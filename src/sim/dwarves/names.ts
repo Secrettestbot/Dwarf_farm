@@ -34,16 +34,22 @@ export interface GeneratedName {
 }
 
 export function rollName(rng: Rng, usedFirsts: Set<string> = new Set()): GeneratedName {
+  const first = rollFirstName(rng, usedFirsts);
+  const left = SURNAME_LEFTS[(rng.nextFloat() * SURNAME_LEFTS.length) | 0];
+  const right = SURNAME_RIGHTS[(rng.nextFloat() * SURNAME_RIGHTS.length) | 0];
+  const surname = left + right;
+  return { first, surname, full: `${first} ${surname}` };
+}
+
+/** Just the first-name part — useful for births, where the surname is
+ * inherited from the father. Tries a few times to avoid duplicates. */
+export function rollFirstName(rng: Rng, usedFirsts: Set<string> = new Set()): string {
   let first = "";
-  // Try a few times to avoid duplicate first names within the founders.
   for (let attempt = 0; attempt < 8; attempt++) {
     const p = FIRST_PREFIXES[(rng.nextFloat() * FIRST_PREFIXES.length) | 0];
     const s = FIRST_SUFFIXES[(rng.nextFloat() * FIRST_SUFFIXES.length) | 0];
     first = p + s;
     if (!usedFirsts.has(first)) break;
   }
-  const left = SURNAME_LEFTS[(rng.nextFloat() * SURNAME_LEFTS.length) | 0];
-  const right = SURNAME_RIGHTS[(rng.nextFloat() * SURNAME_RIGHTS.length) | 0];
-  const surname = left + right;
-  return { first, surname, full: `${first} ${surname}` };
+  return first;
 }

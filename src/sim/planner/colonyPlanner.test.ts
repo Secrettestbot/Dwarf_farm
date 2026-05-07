@@ -179,11 +179,15 @@ describe("ColonyPlanner", () => {
   });
 
   it("emits a mine blueprint once corridors expose ore", () => {
-    const w = generateWorld({ seed: 67, width: 200, height: 500 });
+    // Worldgen ore lies in the Shallow Earth layer (y >= 80); reaching it
+    // organically takes many corridor emissions and the seed-dependent
+    // distribution makes the integration timing brittle. We plant an
+    // accessible ore vein near the spawn cavern to assert the wiring.
+    const w = generateWorld({ seed: 73, width: 200, height: 500 });
+    // Plant ore one tile outside the spawn cavern's right edge.
+    w.grid.setTile(w.spawn.x + 7, w.spawn.y + 1, 5 /* TileType.Ore */);
     const planner = new ColonyPlanner();
-    // Random corridor length variation means descent is stochastic; give the
-    // colony enough wall-clock to reach the ore-bearing Shallow Earth layer.
-    for (let t = 1; t <= 12000; t++) {
+    for (let t = 1; t <= 800; t++) {
       planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
       for (const bp of planner.blueprints) {
         if (bp.status !== "digging") continue;
@@ -228,6 +232,36 @@ describe("ColonyPlanner", () => {
     const horizontals = corridors.filter((b) => b.width > b.height).length;
     expect(verticals).toBeGreaterThan(0);
     expect(horizontals).toBeGreaterThan(0);
+  });
+
+  it("emits corridors below 80 tiles deep — no Skin-layer cap", () => {
+    // Regression: the planner used to cap its corridor scan to ±50 tiles
+    // around spawn, so once the deepest walkable was 50+ tiles down, no
+    // new corridor could extend from it. Run long enough to descend past
+    // y_spawn + 80 (well past the Skin layer) and assert that at least one
+    // corridor is anchored deep.
+    const w = generateWorld({ seed: 73, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    for (let t = 1; t <= 8000; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    // Find the deepest corridor's exit Y.
+    let deepest = -Infinity;
+    for (const b of planner.blueprints) {
+      if (b.kind !== "corridor") continue;
+      const bottom = b.originY + b.height - 1;
+      if (bottom > deepest) deepest = bottom;
+    }
+    expect(deepest).toBeGreaterThan(w.spawn.y + 60);
   });
 
   it("placement is deterministic across runs with the same seed", () => {

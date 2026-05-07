@@ -10,6 +10,10 @@ import { findMineTarget } from "./chooseJob";
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
 const SOCIAL_RANGE = 10; // tiles
+/** Below this age, dwarves don't take mining work — they sleep, socialise,
+ * and wander like the children they are. GDD §6.1: childhood 0–18; light
+ * hauling 5–18 lands once we have a hauling system. */
+const MIN_WORK_AGE = 18;
 
 /**
  * Returns a JobAssignment proposal, or null if the dwarf should remain idle
@@ -30,10 +34,14 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     // doesn't get stuck.
   }
 
-  // 2. Work: mine inside an active blueprint.
-  const mineTarget = findMineTarget(sim, pos.x, pos.y);
-  if (mineTarget) {
-    return { kind: "mine" as JobKind, targetX: mineTarget.x, targetY: mineTarget.y, progress: 0 };
+  // 2. Work: mine inside an active blueprint. Children are skipped — they
+  //    play / sleep / socialise instead, falling through to wander below.
+  const age = sim.ageOf(e);
+  if (age >= MIN_WORK_AGE) {
+    const mineTarget = findMineTarget(sim, pos.x, pos.y);
+    if (mineTarget) {
+      return { kind: "mine" as JobKind, targetX: mineTarget.x, targetY: mineTarget.y, progress: 0 };
+    }
   }
 
   // 3. Social: find an idle nearby dwarf to talk to.

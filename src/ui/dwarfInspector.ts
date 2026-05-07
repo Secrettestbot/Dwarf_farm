@@ -63,6 +63,8 @@ export class DwarfInspector {
     const job = sim.job.get(this.targetId);
     const path = sim.pathing.get(this.targetId);
     const needs = sim.needs.get(this.targetId);
+    const lifeStage = age < 5 ? "child" : age < 18 ? "youth" : age < 80 ? "adult" : "elder";
+    const partner = dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId) ? sim.dwarf.get(dw.partnerId) : null;
 
     const traits = dw.traitIds
       .map((id) => TRAITS_BY_ID[id])
@@ -104,10 +106,11 @@ export class DwarfInspector {
         </div>
         <div style="flex:1;min-width:0;">
           <div style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(dw.name)}</div>
-          <div style="font-size:11px;color:#888;">${escapeHtml(dw.profession)} · age ${age} · @ ${pos.x},${pos.y}</div>
+          <div style="font-size:11px;color:#888;">${escapeHtml(dw.profession)} · ${lifeStage} · age ${age} · @ ${pos.x},${pos.y}</div>
         </div>
         <button id="inspector-close" class="btn" style="padding:2px 8px;font-size:11px;">×</button>
       </div>
+      ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${needsHtml}
       <div style="margin-top:8px;">${traitsHtml || '<span style="color:#666;">no traits</span>'}</div>

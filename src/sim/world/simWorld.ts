@@ -115,6 +115,7 @@ export class SimWorld {
       skills: spec.skills ?? {},
       profession: spec.profession ?? "Worker",
       bornAtTick,
+      partnerId: null,
       lastJobTick: 0,
     });
     this.needs.set(e, {

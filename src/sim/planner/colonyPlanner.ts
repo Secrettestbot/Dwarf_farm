@@ -52,16 +52,16 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Corridors are placed by a custom routine; this dim entry just holds the
   // per-segment metadata used by the renderer / blueprint commit path.
   corridor: { w: 8, h: 1, priority: 4 },
-  // Mines are 3×3 cavities centered on an ore tile.
-  mine: { w: 3, h: 3, priority: 2 },
+  // Mines are 2×2 chambers around an ore tile. Smaller than rooms so they
+  // can fit between corridors and ore-vein neighbours where larger cavities
+  // would be blocked by adjacent walkable tiles.
+  mine: { w: 2, h: 2, priority: 2 },
   stairwell: { w: 2, h: 6, priority: 5 },
 };
 
-const ROOM_SEARCH_RADIUS = 60;
-const CORRIDOR_SEARCH_RADIUS = 50;
 const CORRIDOR_MIN_LEN = 4;
 const CORRIDOR_MAX_LEN = 10;
-const ORE_SENSE_RADIUS = 8; // an ore tile is sense-able this many tiles from walkable
+const ORE_SENSE_RADIUS = 12; // an ore tile is sense-able this many tiles from walkable
 const MAX_ACTIVE_BLUEPRINTS = 3;
 
 interface StylePref {
@@ -204,20 +204,45 @@ export class ColonyPlanner {
 
   private placeRoom(ctx: PlannerContext, kind: BlueprintKind): Blueprint | null {
     const dims = ROOM_DIMS[kind];
-    const { spawn } = ctx;
+    const { grid, spawn } = ctx;
     let best: { x: number; y: number; score: number } | null = null;
 
     const xBias = (DEFAULT_STYLE as unknown as Record<string, number>)[kind] ?? 0;
 
-    for (let dy = -ROOM_SEARCH_RADIUS; dy <= ROOM_SEARCH_RADIUS; dy++) {
-      for (let dx = -ROOM_SEARCH_RADIUS; dx <= ROOM_SEARCH_RADIUS; dx++) {
-        const ox = spawn.x + dx;
-        const oy = spawn.y + dy;
+    // Iterate every reachable walkable tile and try a placement anchored to
+    // each of its four cardinal neighbours. Previously the search was a
+    // ±60 box around spawn, which silently capped the colony to the Skin
+    // layer — once corridors descended past that radius, no room could
+    // land at the bottom of the shaft.
+    const reachable = this.ensureReachable(ctx);
+    const seen = new Set<number>();
+    const w = grid.width;
+    const halfW = Math.floor(dims.w / 2);
+    const halfH = Math.floor(dims.h / 2);
+
+    for (let i = 0; i < reachable.length; i++) {
+      if (reachable[i] !== 1) continue;
+      const wx = i % w;
+      const wy = (i / w) | 0;
+      // Four candidate origins: room extending right of, left of, below, or
+      // above the walkable seed tile. Centred on the perpendicular axis so
+      // the doorway lines up with where the dwarves are.
+      const candidates: Array<[number, number]> = [
+        [wx + 1, wy - halfH],         // right
+        [wx - dims.w, wy - halfH],    // left
+        [wx - halfW, wy + 1],         // below
+        [wx - halfW, wy - dims.h],    // above
+      ];
+      for (const [ox, oy] of candidates) {
+        const key = (oy << 16) | (ox & 0xffff);
+        if (seen.has(key)) continue;
+        seen.add(key);
         if (!this.candidateValid(ctx, ox, oy, dims.w, dims.h)) continue;
+        const dx = ox - spawn.x;
+        const dy = oy - spawn.y;
         const score = this.scoreRoomCandidate(dx, dy, xBias);
-        if (best === null) {
-          best = { x: ox, y: oy, score };
-        } else if (
+        if (
+          best === null ||
           score > best.score ||
           (score === best.score && (oy < best.y || (oy === best.y && ox < best.x)))
         ) {
@@ -274,15 +299,16 @@ export class ColonyPlanner {
     // probability — not score.
     const bestByDir = new Map<string, Candidate>();
 
-    for (let wy = -CORRIDOR_SEARCH_RADIUS; wy <= CORRIDOR_SEARCH_RADIUS; wy++) {
-      for (let wx = -CORRIDOR_SEARCH_RADIUS; wx <= CORRIDOR_SEARCH_RADIUS; wx++) {
-        const ax = spawn.x + wx;
-        const ay = spawn.y + wy;
-        if (!grid.isWalkable(ax, ay)) continue;
-        // The corridor must start from a walkable tile actually reachable
-        // from the spawn — otherwise we'd dig tunnels in disconnected
-        // worldgen caverns the dwarves can never visit.
-        if (!this.isReachable(ctx, ax, ay)) continue;
+    // Iterate every reachable walkable tile. Was previously a ±50 box around
+    // spawn, which capped tunnel placement to the upper Skin layer once the
+    // colony's deepest walkable tile exceeded that distance.
+    const reachable = this.ensureReachable(ctx);
+    const gridW = grid.width;
+    for (let i = 0; i < reachable.length; i++) {
+      if (reachable[i] !== 1) continue;
+      const ax = i % gridW;
+      const ay = (i / gridW) | 0;
+      {
         for (const dir of CORRIDOR_DIRS) {
           // Try the desired width first; if 2-wide doesn't fit, fall back
           // to 1 (so we don't lose all candidates when wantWidth=2).
@@ -456,13 +482,13 @@ export class ColonyPlanner {
     }
     if (!bestOre) return null;
 
-    // Slide the 3×3 origin around the ore tile until candidateValid passes.
-    for (let oyOff = -1; oyOff <= 1; oyOff++) {
-      for (let oxOff = -1; oxOff <= 1; oxOff++) {
-        const ox = bestOre.x - 1 - oxOff;
-        const oy = bestOre.y - 1 - oyOff;
-        if (bestOre.x < ox || bestOre.x >= ox + mw) continue;
-        if (bestOre.y < oy || bestOre.y >= oy + mh) continue;
+    // Try every origin where the cavity covers the ore tile. For a 2×2
+    // mine that's 4 candidate origins (top-left through bottom-right
+    // anchored relative to the ore). The first valid one wins.
+    for (let oyOff = 0; oyOff < mh; oyOff++) {
+      for (let oxOff = 0; oxOff < mw; oxOff++) {
+        const ox = bestOre.x - oxOff;
+        const oy = bestOre.y - oyOff;
         if (!this.candidateValid(ctx, ox, oy, mw, mh)) continue;
         return this.commitBlueprint(ctx, "mine", ox, oy, mw, mh, rectCavity(ox, oy, mw, mh));
       }

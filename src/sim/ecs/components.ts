@@ -19,6 +19,9 @@ export interface Dwarf {
    * began (i.e. the founders, who are already adults at game start). Current
    * age = (sim.tick - bornAtTick) / TICKS_PER_YEAR. */
   bornAtTick: number;
+  /** Entity id of the bonded partner, or null. Set by pairingSystem;
+   * cleared in killDwarf when one of the pair dies. */
+  partnerId: number | null;
   /** Tick at which this dwarf last finished a job. Used for tie-breaking idle
    * selection in deterministic order. */
   lastJobTick: number;
