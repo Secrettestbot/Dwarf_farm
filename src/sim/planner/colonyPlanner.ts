@@ -26,6 +26,7 @@ import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
 import { Blueprint, BlueprintKind, isComplete, rectCavity } from "./blueprint";
+import { furnishRoom } from "./furnish";
 
 export interface PlannerContext {
   grid: TileGrid;
@@ -640,6 +641,9 @@ export class ColonyPlanner {
           const y = (c >>> 16) & 0xffff;
           grid.setDesignation(x, y, 0);
         }
+        // The room is dug; now furnish it. Beds in bedrooms, tables in
+        // dining halls, bins in stockpiles. Tunnels and mines stay bare.
+        furnishRoom(grid, b);
         if (ctx.events) {
           ctx.events.add(ctx.tick, "construction", narrateBlueprintComplete(ctx.rng, b, ctx.spawn.y));
         }

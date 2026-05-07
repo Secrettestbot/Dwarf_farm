@@ -15,8 +15,10 @@ export interface Dwarf {
   skills: SkillLevels;
   /** Starting profession label (flavour). */
   profession: string;
-  /** Age in in-game years. Increments via aging system in later sessions. */
-  age: number;
+  /** Tick at which this dwarf was "born". Negative means born before world
+   * began (i.e. the founders, who are already adults at game start). Current
+   * age = (sim.tick - bornAtTick) / TICKS_PER_YEAR. */
+  bornAtTick: number;
   /** Tick at which this dwarf last finished a job. Used for tie-breaking idle
    * selection in deterministic order. */
   lastJobTick: number;

@@ -54,7 +54,83 @@ const TILE_PIXELS: Record<TileType, string[]> = {
   [TileType.Water]: rep("F", 16, 16, "F"),
   [TileType.Lava]: rep("E", 16, 16, "E"),
   [TileType.Designated]: digOverlay(),
+  [TileType.Bed]: bedSprite(),
+  [TileType.Table]: tableSprite(),
+  [TileType.Bin]: binSprite(),
 };
+
+/** Bed: dark wood frame, red mattress on top of corridor-floor base. */
+function bedSprite(): string[] {
+  const base = noisyFill(3, 2); // corridor floor base color
+  // Frame at rows 5-12, mattress at rows 6-9.
+  for (let y = 5; y <= 12; y++) {
+    let row = "";
+    for (let x = 0; x < 16; x++) {
+      if (x < 2 || x > 13) {
+        row += base[y][x];
+      } else if (y === 5 || y === 12) {
+        row += "1"; // dark frame top/bottom
+      } else if (x === 2 || x === 13) {
+        row += "1"; // dark frame sides
+      } else if (y >= 6 && y <= 9) {
+        row += "E"; // red mattress (palette 14 = clothes red, but using E as bright accent)
+      } else {
+        row += "5"; // pillow / blanket lower (dirt brown)
+      }
+    }
+    base[y] = row;
+  }
+  // Pillow indicator: a small lighter spot at the head.
+  base[6] = base[6].substring(0, 3) + "DD" + base[6].substring(5);
+  base[7] = base[7].substring(0, 3) + "DD" + base[7].substring(5);
+  return base;
+}
+
+/** Table: square wooden top with darker legs. */
+function tableSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Top at rows 5-9, columns 2-13.
+  for (let y = 5; y <= 9; y++) {
+    let row = "";
+    for (let x = 0; x < 16; x++) {
+      if (x >= 2 && x <= 13) row += "5"; // wood top
+      else row += base[y][x];
+    }
+    base[y] = row;
+  }
+  // Edge highlight at row 5.
+  base[5] = base[5].substring(0, 2) + "6666666666" + "66" + base[5].substring(14);
+  // Legs at rows 10-13, columns 3 + 12.
+  for (let y = 10; y <= 13; y++) {
+    let row = base[y];
+    row = row.substring(0, 3) + "1" + row.substring(4);
+    row = row.substring(0, 12) + "1" + row.substring(13);
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Bin: a small box on the floor. */
+function binSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Box at rows 4-13, cols 3-12.
+  for (let y = 4; y <= 13; y++) {
+    let row = "";
+    for (let x = 0; x < 16; x++) {
+      if (x < 3 || x > 12) {
+        row += base[y][x];
+      } else if (y === 4 || y === 13 || x === 3 || x === 12) {
+        row += "1"; // dark frame
+      } else {
+        row += "4"; // soil-brown contents
+      }
+    }
+    base[y] = row;
+  }
+  // Lid line at row 6.
+  base[6] = base[6].substring(0, 4) + "11111111" + base[6].substring(12);
+  return base;
+}
 
 function rep(c: string, w: number, h: number, _alt?: string): string[] {
   const row = c.repeat(w);

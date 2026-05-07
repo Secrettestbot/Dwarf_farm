@@ -12,7 +12,11 @@ export interface SavedDwarf {
   traitIds: string[];
   skills: SkillLevels;
   profession: string;
-  age: number;
+  /** Tick at which this dwarf was "born". Negative for founders. */
+  bornAtTick: number;
+  /** Legacy field kept for back-compat with v2 saves; restore code falls
+   * back to computing bornAtTick from age + tick if bornAtTick is missing. */
+  age?: number;
   lastJobTick: number;
   needs?: { sleep: number; social: number; decayAccumSleep: number; decayAccumSocial: number };
   /** In-flight job (mine / sleep / socialise / wander) at save time. */
@@ -95,6 +99,7 @@ export interface SaveV1 {
   events?: SavedLogEvent[];
   stockpile?: SavedStockpile;
   oreEverStruck?: boolean;
+  lastYearAnnounced?: number;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

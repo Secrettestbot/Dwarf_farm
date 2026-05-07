@@ -13,6 +13,11 @@ export const enum TileType {
   Water = 8,
   Lava = 9,
   Designated = 10, // marker overlay; never an actual ground state
+  // Furniture — placed when a blueprint is harvested complete. All walkable
+  // (dwarves can stand on them) so pathfinding doesn't need to special-case.
+  Bed = 11,        // bedroom: 1 per cavity, faster sleep restoration
+  Table = 12,      // dining hall: a few per cavity, decorative for now
+  Bin = 13,        // stockpile: a few per cavity, decorative for now
 }
 
 export interface TileInfo {
@@ -35,7 +40,18 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Water]: { name: "water", walkable: false, solid: false, color: 0x2244aa },
   [TileType.Lava]: { name: "lava", walkable: false, solid: false, color: 0xcc4400 },
   [TileType.Designated]: { name: "designated", walkable: false, solid: false, color: 0x665500 },
+  [TileType.Bed]: { name: "bed", walkable: true, solid: false, color: 0xa04030 },
+  [TileType.Table]: { name: "table", walkable: true, solid: false, color: 0x8a6a3a },
+  [TileType.Bin]: { name: "bin", walkable: true, solid: false, color: 0x5a4633 },
 };
+
+export function tileIsBed(t: number): boolean {
+  return t === TileType.Bed;
+}
+
+export function tileIsFurniture(t: number): boolean {
+  return t === TileType.Bed || t === TileType.Table || t === TileType.Bin;
+}
 
 export function tileWalkable(t: number): boolean {
   return TILE_INFO[t]?.walkable ?? false;

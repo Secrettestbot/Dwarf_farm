@@ -7,6 +7,7 @@ import { renderWorld } from "./render/renderer";
 import { Minimap } from "./render/minimap";
 import { Hud } from "./ui/hud";
 import { EventLogPanel } from "./ui/eventLogPanel";
+import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen } from "./ui/returnScreen";
@@ -188,6 +189,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
     },
   });
   const eventPanel = new EventLogPanel(uiHost);
+  const inspector = new DwarfInspector(uiHost);
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
   canvas.addEventListener("pointerdown", (e) => {
@@ -210,6 +212,20 @@ function runGame(active: ActiveFortress, camera: Camera) {
 
   canvas.addEventListener("pointerup", (e) => {
     canvas.releasePointerCapture(e.pointerId);
+    // A pointer up that wasn't preceded by a real drag is treated as a
+    // click — see if it landed on a dwarf and open the inspector.
+    if (panStart && !isPanning) {
+      const tile = camera.screenToTile(e.clientX, e.clientY, viewW, viewH);
+      const tx = Math.floor(tile.x);
+      const ty = Math.floor(tile.y);
+      const id = findDwarfNear(active.sim, tx, ty);
+      if (id !== null) {
+        inspector.open(id);
+      } else {
+        // Click on empty space closes the inspector.
+        inspector.close();
+      }
+    }
     panStart = null;
     isPanning = false;
   });
@@ -265,9 +281,24 @@ function runGame(active: ActiveFortress, camera: Camera) {
 
     hud.update(clock, sim);
     eventPanel.update(sim.events.events);
+    inspector.update(sim);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+}
+
+/** Click tolerance: try the exact tile first, then 1-tile neighbors. */
+function findDwarfNear(sim: SimWorld, x: number, y: number): number | null {
+  const exact = sim.dwarfAt(x, y);
+  if (exact !== null) return exact;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const id = sim.dwarfAt(x + dx, y + dy);
+      if (id !== null) return id;
+    }
+  }
+  return null;
 }
 
 let saveInFlight: Promise<void> | null = null;
