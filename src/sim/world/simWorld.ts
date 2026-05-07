@@ -52,10 +52,25 @@ export class SimWorld {
     this.astar = new AStar(grid.width, grid.height);
   }
 
-  spawnDwarf(name: string, x: number, y: number): EntityId {
+  spawnDwarf(spec: {
+    name: string;
+    x: number;
+    y: number;
+    traitIds?: string[];
+    skills?: import("../dwarves/skills").SkillLevels;
+    profession?: string;
+    age?: number;
+  }): EntityId {
     const e = this.ecs.create();
-    this.position.set(e, { x, y });
-    this.dwarf.set(e, { name, lastJobTick: 0 });
+    this.position.set(e, { x: spec.x, y: spec.y });
+    this.dwarf.set(e, {
+      name: spec.name,
+      traitIds: spec.traitIds ?? [],
+      skills: spec.skills ?? {},
+      profession: spec.profession ?? "Worker",
+      age: spec.age ?? 25,
+      lastJobTick: 0,
+    });
     return e;
   }
 

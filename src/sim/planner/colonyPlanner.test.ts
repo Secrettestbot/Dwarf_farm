@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 import { generateWorld } from "../world/worldgen";
 import { ColonyPlanner } from "./colonyPlanner";
 
+const POP_DEFAULT = 7;
+
 describe("ColonyPlanner", () => {
   it("does not emit anything before its evaluation cadence elapses", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 30; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
     }
     expect(planner.blueprints.length).toBe(0);
   });
@@ -16,7 +18,7 @@ describe("ColonyPlanner", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 60; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
     }
     expect(planner.blueprints.length).toBe(1);
     const bp = planner.blueprints[0];
@@ -31,14 +33,13 @@ describe("ColonyPlanner", () => {
     }
   });
 
-  it("never emits two overlapping blueprints", () => {
+  it("emits multiple blueprints as completed cavities free the gate (population 7)", () => {
     const w = generateWorld({ seed: 23, width: 200, height: 500 });
     const planner = new ColonyPlanner();
-    // Gating signal allows ≥2 rooms once 2 in-game days (2880 ticks) have passed.
-    // We hand-excavate cavities so the planner sees them complete and can emit
-    // another (otherwise dwarves would do this in the live sim).
-    for (let t = 1; t <= 5000; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t });
+    // Hand-excavate cavities so the planner sees them complete and can emit
+    // another. With population 7 the target is ceil(7*1.5) = 11 rooms.
+    for (let t = 1; t <= 800; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
       if (planner.blueprints.length > 0) {
         const bp = planner.blueprints[planner.blueprints.length - 1];
         if (bp.status === "digging") {
@@ -46,7 +47,6 @@ describe("ColonyPlanner", () => {
             const c = bp.cavity[i];
             const x = c & 0xffff;
             const y = (c >>> 16) & 0xffff;
-            // Use CorridorFloor (7) — walkable, non-solid.
             w.grid.setTile(x, y, 7);
           }
         }
@@ -69,14 +69,35 @@ describe("ColonyPlanner", () => {
     }
   });
 
+  it("stops emitting once the population target is met", () => {
+    const w = generateWorld({ seed: 31, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    // Population 1: target = max(2, ceil(1*1.5)) = 2 rooms.
+    for (let t = 1; t <= 4000; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1 });
+      if (planner.blueprints.length > 0) {
+        const bp = planner.blueprints[planner.blueprints.length - 1];
+        if (bp.status === "digging") {
+          for (let i = 0; i < bp.cavity.length; i++) {
+            const c = bp.cavity[i];
+            const x = c & 0xffff;
+            const y = (c >>> 16) & 0xffff;
+            w.grid.setTile(x, y, 7);
+          }
+        }
+      }
+    }
+    expect(planner.completed).toBeLessThanOrEqual(2);
+  });
+
   it("placement is deterministic across runs with the same seed", () => {
     const wa = generateWorld({ seed: 99, width: 200, height: 500 });
     const wb = generateWorld({ seed: 99, width: 200, height: 500 });
     const pa = new ColonyPlanner();
     const pb = new ColonyPlanner();
     for (let t = 1; t <= 200; t++) {
-      pa.tick({ grid: wa.grid, spawn: wa.spawn, tick: t });
-      pb.tick({ grid: wb.grid, spawn: wb.spawn, tick: t });
+      pa.tick({ grid: wa.grid, spawn: wa.spawn, tick: t, population: POP_DEFAULT });
+      pb.tick({ grid: wb.grid, spawn: wb.spawn, tick: t, population: POP_DEFAULT });
     }
     expect(pa.blueprints.length).toBe(pb.blueprints.length);
     for (let i = 0; i < pa.blueprints.length; i++) {

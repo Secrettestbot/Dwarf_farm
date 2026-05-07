@@ -1,17 +1,19 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides } from "./codec";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
 // Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
 // what's needed to deterministically reconstruct the simulation: seed, RLE
-// delta vs a clean regen, RNG states, the dwarf list, and the colony planner
-// state (active blueprints + counters).
+// delta vs a clean regen, RNG states, the dwarf list with traits/skills, and
+// the colony planner state.
 
 export interface SnapshotInput {
   sim: SimWorld;
   slotId: string;
+  fortressName: string;
+  mode: GameMode;
   cameraX: number;
   cameraY: number;
   zoomIndex: number;
@@ -25,9 +27,18 @@ export function snapshot(input: SnapshotInput): SaveV1 {
   });
   const overrides = encodeOverrides(input.sim.grid, baseline.grid);
 
-  const dwarves: SaveV1["dwarves"] = [];
+  const dwarves: SavedDwarf[] = [];
   input.sim.forEachDwarf((_id, pos, dw) => {
-    dwarves.push({ name: dw.name, x: pos.x, y: pos.y, lastJobTick: dw.lastJobTick });
+    dwarves.push({
+      name: dw.name,
+      x: pos.x,
+      y: pos.y,
+      traitIds: dw.traitIds,
+      skills: dw.skills,
+      profession: dw.profession,
+      age: dw.age,
+      lastJobTick: dw.lastJobTick,
+    });
   });
 
   const planner = input.sim.planner;
@@ -55,6 +66,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
   return {
     version: CURRENT_SAVE_VERSION,
     slotId: input.slotId,
+    fortressName: input.fortressName,
+    mode: input.mode,
     seed: input.sim.seed,
     width: input.sim.grid.width,
     height: input.sim.grid.height,
@@ -69,8 +82,6 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     blueprints,
     plannerNextId: planner.nextId,
     plannerCompleted: planner.completed,
-    // accum is private but we need to round-trip it for byte-for-byte
-    // determinism; reach in via an accessor.
     plannerAccum: (planner as unknown as { accum: number }).accum,
     cameraX: input.cameraX,
     cameraY: input.cameraY,
@@ -100,8 +111,16 @@ export function restore(save: SaveV1): SimWorld {
 
   // Restore dwarves.
   for (const d of save.dwarves) {
-    const e = sim.spawnDwarf(d.name, d.x, d.y);
-    sim.dwarf.get(e)!.lastJobTick = d.lastJobTick;
+    const e = sim.spawnDwarf({
+      name: d.name,
+      x: d.x,
+      y: d.y,
+      traitIds: d.traitIds ?? [],
+      skills: d.skills ?? {},
+      profession: d.profession ?? "Worker",
+      age: d.age ?? 25,
+    });
+    sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
   }
 
   // Restore Colony Planner.

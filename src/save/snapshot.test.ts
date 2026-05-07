@@ -7,7 +7,7 @@ import { snapshot, restore } from "./snapshot";
 function buildSim(seed: number): SimWorld {
   const w = generateWorld({ seed, width: 200, height: 500 });
   const sim = new SimWorld(seed, w.grid, w.surfaceY, w.spawn);
-  sim.spawnDwarf("Borin", w.spawn.x, w.spawn.y);
+  sim.spawnDwarf({ name: "Borin", x: w.spawn.x, y: w.spawn.y });
   return sim;
 }
 
@@ -43,7 +43,7 @@ function hashSim(sim: SimWorld): number {
 describe("snapshot/restore", () => {
   it("round-trips an unmodified sim", () => {
     const a = buildSim(99);
-    const save = snapshot({ sim: a, slotId: "slot0", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
     const b = restore(save);
     expect(hashSim(b)).toBe(hashSim(a));
   });
@@ -53,7 +53,7 @@ describe("snapshot/restore", () => {
     // Final state must match.
     const a = buildSim(123);
     for (let i = 0; i < 500; i++) tick(a);
-    const save = snapshot({ sim: a, slotId: "slot0", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
     const b = restore(save);
     expect(hashSim(b)).toBe(hashSim(a));
     for (let i = 0; i < 500; i++) {
@@ -67,7 +67,7 @@ describe("snapshot/restore", () => {
     const a = buildSim(42);
     for (let i = 0; i < 200; i++) tick(a);
     expect(a.planner.blueprints.length).toBeGreaterThan(0);
-    const save = snapshot({ sim: a, slotId: "slot0", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
     const b = restore(save);
     expect(b.planner.blueprints.length).toBe(a.planner.blueprints.length);
     expect(b.planner.blueprints[0].originX).toBe(a.planner.blueprints[0].originX);

@@ -18,14 +18,15 @@ export interface PlannerContext {
   grid: TileGrid;
   spawn: { x: number; y: number };
   tick: number;
+  /** Live colony population — drives how aggressively the planner expands. */
+  population: number;
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
-const DAY_TICKS = 60 * 24;
 
 const BEDROOM_W = 4;
 const BEDROOM_H = 3;
-const SEARCH_RADIUS = 35;
+const SEARCH_RADIUS = 50;
 
 export class ColonyPlanner {
   blueprints: Blueprint[] = [];
@@ -55,16 +56,20 @@ export class ColonyPlanner {
   }
 
   /**
-   * Gating signal v0: emit a new bedroom if no blueprint is currently active
-   * AND the colony's age justifies one (1 room per in-game day, scaled later
-   * by population pressure). This is the placeholder that exercises the
-   * pipeline; session 2 replaces it with population-vs-beds.
+   * Gating signal v1 (population): the planner aims for ~1.5 bedrooms per
+   * dwarf so individual rooms (later sessions: bed + chest + door) can be
+   * assigned per-dwarf and the colony has a comfortable amount of common
+   * space. We allow only one *active* blueprint at a time so the dwarves
+   * focus their effort and the player can read the colony's intent at a
+   * glance. The cap (active + completed ≤ target) means the planner stops
+   * emitting once the population is housed; new dwarves (immigrants, births
+   * — both arriving in later sessions) raise the target and resume work.
    */
   private shouldEmitBedroom(ctx: PlannerContext): boolean {
     const active = this.blueprints.some((b) => b.status === "digging");
     if (active) return false;
-    const day = Math.floor(ctx.tick / DAY_TICKS);
-    const targetRooms = Math.max(1, day + 1);
+    const pop = Math.max(1, ctx.population);
+    const targetRooms = Math.max(2, Math.ceil(pop * 1.5));
     return this.completed + 1 <= targetRooms;
   }
 

@@ -21,7 +21,12 @@ export function tick(sim: SimWorld): void {
   // Planner runs first: it can emit new blueprints based on the colony's
   // current state, and chooseJob picks targets from the active blueprint set
   // immediately afterwards.
-  sim.planner.tick({ grid: sim.grid, spawn: sim.spawn, tick: sim.tick });
+  sim.planner.tick({
+    grid: sim.grid,
+    spawn: sim.spawn,
+    tick: sim.tick,
+    population: sim.dwarf.size(),
+  });
   jobAssignmentSystem(sim);
   movementSystem(sim);
   miningSystem(sim);

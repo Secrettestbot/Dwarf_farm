@@ -51,6 +51,8 @@ async function runCatchup(saveData: import("../save/schema").SaveV1, ticksToRun:
     const finalSave = snapshot({
       sim,
       slotId: saveData.slotId,
+      fortressName: saveData.fortressName,
+      mode: saveData.mode,
       cameraX: saveData.cameraX,
       cameraY: saveData.cameraY,
       zoomIndex: saveData.zoomIndex,

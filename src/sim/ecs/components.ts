@@ -1,4 +1,6 @@
-// Component data shapes for session 1. All POJO, all serializable.
+// Component data shapes. All POJO, all serializable.
+
+import { SkillLevels } from "../dwarves/skills";
 
 export interface Position {
   x: number;
@@ -7,8 +9,16 @@ export interface Position {
 
 export interface Dwarf {
   name: string;
-  // Tick at which this dwarf last finished a job. Used for tie-breaking idle
-  // selection in deterministic order.
+  /** Trait IDs from the registry in dwarves/traits.ts. */
+  traitIds: string[];
+  /** Per-skill level 1..20 (1 = Novice, 17+ = Legendary). */
+  skills: SkillLevels;
+  /** Starting profession label (flavour). */
+  profession: string;
+  /** Age in in-game years. Increments via aging system in later sessions. */
+  age: number;
+  /** Tick at which this dwarf last finished a job. Used for tie-breaking idle
+   * selection in deterministic order. */
   lastJobTick: number;
 }
 
