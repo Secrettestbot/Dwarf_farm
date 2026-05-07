@@ -39,6 +39,19 @@ describe("Rng (PCG32)", () => {
     }
   });
 
+  it("nextRange terminates for divisors of 2^32 (regression test)", () => {
+    // Powers of two — and any divisor of 2^32 — used to cause an infinite
+    // loop in nextRange because the limit overflowed to 0. Cover several.
+    const r = Rng.fromSeed(7);
+    for (const span of [1, 2, 4, 8, 16, 32, 64, 128, 256, 1024]) {
+      for (let i = 0; i < 100; i++) {
+        const v = r.nextRange(0, span);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThan(span);
+      }
+    }
+  });
+
   it("survives a serialize/deserialize round-trip mid-sequence", () => {
     const a = Rng.fromSeed(123);
     for (let i = 0; i < 500; i++) a.next();

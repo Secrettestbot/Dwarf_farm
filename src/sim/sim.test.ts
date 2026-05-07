@@ -6,7 +6,7 @@ import { tick } from "./sim";
 function buildSim(seed: number): SimWorld {
   const w = generateWorld({ seed, width: 200, height: 500 });
   const sim = new SimWorld(seed, w.grid, w.surfaceY, w.spawn);
-  sim.spawnDwarf("Borin", w.spawn.x, w.spawn.y);
+  sim.spawnDwarf({ name: "Borin", x: w.spawn.x, y: w.spawn.y });
   return sim;
 }
 

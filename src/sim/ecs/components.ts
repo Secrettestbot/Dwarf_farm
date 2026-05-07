@@ -1,4 +1,6 @@
-// Component data shapes for session 1. All POJO, all serializable.
+// Component data shapes. All POJO, all serializable.
+
+import { SkillLevels } from "../dwarves/skills";
 
 export interface Position {
   x: number;
@@ -7,8 +9,16 @@ export interface Position {
 
 export interface Dwarf {
   name: string;
-  // Tick at which this dwarf last finished a job. Used for tie-breaking idle
-  // selection in deterministic order.
+  /** Trait IDs from the registry in dwarves/traits.ts. */
+  traitIds: string[];
+  /** Per-skill level 1..20 (1 = Novice, 17+ = Legendary). */
+  skills: SkillLevels;
+  /** Starting profession label (flavour). */
+  profession: string;
+  /** Age in in-game years. Increments via aging system in later sessions. */
+  age: number;
+  /** Tick at which this dwarf last finished a job. Used for tie-breaking idle
+   * selection in deterministic order. */
   lastJobTick: number;
 }
 
@@ -21,13 +31,31 @@ export interface Pathing {
   goalY: number;
 }
 
-export type JobKind = "mine" | "idle-walk";
+/**
+ * Internal drives. All in 0..100. Decays over real time, restored by
+ * matching activity. Once a need crosses a low threshold the dwarf will drop
+ * non-emergency work to address it. Hunger / thirst lands when farming &
+ * stockpiles arrive in a later session.
+ */
+export interface Needs {
+  /** Sleep — drops continuously; restored by sleeping. */
+  sleep: number;
+  /** Social — drops slowly; restored by talking with another dwarf. */
+  social: number;
+  /** Internal accumulator for sub-tick decay. Carries fractional need loss. */
+  decayAccumSleep: number;
+  decayAccumSocial: number;
+}
+
+export type JobKind = "mine" | "sleep" | "socialise" | "wander";
 
 export interface JobAssignment {
   kind: JobKind;
-  // Target tile (for mining: the solid tile being dug).
+  // Target tile (mine: solid rock; sleep/wander: walkable spot; socialise: partner tile).
   targetX: number;
   targetY: number;
-  // Mining progress in ticks: counts up from 0; tile breaks at MINE_TICKS.
+  // Progress in ticks toward completion. Per-kind thresholds in sim.ts.
   progress: number;
+  /** For socialise jobs, the partner dwarf entity id. */
+  partnerId?: number;
 }

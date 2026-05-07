@@ -1,5 +1,21 @@
-// Persistent save record. The terrain itself is regenerated from `seed`; only
+// Persistent save record. The terrain is regenerated from `seed`; only
 // player-modified tiles are stored as RLE deltas in `tileOverrides`.
+
+import { SkillLevels } from "../sim/dwarves/skills";
+
+export type GameMode = "legacy" | "saga";
+
+export interface SavedDwarf {
+  name: string;
+  x: number;
+  y: number;
+  traitIds: string[];
+  skills: SkillLevels;
+  profession: string;
+  age: number;
+  lastJobTick: number;
+  needs?: { sleep: number; social: number; decayAccumSleep: number; decayAccumSocial: number };
+}
 
 export interface SavedBlueprint {
   id: number;
@@ -8,9 +24,6 @@ export interface SavedBlueprint {
   originY: number;
   width: number;
   height: number;
-  // Cells stored as flat array of (x, y, x, y, ...). Small enough at session 1
-  // scale that JSON-friendly storage is fine; later sessions can swap to RLE
-  // if the count grows.
   cells: number[];
   status: "digging" | "complete";
   priority: number;
@@ -18,8 +31,12 @@ export interface SavedBlueprint {
 }
 
 export interface SaveV1 {
-  version: 1;
+  version: 2;
   slotId: string;
+  /** Friendly fortress name shown on the title screen — set when the founders begin. */
+  fortressName: string;
+  /** Permadeath choice. Stored at fortress creation; never changes. */
+  mode: GameMode;
   seed: number;
   width: number;
   height: number;
@@ -31,12 +48,11 @@ export interface SaveV1 {
   // Forked RNG states keyed by label.
   rngStates: Record<string, [number, number]>;
 
-  // RLE delta from worldgen output. Pure tile-state — no zones, no blueprints.
+  // RLE delta from worldgen output.
   tileOverrides: Uint8Array;
 
-  // Entities packed minimally: dwarves with name + position + lastJobTick.
-  // Encoded as JSON-friendly objects since the count is small in session 1.
-  dwarves: Array<{ name: string; x: number; y: number; lastJobTick: number }>;
+  // Full dwarf list with traits, skills, profession, age.
+  dwarves: SavedDwarf[];
 
   // Colony Planner state.
   blueprints: SavedBlueprint[];
@@ -49,4 +65,17 @@ export interface SaveV1 {
   zoomIndex: number;
 }
 
-export const CURRENT_SAVE_VERSION = 1;
+export const CURRENT_SAVE_VERSION = 2 as const;
+
+/** A lightweight summary of a save slot, shown on the title screen. */
+export interface SlotSummary {
+  slotId: string;
+  fortressName: string;
+  mode: GameMode;
+  population: number;
+  tick: number;
+  realTimestampMs: number;
+}
+
+export const SAVE_SLOT_IDS = ["slot0", "slot1", "slot2", "slot3", "slot4"] as const;
+export type SaveSlotId = typeof SAVE_SLOT_IDS[number];

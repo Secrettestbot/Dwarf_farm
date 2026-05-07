@@ -9,8 +9,18 @@ import { TileGrid } from "../world/grid";
 
 export type BlueprintKind =
   | "bedroom"
+  | "dining_hall"
+  | "stockpile"
   | "corridor"
   | "stairwell";
+
+export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
+  bedroom: "Bedroom",
+  dining_hall: "Dining Hall",
+  stockpile: "Stockpile",
+  corridor: "Corridor",
+  stairwell: "Stairwell",
+};
 
 export type BlueprintStatus = "digging" | "complete";
 
@@ -20,14 +30,12 @@ export type CavityCells = Int32Array;
 export interface Blueprint {
   id: number;
   kind: BlueprintKind;
-  // Bounding rect of the cavity (inclusive of origin, exclusive of width/height).
+  // Bounding rect of the cavity.
   originX: number;
   originY: number;
   width: number;
   height: number;
-  // Cells composing the cavity. Always within the bounding rect; for a simple
-  // rectangular cavity this is a contiguous list, but we keep it explicit so
-  // future blueprints (L-shaped corridors, irregular halls) are easy to model.
+  // Cells composing the cavity. Always within the bounding rect.
   cavity: CavityCells;
   status: BlueprintStatus;
   // Higher = more urgent. Tie-broken by id for deterministic ordering.

@@ -1,4 +1,4 @@
-import { SaveV1 } from "./schema";
+import { SaveV1, SlotSummary } from "./schema";
 
 const DB_NAME = "dwarven-deep";
 const DB_VERSION = 1;
@@ -61,4 +61,17 @@ export async function listSaves(): Promise<SaveV1[]> {
     req.onsuccess = () => resolve((req.result as SaveV1[]) ?? []);
     req.onerror = () => reject(req.error);
   });
+}
+
+/** Return one summary per occupied slot. Empty slots are omitted. */
+export async function listSlotSummaries(): Promise<SlotSummary[]> {
+  const all = await listSaves();
+  return all.map((s) => ({
+    slotId: s.slotId,
+    fortressName: s.fortressName ?? "Unnamed Fortress",
+    mode: s.mode ?? "legacy",
+    population: s.dwarves.length,
+    tick: s.tick,
+    realTimestampMs: s.realTimestampMs,
+  }));
 }

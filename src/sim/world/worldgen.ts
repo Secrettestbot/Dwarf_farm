@@ -90,9 +90,15 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
   }
 
   // 4. Carve a starter pocket so the founders have somewhere to stand.
+  // Sized for the seven founders plus a little working room. Per GDD §5.2 the
+  // surface entrance is exposed; we extend a short corridor down into the
+  // soil before opening into the chamber so the entrance reads as deliberate.
   const spawnX = Math.floor(width / 2);
   const spawnY = surfaceY[spawnX] + 2;
-  carveRect(grid, spawnX - 4, spawnY, 9, 4, TileType.CorridorFloor);
+  // Entrance shaft (a 2-wide stair down into the soil cap).
+  carveRect(grid, spawnX, surfaceY[spawnX], 2, spawnY - surfaceY[spawnX] + 1, TileType.CorridorFloor);
+  // Founders' chamber: 13×4 cavern just below.
+  carveRect(grid, spawnX - 6, spawnY, 13, 4, TileType.CorridorFloor);
 
   return { grid, spawn: { x: spawnX, y: spawnY + 1 }, surfaceY };
 }

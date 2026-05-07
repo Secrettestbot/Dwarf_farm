@@ -1,7 +1,10 @@
 import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY } from "../sim/time";
 import { SimWorld } from "../sim/world/simWorld";
+import { GameMode } from "../save/schema";
 
 export interface HudHandlers {
+  fortressName: string;
+  mode: GameMode;
   onSpeedChange(s: SpeedLevel): void;
   onSave(): void;
 }
@@ -17,8 +20,15 @@ export class Hud {
     const top = document.createElement("div");
     top.className = "panel";
     top.style.cssText =
-      "position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:6px;min-width:230px;";
-    top.innerHTML = `<div style="color:#e0c080;font-size:13px;letter-spacing:2px;">⛏ DWARVEN DEEP</div>`;
+      "position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:6px;min-width:240px;";
+    const modeBadge =
+      handlers.mode === "saga"
+        ? `<span style="color:#ff8a5c;font-size:9px;letter-spacing:2px;">SAGA</span>`
+        : `<span style="color:#789;font-size:9px;letter-spacing:2px;">LEGACY</span>`;
+    top.innerHTML = `
+      <div style="color:#888;font-size:10px;letter-spacing:3px;">⛏ DWARVEN DEEP</div>
+      <div style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(handlers.fortressName)} ${modeBadge}</div>
+    `;
 
     this.clockLabel = document.createElement("div");
     this.clockLabel.style.fontSize = "11px";
@@ -91,4 +101,10 @@ export class Hud {
 
 function pad(n: number): string {
   return n < 10 ? `0${n}` : `${n}`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
+  );
 }
