@@ -121,6 +121,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     cameraX: input.cameraX,
     cameraY: input.cameraY,
     zoomIndex: input.zoomIndex,
+    events: sim.events.events.map((e) => ({ tick: e.tick, category: e.category, text: e.text })),
+    stockpile: { ore: sim.stockpile.ore, stone: sim.stockpile.stone, dirt: sim.stockpile.dirt },
+    oreEverStruck: sim.oreEverStruck,
   };
 }
 
@@ -221,6 +224,23 @@ export function restore(save: SaveV1): SimWorld {
   sim.planner.completed = save.plannerCompleted ?? blueprints.filter((b) => b.status === "complete").length;
   (sim.planner as unknown as { accum: number }).accum = save.plannerAccum ?? 0;
   sim.planner.rehydrate(sim.grid);
+
+  // Event log + stockpile.
+  if (save.events) {
+    for (const e of save.events) {
+      sim.events.events.push({
+        tick: e.tick,
+        category: e.category as import("../sim/events/eventLog").EventCategory,
+        text: e.text,
+      });
+    }
+  }
+  if (save.stockpile) {
+    sim.stockpile.ore = save.stockpile.ore;
+    sim.stockpile.stone = save.stockpile.stone;
+    sim.stockpile.dirt = save.stockpile.dirt;
+  }
+  if (save.oreEverStruck) sim.oreEverStruck = true;
 
   return sim;
 }

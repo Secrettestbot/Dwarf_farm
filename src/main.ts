@@ -6,6 +6,7 @@ import { Camera } from "./render/camera";
 import { renderWorld } from "./render/renderer";
 import { Minimap } from "./render/minimap";
 import { Hud } from "./ui/hud";
+import { EventLogPanel } from "./ui/eventLogPanel";
 import { showTitleScreen } from "./ui/titleScreen";
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen } from "./ui/returnScreen";
@@ -14,6 +15,7 @@ import { saveGame, loadGame } from "./save/db";
 import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
 import { WorkerToMain } from "./shared/protocol";
 import { Founder } from "./sim/dwarves/founders";
+import { narrateFounding } from "./sim/events/narrator";
 
 const WORLD_WIDTH = 200;
 const WORLD_HEIGHT = 500;
@@ -67,6 +69,7 @@ async function boot() {
     const w = generateWorld({ seed: choice.seed, width: WORLD_WIDTH, height: WORLD_HEIGHT });
     const sim = new SimWorld(choice.seed, w.grid, w.surfaceY, w.spawn);
     placeFounders(sim, founderResult.founders);
+    sim.events.add(0, "founding", narrateFounding(founderResult.founders.map((f) => f.name)));
     camera.x = w.spawn.x;
     camera.y = w.spawn.y;
     camera.setZoom(2);
@@ -184,6 +187,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
       flashSave();
     },
   });
+  const eventPanel = new EventLogPanel(uiHost);
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
   canvas.addEventListener("pointerdown", (e) => {
@@ -260,6 +264,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
     minimap.draw(ctx, mx, my, camera, viewW, viewH);
 
     hud.update(clock, sim);
+    eventPanel.update(sim.events.events);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

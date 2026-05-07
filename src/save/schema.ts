@@ -46,6 +46,18 @@ export interface SavedBlueprint {
   createdTick: number;
 }
 
+export interface SavedLogEvent {
+  tick: number;
+  category: string;
+  text: string;
+}
+
+export interface SavedStockpile {
+  ore: number;
+  stone: number;
+  dirt: number;
+}
+
 export interface SaveV1 {
   version: 2;
   slotId: string;
@@ -79,6 +91,10 @@ export interface SaveV1 {
   cameraX: number;
   cameraY: number;
   zoomIndex: number;
+
+  events?: SavedLogEvent[];
+  stockpile?: SavedStockpile;
+  oreEverStruck?: boolean;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

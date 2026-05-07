@@ -23,6 +23,8 @@
 import { TileGrid } from "../world/grid";
 import { TileType } from "../world/tiles";
 import { Rng } from "../rng";
+import { EventLog } from "../events/eventLog";
+import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
 import { Blueprint, BlueprintKind, isComplete, rectCavity } from "./blueprint";
 
 export interface PlannerContext {
@@ -34,6 +36,10 @@ export interface PlannerContext {
   /** Forked, deterministic RNG used to vary placement (corridor length,
    * width, direction sampling). State is part of SimWorld and serialized. */
   rng: Rng;
+  /** Optional event log — when present, the planner narrates blueprint
+   * lifecycle events ("plans laid out", "tunnel complete", etc.). The log
+   * is part of save state, so the chronicle is reproducible. */
+  events?: EventLog;
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
@@ -115,7 +121,7 @@ export class ColonyPlanner {
   /** Run one planning step. Called from sim.tick BEFORE job assignment. */
   tick(ctx: PlannerContext): void {
     this.accum++;
-    this.harvestCompleted(ctx.grid);
+    this.harvestCompleted(ctx);
 
     if (this.accum < PLAN_INTERVAL_TICKS) return;
     this.accum = 0;
@@ -477,7 +483,8 @@ export class ColonyPlanner {
 
   /**
    * Common emit path: register the blueprint, mark claimed tiles, paint the
-   * designation overlay so the renderer can show the planner's intent.
+   * designation overlay so the renderer can show the planner's intent, and
+   * narrate the new plan in the event log.
    */
   private commitBlueprint(
     ctx: PlannerContext,
@@ -504,6 +511,9 @@ export class ColonyPlanner {
     this.blueprints.push(bp);
     this.markClaimed(ctx.grid, bp);
     this.markDesignations(ctx.grid, bp, true);
+    if (ctx.events) {
+      ctx.events.add(ctx.tick, "construction", narrateBlueprintBegin(ctx.rng, bp, ctx.spawn.y));
+    }
     return bp;
   }
 
@@ -617,7 +627,8 @@ export class ColonyPlanner {
     return (this.completedByKind[kind] ?? 0) + (this.activeByKind()[kind] ?? 0);
   }
 
-  private harvestCompleted(grid: TileGrid): void {
+  private harvestCompleted(ctx: PlannerContext): void {
+    const grid = ctx.grid;
     for (const b of this.blueprints) {
       if (b.status === "digging" && isComplete(b, grid)) {
         b.status = "complete";
@@ -628,6 +639,9 @@ export class ColonyPlanner {
           const x = c & 0xffff;
           const y = (c >>> 16) & 0xffff;
           grid.setDesignation(x, y, 0);
+        }
+        if (ctx.events) {
+          ctx.events.add(ctx.tick, "construction", narrateBlueprintComplete(ctx.rng, b, ctx.spawn.y));
         }
       }
     }

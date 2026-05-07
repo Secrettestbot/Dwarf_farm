@@ -4,6 +4,18 @@ import { Rng } from "../rng";
 import { TileGrid } from "./grid";
 import { ColonyPlanner } from "../planner/colonyPlanner";
 import { AStar } from "../pathing/astar";
+import { EventLog } from "../events/eventLog";
+
+export interface Stockpile {
+  /** Generic ore tally — any TileType.Ore mined. Later sessions split into
+   * iron / copper / silver / gold etc. */
+  ore: number;
+  /** Stone blocks recovered from Stone / Granite mining. */
+  stone: number;
+  /** Loose dirt and sand pulled from the Skin layer. Mostly useless
+   * structurally but tracked because the dwarves did the work. */
+  dirt: number;
+}
 
 /**
  * Aggregate of everything the deterministic tick function needs. The same
@@ -35,6 +47,18 @@ export class SimWorld {
   // all 7 founders pile onto a single mining target — defeating the point
   // of having several dwarves at all.
   readonly mineClaims: Set<number> = new Set();
+
+  // Player's reading material. Every meaningful sim event lands here.
+  readonly events = new EventLog();
+
+  // Resource accumulation — a real stockpile system with workshops arrives
+  // in a later session, but tracking what's been pulled from the rock now
+  // gives the player something concrete to watch grow.
+  readonly stockpile: Stockpile = { ore: 0, stone: 0, dirt: 0 };
+
+  // True once the colony has hit its first ore tile. Used to fire a one-
+  // time discovery event the next time a dwarf strikes ore.
+  oreEverStruck = false;
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
