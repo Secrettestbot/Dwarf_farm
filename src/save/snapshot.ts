@@ -58,6 +58,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           goalY: p.goalY,
         }
       : undefined;
+    const partnerIndex = dw.partnerId !== null ? entityToIndex.get(dw.partnerId) ?? null : null;
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -66,6 +67,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       skills: dw.skills,
       profession: dw.profession,
       bornAtTick: dw.bornAtTick,
+      partnerIndex,
       lastJobTick: dw.lastJobTick,
       needs: n
         ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
@@ -173,11 +175,15 @@ export function restore(save: SaveV1): SimWorld {
     sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
     spawnedEntities.push(e);
   }
-  // Re-apply in-flight job + pathing components so the worker / next session
-  // resumes at the exact mid-task state, not as freshly idle dwarves.
+  // Re-apply in-flight job + pathing components, plus partnerships, so the
+  // worker / next session resumes at exact mid-task state.
   for (let i = 0; i < save.dwarves.length; i++) {
     const d = save.dwarves[i];
     const e = spawnedEntities[i];
+    if (d.partnerIndex !== undefined && d.partnerIndex !== null) {
+      const dw = sim.dwarf.get(e);
+      if (dw) dw.partnerId = spawnedEntities[d.partnerIndex];
+    }
     if (d.job) {
       const partnerId = d.job.partnerIndex !== undefined ? spawnedEntities[d.job.partnerIndex] : undefined;
       sim.job.set(e, {

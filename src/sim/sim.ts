@@ -4,8 +4,9 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath } from "./events/narrator";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement } from "./events/narrator";
 import { TICKS_PER_YEAR } from "./time";
+import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -38,6 +39,8 @@ export function tick(sim: SimWorld): void {
     events: sim.events,
   });
   yearRolloverSystem(sim);
+  pairingSystem(sim);
+  reproductionSystem(sim);
   deathSystem(sim);
   needsSystem(sim);
   jobAssignmentSystem(sim);
@@ -86,7 +89,8 @@ function deathSystem(sim: SimWorld): void {
 /**
  * Remove a dwarf from the sim, log the death in the chronicle, and place a
  * Memorial tile where they fell. Releases any in-flight job claim so the
- * planner state stays consistent.
+ * planner state stays consistent. If the dwarf was bonded, also clears the
+ * survivor's partnerId and emits a bereavement event.
  */
 function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   const dw = sim.dwarf.get(e);
@@ -102,8 +106,130 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.grid.setTile(pos.x, pos.y, TileType.Memorial);
   }
   sim.events.add(sim.tick, "social", narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause));
+  // If this dwarf had a partner, clear the survivor's partnerId and log a
+  // bereavement event. The relationship's length is approximated as
+  // min(both ages) - 18 (i.e. years they could have been bonded as adults),
+  // which is good enough for narration without a per-bond pairedAtTick.
+  if (dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId)) {
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (partner) {
+      const survivorAge = sim.ageOf(dw.partnerId);
+      const yearsTogether = Math.max(0, Math.min(age, survivorAge) - 18);
+      sim.events.add(
+        sim.tick,
+        "social",
+        narrateBereavement(sim.aiRng, partner.name, dw.name, yearsTogether),
+      );
+      partner.partnerId = null;
+    }
+  }
   // Remove from the ECS, which strips all component stores.
   sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs]);
+}
+
+// ---- Partnership + reproduction ----------------------------------------
+
+const PAIR_MIN_AGE = 18;
+const PAIR_MAX_AGE = 70;
+const PAIR_CHANCE_PER_YEAR = 0.35;
+const REPRODUCE_MIN_AGE = 18;
+const REPRODUCE_MAX_AGE = 60;
+const REPRODUCE_CHANCE_PER_YEAR = 0.25;
+
+/**
+ * Once per in-game year, scan unpaired adults of pair-eligible age and
+ * randomly bond pairs. Order is shuffled deterministically via aiRng so
+ * pairing isn't dictated by entity creation order.
+ */
+function pairingSystem(sim: SimWorld): void {
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  if (sim.tick === 0) return;
+  const eligible: EntityId[] = [];
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const dw = sim.dwarf.get(e);
+    if (!dw) continue;
+    if (dw.partnerId !== null) continue;
+    const age = sim.ageOf(e);
+    if (age < PAIR_MIN_AGE || age > PAIR_MAX_AGE) continue;
+    eligible.push(e);
+  }
+  // Fisher-Yates shuffle using aiRng for deterministic pairing order.
+  for (let i = eligible.length - 1; i > 0; i--) {
+    const j = sim.aiRng.nextRange(0, i + 1);
+    const tmp = eligible[i];
+    eligible[i] = eligible[j];
+    eligible[j] = tmp;
+  }
+  for (let i = 0; i + 1 < eligible.length; i += 2) {
+    if (sim.aiRng.nextFloat() >= PAIR_CHANCE_PER_YEAR) continue;
+    const a = eligible[i];
+    const b = eligible[i + 1];
+    const dwA = sim.dwarf.get(a);
+    const dwB = sim.dwarf.get(b);
+    if (!dwA || !dwB) continue;
+    dwA.partnerId = b;
+    dwB.partnerId = a;
+    sim.events.add(sim.tick, "social", narratePairing(sim.aiRng, dwA.name, dwB.name));
+  }
+}
+
+/**
+ * Once per in-game year, paired couples within the fertile age window have
+ * a chance of producing a child.
+ */
+function reproductionSystem(sim: SimWorld): void {
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  if (sim.tick === 0) return;
+  const visited = new Set<EntityId>();
+  // Iterate a snapshot of the dwarf list — births mutate the live list
+  // (newborns get appended), and we don't want them participating in this
+  // year's roll.
+  const ents = sim.dwarf.entities.slice();
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    if (visited.has(e)) continue;
+    const dw = sim.dwarf.get(e);
+    if (!dw || dw.partnerId === null) continue;
+    if (!sim.ecs.isAlive(dw.partnerId)) continue;
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (!partner) continue;
+    visited.add(e);
+    visited.add(dw.partnerId);
+    const ageA = sim.ageOf(e);
+    const ageB = sim.ageOf(dw.partnerId);
+    if (ageA < REPRODUCE_MIN_AGE || ageA > REPRODUCE_MAX_AGE) continue;
+    if (ageB < REPRODUCE_MIN_AGE || ageB > REPRODUCE_MAX_AGE) continue;
+    if (sim.aiRng.nextFloat() < REPRODUCE_CHANCE_PER_YEAR) {
+      birthDwarf(sim, e, dw.partnerId);
+    }
+  }
+}
+
+function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
+  const mother = sim.dwarf.get(motherId);
+  const father = sim.dwarf.get(fatherId);
+  const motherPos = sim.position.get(motherId);
+  if (!mother || !father || !motherPos) return;
+  // Collect existing first names so the newborn isn't a duplicate.
+  const usedFirsts = new Set<string>();
+  sim.forEachDwarf((_id, _pos, dw) => {
+    usedFirsts.add(dw.name.split(" ")[0]);
+  });
+  const childName = rollChildName(sim.aiRng, mother.name, father.name, usedFirsts);
+  const traitIds = inheritTraits(sim.aiRng, mother.traitIds, father.traitIds);
+  const childId = sim.spawnDwarf({
+    name: childName,
+    x: motherPos.x,
+    y: motherPos.y,
+    traitIds,
+    skills: newbornSkills(),
+    profession: "Child",
+    age: 0,
+  });
+  void childId;
+  sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));
 }
 
 /**

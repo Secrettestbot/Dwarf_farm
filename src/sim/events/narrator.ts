@@ -109,6 +109,36 @@ export function narrateOreFirstStrike(rng: Rng, dwarfName: string, depth: number
   ]);
 }
 
+export function narratePairing(rng: Rng, a: string, b: string): string {
+  return pick(rng, [
+    `${a} and ${b} have become partners.`,
+    `Old friends ${a} and ${b} have decided to marry.`,
+    `${a} and ${b} have bonded over a long winter and become a couple.`,
+  ]);
+}
+
+export function narrateBirth(rng: Rng, child: string, mother: string, father: string): string {
+  return pick(rng, [
+    `${child} has been born to ${mother} and ${father}.`,
+    `A child, ${child}, has been born in the mountain. ${mother} and ${father} are well.`,
+    `${mother} has given birth to ${child}. The fortress is one larger.`,
+  ]);
+}
+
+export function narrateBereavement(rng: Rng, survivor: string, deceased: string, yearsTogether: number): string {
+  if (yearsTogether < 2) {
+    return pick(rng, [
+      `${survivor} mourns ${deceased}, their partner.`,
+      `${survivor} sits alone tonight. ${deceased} is gone.`,
+    ]);
+  }
+  return pick(rng, [
+    `${survivor} grieves for ${deceased}, their partner of ${yearsTogether} years.`,
+    `${yearsTogether} years bonded, and now ${survivor} stands alone. ${deceased} is dead.`,
+    `${survivor} weeps for ${deceased}. They were partners ${yearsTogether} years.`,
+  ]);
+}
+
 export function narrateDeath(rng: Rng, name: string, profession: string, age: number, cause: string): string {
   const opts = cause === "old age"
     ? [

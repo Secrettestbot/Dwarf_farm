@@ -17,6 +17,8 @@ export interface SavedDwarf {
   /** Legacy field kept for back-compat with v2 saves; restore code falls
    * back to computing bornAtTick from age + tick if bornAtTick is missing. */
   age?: number;
+  /** Partner referenced by index into the saved dwarves array, or null. */
+  partnerIndex?: number | null;
   lastJobTick: number;
   needs?: { sleep: number; social: number; decayAccumSleep: number; decayAccumSocial: number };
   /** In-flight job (mine / sleep / socialise / wander) at save time. */
