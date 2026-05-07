@@ -569,6 +569,23 @@ export class ColonyPlanner {
 
   // ---- Reachable-from-spawn flood fill -----------------------------------
 
+  /**
+   * Read-only accessor for the reachable-from-spawn mask. Used by the
+   * hostile spawn system to pick a candidate tile that's connected to the
+   * colony but far from any dwarf — without forcing the planner internals
+   * to know about hostiles.
+   */
+  exposeReachable(sim: { grid: TileGrid; spawn: { x: number; y: number } }): Uint8Array | null {
+    return this.ensureReachable({
+      grid: sim.grid,
+      spawn: sim.spawn,
+      tick: 0,
+      population: 0,
+      // ensureReachable reads only grid + spawn; rng/events/tick are unused.
+      rng: undefined as unknown as import("../rng").Rng,
+    });
+  }
+
   /** True if (x, y) is walkable AND connected to spawn via walkable tiles. */
   private isReachable(ctx: PlannerContext, x: number, y: number): boolean {
     if (!ctx.grid.inBounds(x, y)) return false;

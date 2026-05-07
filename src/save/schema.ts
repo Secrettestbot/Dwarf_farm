@@ -39,6 +39,19 @@ export interface SavedDwarf {
     goalX: number;
     goalY: number;
   };
+  /** Combat HP. Optional for back-compat with v2 saves. */
+  health?: { hp: number; maxHp: number; lastAttackTick: number };
+}
+
+/** Saved hostile entity. */
+export interface SavedHostile {
+  kind: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  lastAttackTick: number;
+  lastMoveTick: number;
 }
 
 export interface SavedBlueprint {
@@ -105,6 +118,7 @@ export interface SaveV1 {
   oreEverStruck?: boolean;
   lastYearAnnounced?: number;
   populationMilestones?: number[];
+  hostiles?: SavedHostile[];
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

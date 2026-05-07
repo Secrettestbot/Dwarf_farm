@@ -6,6 +6,9 @@ import { ColonyPlanner } from "../planner/colonyPlanner";
 import { AStar } from "../pathing/astar";
 import { EventLog } from "../events/eventLog";
 import { TICKS_PER_YEAR } from "../time";
+import { Hostile, Health, HOSTILE_DEFS, HostileKind } from "../hostiles/types";
+
+const DWARF_BASE_MAX_HP = 100;
 
 export interface Stockpile {
   /** Generic ore tally — any TileType.Ore mined. Later sessions split into
@@ -36,6 +39,8 @@ export class SimWorld {
   readonly pathing: ComponentStore<Pathing>;
   readonly job: ComponentStore<JobAssignment>;
   readonly needs: ComponentStore<Needs>;
+  readonly hostile: ComponentStore<Hostile>;
+  readonly health: ComponentStore<Health>;
 
   // Forked RNG streams.
   readonly aiRng: Rng;
@@ -87,6 +92,8 @@ export class SimWorld {
     this.pathing = new ComponentStore(maxEntities);
     this.job = new ComponentStore(maxEntities);
     this.needs = new ComponentStore(maxEntities);
+    this.hostile = new ComponentStore(maxEntities);
+    this.health = new ComponentStore(maxEntities);
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");
@@ -123,6 +130,7 @@ export class SimWorld {
       partnerId: null,
       lastJobTick: 0,
     });
+    this.health.set(e, { hp: DWARF_BASE_MAX_HP, maxHp: DWARF_BASE_MAX_HP, lastAttackTick: 0 });
     this.needs.set(e, {
       sleep: spec.initialNeeds?.sleep ?? 100,
       social: spec.initialNeeds?.social ?? 100,
@@ -175,5 +183,32 @@ export class SimWorld {
 
   isMineClaimed(x: number, y: number): boolean {
     return this.mineClaims.has((y << 16) | x);
+  }
+
+  // ---- Hostile spawning --------------------------------------------------
+
+  /** Spawn a new hostile entity. Returns the new entity id. */
+  spawnHostile(spec: {
+    kind: HostileKind;
+    x: number;
+    y: number;
+    hp?: number;
+    lastAttackTick?: number;
+    lastMoveTick?: number;
+  }): EntityId {
+    const def = HOSTILE_DEFS[spec.kind];
+    const e = this.ecs.create();
+    this.position.set(e, { x: spec.x, y: spec.y });
+    this.hostile.set(e, {
+      kind: spec.kind,
+      lastAttackTick: spec.lastAttackTick ?? 0,
+      lastMoveTick: spec.lastMoveTick ?? 0,
+    });
+    this.health.set(e, {
+      hp: spec.hp ?? def.maxHp,
+      maxHp: def.maxHp,
+      lastAttackTick: 0,
+    });
+    return e;
   }
 }

@@ -1,6 +1,6 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, GameMode } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides } from "./codec";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
@@ -59,6 +59,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
         }
       : undefined;
     const partnerIndex = dw.partnerId !== null ? entityToIndex.get(dw.partnerId) ?? null : null;
+    const h = sim.health.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -70,6 +71,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       bornAtTick: dw.bornAtTick,
       partnerIndex,
       lastJobTick: dw.lastJobTick,
+      health: h ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick } : undefined,
       needs: n
         ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
         : undefined,
@@ -129,7 +131,30 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
     populationMilestones: Array.from(sim.populationMilestones),
+    hostiles: collectHostiles(sim),
   };
+}
+
+function collectHostiles(sim: SimWorld): SavedHostile[] {
+  const out: SavedHostile[] = [];
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const h = sim.hostile.get(e);
+    const p = sim.position.get(e);
+    const hp = sim.health.get(e);
+    if (!h || !p || !hp) continue;
+    out.push({
+      kind: h.kind,
+      x: p.x,
+      y: p.y,
+      hp: hp.hp,
+      maxHp: hp.maxHp,
+      lastAttackTick: h.lastAttackTick,
+      lastMoveTick: h.lastMoveTick,
+    });
+  }
+  return out;
 }
 
 export function restore(save: SaveV1): SimWorld {
@@ -256,6 +281,35 @@ export function restore(save: SaveV1): SimWorld {
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
   if (save.populationMilestones) {
     for (const m of save.populationMilestones) sim.populationMilestones.add(m);
+  }
+
+  // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
+  // default 100/100 above).
+  for (let i = 0; i < save.dwarves.length; i++) {
+    const d = save.dwarves[i];
+    const e = spawnedEntities[i];
+    if (d.health) {
+      const hp = sim.health.get(e);
+      if (hp) {
+        hp.hp = d.health.hp;
+        hp.maxHp = d.health.maxHp;
+        hp.lastAttackTick = d.health.lastAttackTick;
+      }
+    }
+  }
+
+  // Restore hostiles.
+  if (save.hostiles) {
+    for (const h of save.hostiles) {
+      sim.spawnHostile({
+        kind: h.kind as import("../sim/hostiles/types").HostileKind,
+        x: h.x,
+        y: h.y,
+        hp: h.hp,
+        lastAttackTick: h.lastAttackTick,
+        lastMoveTick: h.lastMoveTick,
+      });
+    }
   }
 
   return sim;

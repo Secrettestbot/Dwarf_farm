@@ -4,11 +4,12 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement } from "./events/narrator";
-import { TICKS_PER_YEAR } from "./time";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain } from "./events/narrator";
+import { TICKS_PER_YEAR, TICKS_PER_DAY } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
+import { HOSTILE_DEFS } from "./hostiles/types";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -49,6 +50,9 @@ export function tick(sim: SimWorld): void {
   jobAssignmentSystem(sim);
   movementSystem(sim);
   workSystem(sim);
+  hostileSpawnSystem(sim);
+  hostileMovementSystem(sim);
+  combatSystem(sim);
 }
 
 // GDD §6.1 lifecycle: death at ~150 years naturally; dwarf-touched extends
@@ -127,7 +131,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     }
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health]);
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -530,5 +534,177 @@ function progressWander(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
+  }
+}
+
+// ---- Hazards: spawning, movement, combat ------------------------------
+
+const HOSTILE_SPAWN_INTERVAL_TICKS = TICKS_PER_DAY; // try once per in-game day
+const HOSTILE_SPAWN_CHANCE = 0.4;
+const HOSTILE_MIN_DISTANCE_FROM_DWARF = 8;
+const DWARF_BASE_DAMAGE = 6;
+const DWARF_ATTACK_COOLDOWN = 60;
+
+/**
+ * Periodically a creature finds its way into the colony. We pick a
+ * reachable walkable tile that is (a) deep enough for the kind to spawn,
+ * (b) safely away from any dwarf so they get to discover it. Cap is
+ * proportional to the colony's size so a one-dwarf colony isn't swarmed.
+ */
+function hostileSpawnSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % HOSTILE_SPAWN_INTERVAL_TICKS !== 0) return;
+  // Cap: 1 hostile per 3 dwarves, min 1.
+  const dwarves = sim.dwarf.size();
+  if (dwarves === 0) return;
+  const cap = Math.max(1, Math.floor(dwarves / 3));
+  if (sim.hostile.size() >= cap) return;
+  if (sim.aiRng.nextFloat() >= HOSTILE_SPAWN_CHANCE) return;
+
+  // Pick a reachable walkable tile deep enough for cave_rat. We sample by
+  // scanning the planner's reachable mask deterministically.
+  const reachable = sim.planner.exposeReachable(sim);
+  if (!reachable) return;
+  const grid = sim.grid;
+  const w = grid.width;
+  const def = HOSTILE_DEFS["cave_rat"];
+  const minY = sim.spawn.y + def.minDepth;
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < reachable.length; i++) {
+    if (reachable[i] !== 1) continue;
+    const y = (i / w) | 0;
+    if (y < minY) continue;
+    const x = i % w;
+    // Reject any tile too close to a dwarf — the chronicle's whole point is
+    // the dwarves *discovering* the threat, not bumping into it at spawn.
+    let tooClose = false;
+    sim.forEachDwarf((_id, p) => {
+      if (tooClose) return;
+      const dx = p.x - x;
+      const dy = p.y - y;
+      if (dx * dx + dy * dy < HOSTILE_MIN_DISTANCE_FROM_DWARF * HOSTILE_MIN_DISTANCE_FROM_DWARF) {
+        tooClose = true;
+      }
+    });
+    if (!tooClose) candidates.push({ x, y });
+  }
+  if (candidates.length === 0) return;
+  const pick = candidates[sim.aiRng.nextRange(0, candidates.length)];
+  sim.spawnHostile({ kind: "cave_rat", x: pick.x, y: pick.y });
+  sim.events.add(
+    sim.tick,
+    "crisis",
+    narrateHostileSpawn(sim.aiRng, def.spawnArticle, pick.y, sim.spawn.y),
+  );
+}
+
+/**
+ * Greedy pursuit: each tick, each hostile (rate-limited per kind) takes
+ * a single step toward the nearest dwarf within pursueRange — no A*, just
+ * a sign-of-delta step, fenced by walkability. Cheap and good enough for
+ * cave-rat-scale threats; smarter creatures get proper pathing later.
+ */
+function hostileMovementSystem(sim: SimWorld): void {
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const h = sim.hostile.get(e);
+    if (!h) continue;
+    const def = HOSTILE_DEFS[h.kind];
+    if (sim.tick - h.lastMoveTick < def.moveCooldown) continue;
+    const pos = sim.position.get(e);
+    if (!pos) continue;
+    // Find nearest dwarf within pursue range.
+    let bestDist = def.pursueRange * def.pursueRange + 1;
+    let bestPos: { x: number; y: number } | null = null;
+    sim.forEachDwarf((_id, p) => {
+      const dx = p.x - pos.x;
+      const dy = p.y - pos.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestPos = { x: p.x, y: p.y };
+      }
+    });
+    if (!bestPos) continue;
+    h.lastMoveTick = sim.tick;
+    const target: { x: number; y: number } = bestPos;
+    const dx = Math.sign(target.x - pos.x);
+    const dy = Math.sign(target.y - pos.y);
+    // Try the diagonal first, then horizontal-only, then vertical-only.
+    const tries: Array<[number, number]> = [
+      [pos.x + dx, pos.y + dy],
+      [pos.x + dx, pos.y],
+      [pos.x, pos.y + dy],
+    ];
+    for (const [nx, ny] of tries) {
+      if (nx === pos.x && ny === pos.y) continue;
+      if (!sim.grid.isWalkable(nx, ny)) continue;
+      pos.x = nx;
+      pos.y = ny;
+      break;
+    }
+  }
+}
+
+/**
+ * Adjacent dwarves and hostiles exchange damage on cooldown. Either side
+ * dropping to 0 HP dies on the spot. Dwarf deaths re-use killDwarf so the
+ * memorial-tile + bereavement pipeline still works.
+ */
+function combatSystem(sim: SimWorld): void {
+  const hEnts = sim.hostile.entities.slice(); // snapshot — combat may remove
+  for (const h of hEnts) {
+    const hPos = sim.position.get(h);
+    const hHealth = sim.health.get(h);
+    const hostile = sim.hostile.get(h);
+    if (!hPos || !hHealth || !hostile) continue;
+    const def = HOSTILE_DEFS[hostile.kind];
+    // Find adjacent dwarf (within 1 tile in any direction).
+    let target: EntityId | null = null;
+    let targetPos: { x: number; y: number } | null = null;
+    sim.forEachDwarf((id, p) => {
+      if (target !== null) return;
+      if (Math.abs(p.x - hPos.x) <= 1 && Math.abs(p.y - hPos.y) <= 1) {
+        target = id;
+        targetPos = { x: p.x, y: p.y };
+      }
+    });
+    if (target === null || targetPos === null) continue;
+
+    // Hostile attacks dwarf on its cooldown.
+    if (sim.tick - hostile.lastAttackTick >= def.attackCooldown) {
+      hostile.lastAttackTick = sim.tick;
+      const dwarfHealth = sim.health.get(target);
+      if (dwarfHealth) {
+        dwarfHealth.hp -= def.damage;
+        if (dwarfHealth.hp <= 0) {
+          killDwarf(sim, target, `slain by ${def.spawnArticle}`);
+        }
+      }
+    }
+
+    // Surviving dwarf retaliates (shared cooldown stored on Health).
+    if (!sim.ecs.isAlive(target)) continue;
+    const dHealth = sim.health.get(target);
+    if (!dHealth) continue;
+    if (sim.tick - dHealth.lastAttackTick >= DWARF_ATTACK_COOLDOWN) {
+      dHealth.lastAttackTick = sim.tick;
+      // Damage scales modestly with the military skill (no military skill
+      // = base damage). Mining skill doesn't help in a fight.
+      const dwarf = sim.dwarf.get(target);
+      const military = dwarf?.skills.military ?? 1;
+      const damage = DWARF_BASE_DAMAGE + Math.floor((military - 1) / 2);
+      hHealth.hp -= damage;
+      if (hHealth.hp <= 0) {
+        const dwarfName = dwarf?.name ?? "A dwarf";
+        sim.events.add(
+          sim.tick,
+          "crisis",
+          narrateHostileSlain(sim.aiRng, dwarfName, def.name),
+        );
+        sim.ecs.destroy(h, [sim.position, sim.hostile, sim.health]);
+      }
+    }
   }
 }

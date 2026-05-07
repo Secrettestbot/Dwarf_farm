@@ -106,6 +106,10 @@ export class DwarfInspector {
       ? `${ACTIVITY_LABEL[job.kind] ?? job.kind}${path && path.pathIndex < path.path.length - 1 ? " (en route)" : ""}`
       : "idle";
 
+    const health = sim.health.get(this.targetId);
+    const hpHtml = health
+      ? `${bar("Health", (health.hp / health.maxHp) * 100, `${health.hp}/${health.maxHp}`)}`
+      : "";
     const needsHtml = needs
       ? `
         ${bar("Sleep", needs.sleep)}
@@ -126,6 +130,7 @@ export class DwarfInspector {
       </div>
       ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
+      ${hpHtml}
       ${needsHtml}
       <div style="margin-top:8px;">${traitsHtml || '<span style="color:#666;">no traits</span>'}</div>
       <div style="margin-top:8px;border-top:1px solid #2a2a35;padding-top:6px;">${topSkills}</div>
@@ -135,12 +140,13 @@ export class DwarfInspector {
   }
 }
 
-function bar(label: string, value: number): string {
+function bar(label: string, value: number, displayValue?: string): string {
   const pct = Math.max(0, Math.min(100, value));
   const tone = pct < 30 ? "#ff7060" : pct < 60 ? "#e0c080" : "#9ad3a3";
+  const display = displayValue ?? Math.round(pct).toString();
   return `
     <div style="margin-top:5px;font-size:10px;color:#888;display:flex;justify-content:space-between;">
-      <span>${label}</span><span>${Math.round(pct)}</span>
+      <span>${label}</span><span>${display}</span>
     </div>
     <div style="background:#1c1c24;height:5px;border-radius:3px;overflow:hidden;">
       <div style="height:100%;width:${pct}%;background:${tone};"></div>

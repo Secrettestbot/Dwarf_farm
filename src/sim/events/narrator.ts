@@ -109,6 +109,23 @@ export function narrateOreFirstStrike(rng: Rng, dwarfName: string, depth: number
   ]);
 }
 
+export function narrateHostileSpawn(rng: Rng, kindArticle: string, depth: number, spawnY: number): string {
+  const where = depthPhrase(depth, spawnY);
+  return pick(rng, [
+    `${kindArticle.charAt(0).toUpperCase() + kindArticle.slice(1)} has appeared ${where}. The dwarves should beware.`,
+    `${kindArticle.charAt(0).toUpperCase() + kindArticle.slice(1)} has been heard ${where}.`,
+    `Something stirs ${where} — ${kindArticle}.`,
+  ]);
+}
+
+export function narrateHostileSlain(rng: Rng, dwarfName: string, kindName: string): string {
+  return pick(rng, [
+    `${dwarfName} has slain a ${kindName}.`,
+    `A ${kindName} lies dead at ${dwarfName}'s feet.`,
+    `${dwarfName} has put down a ${kindName}.`,
+  ]);
+}
+
 export function narratePairing(rng: Rng, a: string, b: string): string {
   return pick(rng, [
     `${a} and ${b} have become partners.`,

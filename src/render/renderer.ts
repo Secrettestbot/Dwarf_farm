@@ -1,7 +1,7 @@
 import { Camera } from "./camera";
 import { SimWorld } from "../sim/world/simWorld";
 import { TileType } from "../sim/world/tiles";
-import { getDwarfSprite, getTileSprite, SPRITE_TILE_SIZE } from "./sprites";
+import { getDwarfSprite, getHostileSprite, getTileSprite, SPRITE_TILE_SIZE } from "./sprites";
 import { BlueprintKind } from "../sim/planner/blueprint";
 
 const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> = {
@@ -74,6 +74,19 @@ export function renderWorld(
       }
     }
     ctx.restore();
+  }
+
+  // Hostiles below dwarves so dwarves draw over them in melee.
+  const hostileEnts = sim.hostile.entities;
+  for (let i = 0; i < hostileEnts.length; i++) {
+    const e = hostileEnts[i];
+    const p = sim.position.get(e);
+    const h = sim.hostile.get(e);
+    if (!p || !h) continue;
+    const sprite = getHostileSprite(h.kind);
+    const sx = (p.x - camera.x) * pt + viewW / 2;
+    const sy = (p.y - camera.y) * pt + viewH / 2;
+    ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
   }
 
   // Dwarves on top.

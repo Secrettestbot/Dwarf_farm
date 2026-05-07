@@ -251,4 +251,34 @@ export function getDwarfSprite(): HTMLCanvasElement | OffscreenCanvas {
   return s;
 }
 
+// Cave rat: small, low to the ground, palette-red.
+const CAVE_RAT_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "00000111000000",
+  "0000111E1100000",
+  "00011EEEE110000",
+  "00111EEEEEE1000",
+  "01EEEEEEEEEE100",
+  "0011EEEEEE1100".slice(0, 16),
+  "00011111111100",
+  "0010100110010000",
+  "0010100110010000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+export function getHostileSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {
+  const key = `hostile:${kind}`;
+  let s = cache.get(key);
+  if (!s) {
+    s = paintFromRows(CAVE_RAT_PIXELS);
+    cache.set(key, s);
+  }
+  return s;
+}
+
 export const SPRITE_TILE_SIZE = SPRITE_SIZE;
