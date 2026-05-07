@@ -1,15 +1,23 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { generateWorld } from "../world/worldgen";
+import { Rng } from "../rng";
 import { ColonyPlanner } from "./colonyPlanner";
 
 const POP_DEFAULT = 7;
 
 describe("ColonyPlanner", () => {
+  // A fresh rng per test keeps cross-test interference impossible. Created
+  // outside `it` lambda for terseness — Vitest runs tests sequentially.
+  let testRng: Rng;
+  beforeEach(() => {
+    testRng = Rng.fromSeed(2024);
+  });
+
   it("does not emit anything before its evaluation cadence elapses", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 30; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
     }
     expect(planner.blueprints.length).toBe(0);
   });
@@ -18,7 +26,7 @@ describe("ColonyPlanner", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 60; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
     }
     // Planner allows multiple active blueprints (up to MAX_ACTIVE = 3) so it
     // can saturate work for several dwarves at once.
@@ -40,7 +48,7 @@ describe("ColonyPlanner", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 60; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1 });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1, rng: testRng });
     }
     // pop=1 → ceil(1*1.5)=2 bedrooms target. The first two emissions must
     // both be bedrooms; a 3rd active slot is filled by a fallback corridor
@@ -57,7 +65,7 @@ describe("ColonyPlanner", () => {
     // Hand-excavate cavities so the planner sees them complete and can emit
     // another. With population 7 the target is ceil(7*1.5) = 11 rooms.
     for (let t = 1; t <= 800; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
       if (planner.blueprints.length > 0) {
         const bp = planner.blueprints[planner.blueprints.length - 1];
         if (bp.status === "digging") {
@@ -93,7 +101,7 @@ describe("ColonyPlanner", () => {
     // Population 1: target = max(2, ceil(1*1.5)) = 2 bedrooms. The colony
     // never emits a 3rd bedroom but does keep digging exploration corridors.
     for (let t = 1; t <= 4000; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1 });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1, rng: testRng });
       for (const bp of planner.blueprints) {
         if (bp.status !== "digging") continue;
         for (let i = 0; i < bp.cavity.length; i++) {
@@ -113,7 +121,7 @@ describe("ColonyPlanner", () => {
     const planner = new ColonyPlanner();
     // Hand-excavate as before so the planner can keep emitting.
     for (let t = 1; t <= 600; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 4 });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 4, rng: testRng });
       for (const bp of planner.blueprints) {
         if (bp.status !== "digging") continue;
         for (let i = 0; i < bp.cavity.length; i++) {
@@ -131,7 +139,7 @@ describe("ColonyPlanner", () => {
     const w = generateWorld({ seed: 43, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 800; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 5 });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 5, rng: testRng });
       for (const bp of planner.blueprints) {
         if (bp.status !== "digging") continue;
         for (let i = 0; i < bp.cavity.length; i++) {
@@ -152,7 +160,7 @@ describe("ColonyPlanner", () => {
     const planner = new ColonyPlanner();
     // Hand-excavate so blueprints complete and the planner keeps emitting.
     for (let t = 1; t <= 2400; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
       for (const bp of planner.blueprints) {
         if (bp.status !== "digging") continue;
         for (let i = 0; i < bp.cavity.length; i++) {
@@ -170,11 +178,13 @@ describe("ColonyPlanner", () => {
     expect(downward).toBe(true);
   });
 
-  it("emits a mine blueprint once a corridor exposes ore", () => {
+  it("emits a mine blueprint once corridors expose ore", () => {
     const w = generateWorld({ seed: 67, width: 200, height: 500 });
     const planner = new ColonyPlanner();
-    for (let t = 1; t <= 6000; t++) {
-      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
+    // Random corridor length variation means descent is stochastic; give the
+    // colony enough wall-clock to reach the ore-bearing Shallow Earth layer.
+    for (let t = 1; t <= 12000; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
       for (const bp of planner.blueprints) {
         if (bp.status !== "digging") continue;
         for (let i = 0; i < bp.cavity.length; i++) {
@@ -192,14 +202,46 @@ describe("ColonyPlanner", () => {
     expect(mineEmitted).toBe(true);
   });
 
+  it("corridor emissions vary in length and width across the colony", () => {
+    const w = generateWorld({ seed: 71, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    for (let t = 1; t <= 4000; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT, rng: testRng });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    const corridors = planner.blueprints.filter((b) => b.kind === "corridor");
+    expect(corridors.length).toBeGreaterThanOrEqual(3);
+    // At least two distinct corridor sizes (length × width product).
+    const sizes = new Set(corridors.map((b) => b.cavity.length));
+    expect(sizes.size).toBeGreaterThanOrEqual(2);
+    // At least one horizontal and one vertical corridor (variation in
+    // direction, not just identical 1×N vertical strips).
+    const verticals = corridors.filter((b) => b.height > b.width).length;
+    const horizontals = corridors.filter((b) => b.width > b.height).length;
+    expect(verticals + horizontals).toBeGreaterThanOrEqual(2);
+  });
+
   it("placement is deterministic across runs with the same seed", () => {
+    // Each run gets its own rng instance seeded identically — sharing a
+    // single rng would advance state for run A and leave run B reading
+    // post-A state.
     const wa = generateWorld({ seed: 99, width: 200, height: 500 });
     const wb = generateWorld({ seed: 99, width: 200, height: 500 });
     const pa = new ColonyPlanner();
     const pb = new ColonyPlanner();
+    const rngA = Rng.fromSeed(2024);
+    const rngB = Rng.fromSeed(2024);
     for (let t = 1; t <= 200; t++) {
-      pa.tick({ grid: wa.grid, spawn: wa.spawn, tick: t, population: POP_DEFAULT });
-      pb.tick({ grid: wb.grid, spawn: wb.spawn, tick: t, population: POP_DEFAULT });
+      pa.tick({ grid: wa.grid, spawn: wa.spawn, tick: t, population: POP_DEFAULT, rng: rngA });
+      pb.tick({ grid: wb.grid, spawn: wb.spawn, tick: t, population: POP_DEFAULT, rng: rngB });
     }
     expect(pa.blueprints.length).toBe(pb.blueprints.length);
     for (let i = 0; i < pa.blueprints.length; i++) {

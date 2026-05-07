@@ -110,6 +110,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     rngStates: {
       ai: input.sim.aiRng.serialize(),
       world: input.sim.worldRng.serialize(),
+      planner: input.sim.plannerRng.serialize(),
     },
     tileOverrides: overrides,
     dwarves,
@@ -141,6 +142,11 @@ export function restore(save: SaveV1): SimWorld {
   if (worldState) {
     sim.worldRng.stateHi = worldState[0] >>> 0;
     sim.worldRng.stateLo = worldState[1] >>> 0;
+  }
+  const plannerState = save.rngStates.planner;
+  if (plannerState) {
+    sim.plannerRng.stateHi = plannerState[0] >>> 0;
+    sim.plannerRng.stateLo = plannerState[1] >>> 0;
   }
 
   // Restore dwarves. We spawn them in saved-array order so partnerIndex
@@ -175,6 +181,9 @@ export function restore(save: SaveV1): SimWorld {
         progress: d.job.progress,
         partnerId,
       });
+      if (d.job.kind === "mine") {
+        sim.claimMineTarget(d.job.targetX, d.job.targetY);
+      }
     }
     if (d.pathing) {
       sim.pathing.set(e, {

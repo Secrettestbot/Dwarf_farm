@@ -48,6 +48,27 @@ describe("idle behaviors", () => {
     expect(needs.sleep).toBeGreaterThan(40);
   });
 
+  it("dwarves disperse to different mining targets via claim-locking", () => {
+    const sim = buildSim(19, 7);
+    // Run long enough for the planner to emit blueprints and dwarves to
+    // claim mining targets.
+    for (let i = 0; i < 90; i++) tick(sim);
+    // Collect target tiles for any dwarves with active mine jobs.
+    const targets = new Set<number>();
+    let mineCount = 0;
+    sim.forEachDwarf((id) => {
+      const job = sim.job.get(id);
+      if (job?.kind === "mine") {
+        mineCount++;
+        targets.add((job.targetY << 16) | job.targetX);
+      }
+    });
+    // If multiple dwarves are mining, they must each have a different target.
+    if (mineCount >= 2) {
+      expect(targets.size).toBe(mineCount);
+    }
+  });
+
   it("two idle dwarves with low social need pair up to socialise", () => {
     const sim = buildSim(17, 2);
     // Force both into low social.

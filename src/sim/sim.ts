@@ -32,6 +32,7 @@ export function tick(sim: SimWorld): void {
     spawn: sim.spawn,
     tick: sim.tick,
     population: sim.dwarf.size(),
+    rng: sim.plannerRng,
   });
   needsSystem(sim);
   jobAssignmentSystem(sim);
@@ -93,6 +94,9 @@ function jobAssignmentSystem(sim: SimWorld): void {
     const pathing: Pathing = { path, pathIndex: 0, goalX: proposal.targetX, goalY: proposal.targetY };
     sim.job.set(e, proposal);
     sim.pathing.set(e, pathing);
+    if (proposal.kind === "mine") {
+      sim.claimMineTarget(proposal.targetX, proposal.targetY);
+    }
   }
 }
 
@@ -109,6 +113,8 @@ function movementSystem(sim: SimWorld): void {
     // Replan if the next step became unwalkable since the path was planned.
     const nextCell = unpackCell(path.path[path.pathIndex + 1]);
     if (!sim.grid.isWalkable(nextCell.x, nextCell.y)) {
+      const job = sim.job.get(e);
+      if (job?.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
       sim.pathing.remove(e);
       sim.job.remove(e);
       continue;
@@ -155,11 +161,13 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   const dx = Math.abs(pos.x - job.targetX);
   const dy = Math.abs(pos.y - job.targetY);
   if (dx > 1 || dy > 1) {
+    sim.releaseMineTarget(job.targetX, job.targetY);
     sim.job.remove(e);
     sim.pathing.remove(e);
     return;
   }
   if (!sim.grid.isSolid(job.targetX, job.targetY)) {
+    sim.releaseMineTarget(job.targetX, job.targetY);
     sim.job.remove(e);
     sim.pathing.remove(e);
     return;
@@ -168,6 +176,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (job.progress >= MINE_TICKS) {
     sim.grid.setTile(job.targetX, job.targetY, TileType.CorridorFloor);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
+    sim.releaseMineTarget(job.targetX, job.targetY);
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
