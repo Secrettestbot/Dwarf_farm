@@ -1,14 +1,9 @@
 import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY } from "../sim/time";
+import { SimWorld } from "../sim/world/simWorld";
 
 export interface HudHandlers {
   onSpeedChange(s: SpeedLevel): void;
   onSave(): void;
-  onPaintToggle(active: boolean): void;
-  onClearZones(): void;
-}
-
-export interface HudState {
-  paintMode: boolean;
 }
 
 export class Hud {
@@ -16,8 +11,7 @@ export class Hud {
   private speedButtons: Map<SpeedLevel, HTMLButtonElement> = new Map();
   private clockLabel: HTMLDivElement;
   private dwarfLabel: HTMLDivElement;
-  private paintButton: HTMLButtonElement;
-  state: HudState = { paintMode: false };
+  private plannerLabel: HTMLDivElement;
 
   constructor(host: HTMLElement, handlers: HudHandlers) {
     const top = document.createElement("div");
@@ -36,6 +30,11 @@ export class Hud {
     this.dwarfLabel.style.color = "#888";
     top.appendChild(this.dwarfLabel);
 
+    this.plannerLabel = document.createElement("div");
+    this.plannerLabel.style.fontSize = "11px";
+    this.plannerLabel.style.color = "#888";
+    top.appendChild(this.plannerLabel);
+
     const speedRow = document.createElement("div");
     speedRow.style.cssText = "display:flex;gap:4px;margin-top:4px;";
     for (const s of SPEED_LEVELS) {
@@ -52,48 +51,34 @@ export class Hud {
 
     const tools = document.createElement("div");
     tools.style.cssText = "display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;";
-    this.paintButton = document.createElement("button");
-    this.paintButton.className = "btn";
-    this.paintButton.textContent = "Dig Zone";
-    this.paintButton.title = "Drag a rectangle on the world to mark a Dig Zone — dwarves prefer to mine inside it.";
-    this.paintButton.addEventListener("click", () => {
-      this.state.paintMode = !this.state.paintMode;
-      handlers.onPaintToggle(this.state.paintMode);
-      this.paintButton.classList.toggle("active", this.state.paintMode);
-    });
-    tools.appendChild(this.paintButton);
-
-    const clearButton = document.createElement("button");
-    clearButton.className = "btn";
-    clearButton.textContent = "Clear Zones";
-    clearButton.addEventListener("click", () => handlers.onClearZones());
-    tools.appendChild(clearButton);
-
     const saveButton = document.createElement("button");
     saveButton.className = "btn";
     saveButton.textContent = "Save";
     saveButton.addEventListener("click", () => handlers.onSave());
     tools.appendChild(saveButton);
-
     top.appendChild(tools);
 
     const help = document.createElement("div");
     help.style.cssText = "font-size:10px;color:#666;line-height:1.4;margin-top:6px;";
     help.innerHTML =
-      "Drag empty space to pan · scroll to zoom<br/>The dwarf works on its own — you only watch.";
+      "Drag to pan · scroll to zoom · space pauses<br/>The dwarves work on their own. You only watch.";
     top.appendChild(help);
 
     host.appendChild(top);
     this.root = top;
   }
 
-  update(clock: Clock, dwarfCount: number): void {
+  update(clock: Clock, sim: SimWorld): void {
     const tick = clock.tick;
     const day = Math.floor(tick / TICKS_PER_DAY) + 1;
     const hour = Math.floor((tick % TICKS_PER_DAY) / TICKS_PER_HOUR);
     const min = tick % TICKS_PER_HOUR;
     this.clockLabel.textContent = `Day ${day} · ${pad(hour)}:${pad(min)}  (tick ${tick})`;
+    const dwarfCount = sim.dwarf.size();
     this.dwarfLabel.textContent = `${dwarfCount} dwarf${dwarfCount === 1 ? "" : "ves"}`;
+    const active = sim.planner.activeCount();
+    const built = sim.planner.completed;
+    this.plannerLabel.textContent = `Plans: ${active} digging · ${built} done`;
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }

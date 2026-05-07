@@ -18,6 +18,10 @@ export function tick(sim: SimWorld): void {
   sim.tick++;
   // Systems run in fixed order. Each one iterates entities via sparse-set dense
   // arrays, so iteration order is deterministic.
+  // Planner runs first: it can emit new blueprints based on the colony's
+  // current state, and chooseJob picks targets from the active blueprint set
+  // immediately afterwards.
+  sim.planner.tick({ grid: sim.grid, spawn: sim.spawn, tick: sim.tick });
   jobAssignmentSystem(sim);
   movementSystem(sim);
   miningSystem(sim);

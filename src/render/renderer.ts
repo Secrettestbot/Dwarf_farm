@@ -3,17 +3,12 @@ import { SimWorld } from "../sim/world/simWorld";
 import { TileType } from "../sim/world/tiles";
 import { getDwarfSprite, getTileSprite, SPRITE_TILE_SIZE } from "./sprites";
 
-export interface RenderOptions {
-  digZonePreview?: { x0: number; y0: number; x1: number; y1: number } | null;
-}
-
 export function renderWorld(
   ctx: CanvasRenderingContext2D,
   sim: SimWorld,
   camera: Camera,
   viewW: number,
   viewH: number,
-  options: RenderOptions = {},
 ): void {
   ctx.fillStyle = "#070708";
   ctx.fillRect(0, 0, viewW, viewH);
@@ -35,36 +30,28 @@ export function renderWorld(
     }
   }
 
-  // Dig zone tinting.
-  if (sim.digZones.zones.length > 0) {
+  // Blueprint cavities: faint outline + tint over each active blueprint so the
+  // observer can see what the dwarves intend to dig. The player never created
+  // these — the Colony Planner did. They aren't a UI primitive, just a visible
+  // expression of the colony's intention.
+  const planner = sim.planner;
+  if (planner.blueprints.length > 0) {
     ctx.save();
-    ctx.fillStyle = "rgba(255, 220, 80, 0.18)";
-    for (const z of sim.digZones.zones) {
-      const ax = (z.x0 - camera.x) * pt + viewW / 2;
-      const ay = (z.y0 - camera.y) * pt + viewH / 2;
-      const bx = (z.x1 + 1 - camera.x) * pt + viewW / 2;
-      const by = (z.y1 + 1 - camera.y) * pt + viewH / 2;
-      ctx.fillRect(ax, ay, bx - ax, by - ay);
-      ctx.strokeStyle = "rgba(255, 220, 80, 0.65)";
+    for (const b of planner.blueprints) {
+      if (b.status !== "digging") continue;
+      const ax = (b.originX - camera.x) * pt + viewW / 2;
+      const ay = (b.originY - camera.y) * pt + viewH / 2;
+      const bw = b.width * pt;
+      const bh = b.height * pt;
+      ctx.fillStyle = "rgba(220, 180, 90, 0.10)";
+      ctx.fillRect(ax, ay, bw, bh);
+      ctx.strokeStyle = "rgba(220, 180, 90, 0.55)";
       ctx.lineWidth = 1;
-      ctx.strokeRect(ax + 0.5, ay + 0.5, bx - ax - 1, by - ay - 1);
+      // Dashed outline so it reads as a "plan" rather than "structure".
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(ax + 0.5, ay + 0.5, bw - 1, bh - 1);
+      ctx.setLineDash([]);
     }
-    ctx.restore();
-  }
-
-  // Drag preview rectangle while painting.
-  if (options.digZonePreview) {
-    const z = options.digZonePreview;
-    const ax = (Math.min(z.x0, z.x1) - camera.x) * pt + viewW / 2;
-    const ay = (Math.min(z.y0, z.y1) - camera.y) * pt + viewH / 2;
-    const bx = (Math.max(z.x0, z.x1) + 1 - camera.x) * pt + viewW / 2;
-    const by = (Math.max(z.y0, z.y1) + 1 - camera.y) * pt + viewH / 2;
-    ctx.save();
-    ctx.fillStyle = "rgba(255, 240, 120, 0.25)";
-    ctx.fillRect(ax, ay, bx - ax, by - ay);
-    ctx.strokeStyle = "#ffe066";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(ax + 0.5, ay + 0.5, bx - ax - 1, by - ay - 1);
     ctx.restore();
   }
 

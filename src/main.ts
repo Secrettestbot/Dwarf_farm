@@ -126,8 +126,6 @@ function runGame(sim: SimWorld, camera: Camera) {
   const minimap = new Minimap(sim.grid.width, sim.grid.height);
   minimap.refresh(sim, performance.now(), true);
 
-  let paintMode = false;
-  let painting: { x0: number; y0: number; x1: number; y1: number } | null = null;
   let panStart: { mx: number; my: number; cx: number; cy: number } | null = null;
   let isPanning = false;
 
@@ -139,35 +137,17 @@ function runGame(sim: SimWorld, camera: Camera) {
       await persist(sim, camera);
       flashSave();
     },
-    onPaintToggle(active) {
-      paintMode = active;
-      canvas.style.cursor = active ? "crosshair" : "default";
-    },
-    onClearZones() {
-      sim.digZones.clear();
-    },
   });
 
-  // ---- Input ----
+  // ---- Input: pan + zoom only. The dwarves act on their own. ----
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
-    const tile = camera.screenToTile(e.clientX, e.clientY, viewW, viewH);
-    if (paintMode) {
-      const rx = Math.floor(tile.x);
-      const ry = Math.floor(tile.y);
-      painting = { x0: rx, y0: ry, x1: rx, y1: ry };
-    } else {
-      panStart = { mx: e.clientX, my: e.clientY, cx: camera.x, cy: camera.y };
-      isPanning = false;
-    }
+    panStart = { mx: e.clientX, my: e.clientY, cx: camera.x, cy: camera.y };
+    isPanning = false;
   });
 
   canvas.addEventListener("pointermove", (e) => {
-    if (painting) {
-      const tile = camera.screenToTile(e.clientX, e.clientY, viewW, viewH);
-      painting.x1 = Math.floor(tile.x);
-      painting.y1 = Math.floor(tile.y);
-    } else if (panStart) {
+    if (panStart) {
       const dx = e.clientX - panStart.mx;
       const dy = e.clientY - panStart.my;
       if (!isPanning && Math.hypot(dx, dy) > 3) isPanning = true;
@@ -180,11 +160,6 @@ function runGame(sim: SimWorld, camera: Camera) {
 
   canvas.addEventListener("pointerup", (e) => {
     canvas.releasePointerCapture(e.pointerId);
-    if (painting) {
-      // Only commit zones that actually cover at least one tile.
-      sim.digZones.add(painting);
-      painting = null;
-    }
     panStart = null;
     isPanning = false;
   });
@@ -232,14 +207,14 @@ function runGame(sim: SimWorld, camera: Camera) {
 
     minimap.refresh(sim, now);
 
-    renderWorld(ctx, sim, camera, viewW, viewH, { digZonePreview: painting });
+    renderWorld(ctx, sim, camera, viewW, viewH);
 
     // Minimap in bottom-right.
     const mx = viewW - minimap.width - 14;
     const my = viewH - minimap.height - 14;
     minimap.draw(ctx, mx, my, camera, viewW, viewH);
 
-    hud.update(clock, sim.dwarf.size());
+    hud.update(clock, sim);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

@@ -1,11 +1,13 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1 } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint } from "./schema";
 import { decodeOverrides, encodeOverrides } from "./codec";
+import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
 // Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
 // what's needed to deterministically reconstruct the simulation: seed, RLE
-// delta vs a clean regen, RNG states, and the dwarf list.
+// delta vs a clean regen, RNG states, the dwarf list, and the colony planner
+// state (active blueprints + counters).
 
 export interface SnapshotInput {
   sim: SimWorld;
@@ -21,11 +23,33 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     width: input.sim.grid.width,
     height: input.sim.grid.height,
   });
-  const overrides = encodeOverrides(input.sim.grid, baseline.grid, input.sim.digZones.zones);
+  const overrides = encodeOverrides(input.sim.grid, baseline.grid);
 
   const dwarves: SaveV1["dwarves"] = [];
   input.sim.forEachDwarf((_id, pos, dw) => {
     dwarves.push({ name: dw.name, x: pos.x, y: pos.y, lastJobTick: dw.lastJobTick });
+  });
+
+  const planner = input.sim.planner;
+  const blueprints: SavedBlueprint[] = planner.blueprints.map((b) => {
+    const cells: number[] = new Array(b.cavity.length * 2);
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      cells[i * 2] = c & 0xffff;
+      cells[i * 2 + 1] = (c >>> 16) & 0xffff;
+    }
+    return {
+      id: b.id,
+      kind: b.kind,
+      originX: b.originX,
+      originY: b.originY,
+      width: b.width,
+      height: b.height,
+      cells,
+      status: b.status,
+      priority: b.priority,
+      createdTick: b.createdTick,
+    };
   });
 
   return {
@@ -42,6 +66,12 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     },
     tileOverrides: overrides,
     dwarves,
+    blueprints,
+    plannerNextId: planner.nextId,
+    plannerCompleted: planner.completed,
+    // accum is private but we need to round-trip it for byte-for-byte
+    // determinism; reach in via an accessor.
+    plannerAccum: (planner as unknown as { accum: number }).accum,
     cameraX: input.cameraX,
     cameraY: input.cameraY,
     zoomIndex: input.zoomIndex,
@@ -74,7 +104,32 @@ export function restore(save: SaveV1): SimWorld {
     sim.dwarf.get(e)!.lastJobTick = d.lastJobTick;
   }
 
-  for (const z of decoded.zones) sim.digZones.add(z);
+  // Restore Colony Planner.
+  const blueprints: Blueprint[] = (save.blueprints ?? []).map((b) => {
+    const cavity = new Int32Array(b.cells.length / 2);
+    for (let i = 0; i < cavity.length; i++) {
+      const x = b.cells[i * 2];
+      const y = b.cells[i * 2 + 1];
+      cavity[i] = (y << 16) | x;
+    }
+    return {
+      id: b.id,
+      kind: b.kind as BlueprintKind,
+      originX: b.originX,
+      originY: b.originY,
+      width: b.width,
+      height: b.height,
+      cavity,
+      status: b.status,
+      priority: b.priority,
+      createdTick: b.createdTick,
+    };
+  });
+  sim.planner.blueprints = blueprints;
+  sim.planner.nextId = save.plannerNextId ?? blueprints.reduce((m, b) => Math.max(m, b.id + 1), 1);
+  sim.planner.completed = save.plannerCompleted ?? blueprints.filter((b) => b.status === "complete").length;
+  (sim.planner as unknown as { accum: number }).accum = save.plannerAccum ?? 0;
+  sim.planner.rehydrate(sim.grid);
 
   return sim;
 }

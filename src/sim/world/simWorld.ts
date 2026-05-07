@@ -2,7 +2,7 @@ import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
 import { Dwarf, JobAssignment, Pathing, Position } from "../ecs/components";
 import { Rng } from "../rng";
 import { TileGrid } from "./grid";
-import { DigZones } from "./digZones";
+import { ColonyPlanner } from "../planner/colonyPlanner";
 import { AStar } from "../pathing/astar";
 
 /**
@@ -14,7 +14,7 @@ export class SimWorld {
   readonly seed: number;
   readonly grid: TileGrid;
   readonly ecs: EcsWorld;
-  readonly digZones = new DigZones();
+  readonly planner = new ColonyPlanner();
   readonly astar: AStar;
 
   // Component stores.

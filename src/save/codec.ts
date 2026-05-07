@@ -1,8 +1,8 @@
 import { TileGrid } from "../sim/world/grid";
 
 // Run-length-encoded delta between an authoritative TileGrid and a freshly
-// regenerated one from the same seed. Most cells are unchanged (the player
-// only mines a small fraction of the world), so deltas compress the world to
+// regenerated one from the same seed. Most cells are unchanged (the dwarves
+// only mine a small fraction of the world), so deltas compress the world to
 // kilobytes even at full scale.
 //
 // Format (little-endian):
@@ -13,15 +13,8 @@ import { TileGrid } from "../sim/world/grid";
 //     4 bytes  tile index (y * width + x)
 //     2 bytes  run length
 //     1 byte   tile type
-//   At the end: dig zone list
-//     2 bytes  zone count
-//     for each zone: 4 × 2 bytes (x0,y0,x1,y1)
 
-export interface EncodedSave {
-  bytes: Uint8Array;
-}
-
-export function encodeOverrides(authoritative: TileGrid, baseline: TileGrid, digZones: { x0: number; y0: number; x1: number; y1: number }[]): Uint8Array {
+export function encodeOverrides(authoritative: TileGrid, baseline: TileGrid): Uint8Array {
   if (authoritative.width !== baseline.width || authoritative.height !== baseline.height) {
     throw new Error("encodeOverrides: dimension mismatch");
   }
@@ -59,8 +52,7 @@ export function encodeOverrides(authoritative: TileGrid, baseline: TileGrid, dig
 
   const headerSize = 2 + 2 + 4;
   const runsSize = runs.length * (4 + 2 + 1);
-  const zonesSize = 2 + digZones.length * 8;
-  const out = new Uint8Array(headerSize + runsSize + zonesSize);
+  const out = new Uint8Array(headerSize + runsSize);
   const dv = new DataView(out.buffer);
   let p = 0;
   dv.setUint16(p, w, true); p += 2;
@@ -71,13 +63,6 @@ export function encodeOverrides(authoritative: TileGrid, baseline: TileGrid, dig
     dv.setUint16(p, r.len, true); p += 2;
     dv.setUint8(p, r.type); p += 1;
   }
-  dv.setUint16(p, digZones.length, true); p += 2;
-  for (const z of digZones) {
-    dv.setUint16(p, z.x0, true); p += 2;
-    dv.setUint16(p, z.y0, true); p += 2;
-    dv.setUint16(p, z.x1, true); p += 2;
-    dv.setUint16(p, z.y1, true); p += 2;
-  }
   return out;
 }
 
@@ -85,7 +70,6 @@ export interface DecodedOverrides {
   width: number;
   height: number;
   apply(grid: TileGrid): void;
-  zones: { x0: number; y0: number; x1: number; y1: number }[];
 }
 
 export function decodeOverrides(bytes: Uint8Array): DecodedOverrides {
@@ -101,15 +85,6 @@ export function decodeOverrides(bytes: Uint8Array): DecodedOverrides {
     const type = dv.getUint8(p); p += 1;
     runs.push({ idx, len, type });
   }
-  const zoneCount = dv.getUint16(p, true); p += 2;
-  const zones: { x0: number; y0: number; x1: number; y1: number }[] = [];
-  for (let i = 0; i < zoneCount; i++) {
-    const x0 = dv.getUint16(p, true); p += 2;
-    const y0 = dv.getUint16(p, true); p += 2;
-    const x1 = dv.getUint16(p, true); p += 2;
-    const y1 = dv.getUint16(p, true); p += 2;
-    zones.push({ x0, y0, x1, y1 });
-  }
   return {
     width: w,
     height: h,
@@ -123,6 +98,5 @@ export function decodeOverrides(bytes: Uint8Array): DecodedOverrides {
         }
       }
     },
-    zones,
   };
 }
