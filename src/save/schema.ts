@@ -14,6 +14,7 @@ export interface SavedDwarf {
   profession: string;
   age: number;
   lastJobTick: number;
+  needs?: { sleep: number; social: number; decayAccumSleep: number; decayAccumSocial: number };
 }
 
 export interface SavedBlueprint {

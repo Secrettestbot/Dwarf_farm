@@ -1,5 +1,5 @@
 import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
-import { Dwarf, JobAssignment, Pathing, Position } from "../ecs/components";
+import { Dwarf, JobAssignment, Needs, Pathing, Position } from "../ecs/components";
 import { Rng } from "../rng";
 import { TileGrid } from "./grid";
 import { ColonyPlanner } from "../planner/colonyPlanner";
@@ -22,6 +22,7 @@ export class SimWorld {
   readonly dwarf: ComponentStore<Dwarf>;
   readonly pathing: ComponentStore<Pathing>;
   readonly job: ComponentStore<JobAssignment>;
+  readonly needs: ComponentStore<Needs>;
 
   // Forked RNG streams.
   readonly aiRng: Rng;
@@ -46,6 +47,7 @@ export class SimWorld {
     this.dwarf = new ComponentStore(maxEntities);
     this.pathing = new ComponentStore(maxEntities);
     this.job = new ComponentStore(maxEntities);
+    this.needs = new ComponentStore(maxEntities);
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");
@@ -60,6 +62,7 @@ export class SimWorld {
     skills?: import("../dwarves/skills").SkillLevels;
     profession?: string;
     age?: number;
+    initialNeeds?: Partial<Needs>;
   }): EntityId {
     const e = this.ecs.create();
     this.position.set(e, { x: spec.x, y: spec.y });
@@ -70,6 +73,12 @@ export class SimWorld {
       profession: spec.profession ?? "Worker",
       age: spec.age ?? 25,
       lastJobTick: 0,
+    });
+    this.needs.set(e, {
+      sleep: spec.initialNeeds?.sleep ?? 100,
+      social: spec.initialNeeds?.social ?? 100,
+      decayAccumSleep: spec.initialNeeds?.decayAccumSleep ?? 0,
+      decayAccumSocial: spec.initialNeeds?.decayAccumSocial ?? 0,
     });
     return e;
   }

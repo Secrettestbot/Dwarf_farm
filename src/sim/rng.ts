@@ -83,8 +83,17 @@ export class Rng {
   nextRange(min: number, max: number): number {
     const span = max - min;
     if (span <= 0) return min;
-    // Unbiased rejection-sample in the rare case span doesn't divide 2^32.
-    const limit = (0x100000000 - (0x100000000 % span)) >>> 0;
+    // If span evenly divides 2^32, every uint32 is unbiased — no rejection
+    // needed. The previous version computed `(0x100000000 - 0) >>> 0` which
+    // truncates 2^32 to 0 and made the rejection loop run forever for any
+    // span that's a divisor of 2^32 (e.g. powers of 2).
+    const remainder = 0x100000000 % span;
+    if (remainder === 0) {
+      return min + (this.next() % span);
+    }
+    // Unbiased rejection-sample. `limit` is below 2^32 so it fits safely in a
+    // Number without needing the >>> 0 truncation.
+    const limit = 0x100000000 - remainder;
     let r: number;
     do {
       r = this.next();

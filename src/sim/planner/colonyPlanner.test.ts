@@ -14,23 +14,36 @@ describe("ColonyPlanner", () => {
     expect(planner.blueprints.length).toBe(0);
   });
 
-  it("emits a bedroom blueprint within an in-game hour", () => {
+  it("emits at least one blueprint within an in-game hour", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 60; t++) {
       planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
     }
-    expect(planner.blueprints.length).toBe(1);
-    const bp = planner.blueprints[0];
-    expect(bp.kind).toBe("bedroom");
-    expect(bp.cavity.length).toBe(bp.width * bp.height);
-    // All cavity tiles must currently be solid.
-    for (let i = 0; i < bp.cavity.length; i++) {
-      const c = bp.cavity[i];
-      const x = c & 0xffff;
-      const y = (c >>> 16) & 0xffff;
-      expect(w.grid.isSolid(x, y)).toBe(true);
+    // Planner allows multiple active blueprints (up to MAX_ACTIVE = 3) so it
+    // can saturate work for several dwarves at once.
+    expect(planner.blueprints.length).toBeGreaterThanOrEqual(1);
+    expect(planner.blueprints.length).toBeLessThanOrEqual(3);
+    // All cavity tiles in active blueprints must currently be solid.
+    for (const b of planner.blueprints) {
+      expect(b.cavity.length).toBe(b.width * b.height);
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        const x = c & 0xffff;
+        const y = (c >>> 16) & 0xffff;
+        expect(w.grid.isSolid(x, y)).toBe(true);
+      }
     }
+  });
+
+  it("emissions at population 1 are bedrooms only", () => {
+    const w = generateWorld({ seed: 17, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    for (let t = 1; t <= 60; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1 });
+    }
+    expect(planner.blueprints.length).toBeGreaterThanOrEqual(1);
+    for (const b of planner.blueprints) expect(b.kind).toBe("bedroom");
   });
 
   it("emits multiple blueprints as completed cavities free the gate (population 7)", () => {
@@ -88,6 +101,45 @@ describe("ColonyPlanner", () => {
       }
     }
     expect(planner.completed).toBeLessThanOrEqual(2);
+  });
+
+  it("emits a dining hall once population reaches 4", () => {
+    const w = generateWorld({ seed: 41, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    // Hand-excavate as before so the planner can keep emitting.
+    for (let t = 1; t <= 600; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 4 });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    expect(planner.blueprints.some((b) => b.kind === "dining_hall")).toBe(true);
+  });
+
+  it("emits a stockpile once population reaches 5 and the dining hall is dug", () => {
+    const w = generateWorld({ seed: 43, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    for (let t = 1; t <= 800; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 5 });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    const kinds = planner.blueprints.map((b) => b.kind);
+    expect(kinds).toContain("dining_hall");
+    expect(kinds).toContain("stockpile");
   });
 
   it("placement is deterministic across runs with the same seed", () => {

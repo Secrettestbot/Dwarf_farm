@@ -1,18 +1,24 @@
 // The Colony Planner is the colony's collective intention. It periodically
 // asks "what does the colony need next?" and, when a need crosses a threshold,
 // emits a Blueprint — a specific cavity at a specific location with a specific
-// purpose. Dwarves consult the planner via chooseJob: they only mine inside
-// active blueprints. Without the planner, no rock is ever broken.
+// purpose. Dwarves consult the planner via chooseTask: they only mine inside
+// active blueprints.
 //
-// Session 1 implements the smallest useful version: one signal (population vs.
-// rooms-built, here approximated as in-game days elapsed for visible progress)
-// plus one blueprint kind (bedroom, a 4×3 cavity placed by a heuristic that
-// prefers locations close to the existing colony, downward, and not
-// overlapping prior blueprints). The richer signal mix (geology, architectural
-// sense, Architect dwarf) lands in sessions 2–4 per the plan.
+// v2 (this session) adds:
+//   - Multiple kinds: bedroom, dining_hall, stockpile, corridor.
+//   - Multiple active blueprints (up to MAX_ACTIVE_BLUEPRINTS) so a colony of
+//     several dwarves can divide work and the player sees parallel progress.
+//   - Population-driven kind dispatch: at certain pop thresholds the planner
+//     emits the colony's first dining hall, then its first stockpile, etc.
+//   - Per-kind placement heuristics: bedrooms cluster near the spawn axis,
+//     dining halls bias to one side of the spawn, stockpiles to the other,
+//     so the colony develops a recognizable "shape" rather than a jumble.
+//
+// The richer signal mix (geology, the Architect dwarf, soft tendency dials)
+// arrives in later sessions per the roadmap.
 
 import { TileGrid } from "../world/grid";
-import { Blueprint, BlueprintKind, isComplete, rectCavity, packCell } from "./blueprint";
+import { Blueprint, BlueprintKind, isComplete, rectCavity } from "./blueprint";
 
 export interface PlannerContext {
   grid: TileGrid;
@@ -24,79 +30,109 @@ export interface PlannerContext {
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
 
-const BEDROOM_W = 4;
-const BEDROOM_H = 3;
-const SEARCH_RADIUS = 50;
+const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number }> = {
+  bedroom: { w: 4, h: 3, priority: 1 },
+  dining_hall: { w: 8, h: 5, priority: 3 },
+  stockpile: { w: 5, h: 4, priority: 2 },
+  corridor: { w: 4, h: 2, priority: 4 },
+  stairwell: { w: 2, h: 6, priority: 5 },
+};
+
+const SEARCH_RADIUS = 60;
+const MAX_ACTIVE_BLUEPRINTS = 3;
+
+/** Architectural style preference — biases planner placement decisions. */
+interface StylePref {
+  /**
+   * Horizontal bias for each kind, expressed as a sign factor.
+   * -1 = prefer left of spawn, +1 = prefer right, 0 = no bias.
+   */
+  bedroom: number;
+  dining_hall: number;
+  stockpile: number;
+}
+
+const DEFAULT_STYLE: StylePref = {
+  // Bedrooms cluster on both sides; we let the candidate scorer break ties.
+  bedroom: 0,
+  // Dining hall on one side, stockpile on the other, gives the colony a spine.
+  dining_hall: -1,
+  stockpile: +1,
+};
 
 export class ColonyPlanner {
   blueprints: Blueprint[] = [];
   nextId = 1;
-  // Ticks-since-last-evaluation accumulator.
   private accum = 0;
-  // Number of blueprints completed (for the gating signal).
   completed = 0;
-  // Spatial index: tile-index → blueprintId. -1 means no blueprint claims this
-  // tile. Lazily allocated when grid size becomes known.
+
+  // Per-kind completed counts so dispatch can ask "do we have a dining hall yet?".
+  completedByKind: Record<string, number> = {};
+
+  // Spatial index: tile-index → blueprintId. -1 = unclaimed. Lazily allocated.
   private claimedBy: Int32Array | null = null;
   private claimedW = 0;
 
   /** Run one planning step. Called from sim.tick BEFORE job assignment. */
   tick(ctx: PlannerContext): void {
     this.accum++;
-    // Sweep complete blueprints first so completion immediately frees up the
-    // "no active blueprint" gate for new emission.
     this.harvestCompleted(ctx.grid);
 
     if (this.accum < PLAN_INTERVAL_TICKS) return;
     this.accum = 0;
 
-    if (this.shouldEmitBedroom(ctx)) {
-      this.placeBedroom(ctx);
+    // Allow several active blueprints so the colony actually progresses with
+    // multiple dwarves, but cap so the planner doesn't sprawl.
+    while (this.activeCount() < MAX_ACTIVE_BLUEPRINTS) {
+      const kind = this.pickNextKind(ctx);
+      if (!kind) break;
+      const placed = this.placeRoom(ctx, kind);
+      if (!placed) break; // couldn't find a spot for this kind right now; bail.
     }
   }
 
   /**
-   * Gating signal v1 (population): the planner aims for ~1.5 bedrooms per
-   * dwarf so individual rooms (later sessions: bed + chest + door) can be
-   * assigned per-dwarf and the colony has a comfortable amount of common
-   * space. We allow only one *active* blueprint at a time so the dwarves
-   * focus their effort and the player can read the colony's intent at a
-   * glance. The cap (active + completed ≤ target) means the planner stops
-   * emitting once the population is housed; new dwarves (immigrants, births
-   * — both arriving in later sessions) raise the target and resume work.
+   * Decide what kind of room to emit next, in priority order:
+   *   1. Dining hall when population ≥ 4 and none exists.
+   *   2. Stockpile when population ≥ 5 and none exists.
+   *   3. Bedrooms until ceil(pop × 1.5) bedrooms exist.
+   * Returns null if nothing is needed right now.
    */
-  private shouldEmitBedroom(ctx: PlannerContext): boolean {
-    const active = this.blueprints.some((b) => b.status === "digging");
-    if (active) return false;
+  private pickNextKind(ctx: PlannerContext): BlueprintKind | null {
     const pop = Math.max(1, ctx.population);
-    const targetRooms = Math.max(2, Math.ceil(pop * 1.5));
-    return this.completed + 1 <= targetRooms;
+    const built = this.completedByKind;
+    const active = this.activeByKind();
+
+    // Priority 1: dining hall for ≥4 dwarves.
+    if (pop >= 4 && (built["dining_hall"] ?? 0) === 0 && (active["dining_hall"] ?? 0) === 0) {
+      return "dining_hall";
+    }
+    // Priority 2: stockpile for ≥5 dwarves.
+    if (pop >= 5 && (built["stockpile"] ?? 0) === 0 && (active["stockpile"] ?? 0) === 0) {
+      return "stockpile";
+    }
+    // Priority 3: bedrooms up to target.
+    const bedroomTarget = Math.max(2, Math.ceil(pop * 1.5));
+    const bedroomTotal = (built["bedroom"] ?? 0) + (active["bedroom"] ?? 0);
+    if (bedroomTotal < bedroomTarget) return "bedroom";
+
+    return null;
   }
 
-  /**
-   * Heuristic placement: scan candidate origins inside SEARCH_RADIUS of spawn.
-   * A candidate is valid iff (a) all of its cavity tiles are solid, (b) the
-   * cavity touches at least one walkable tile (so dwarves can reach a face),
-   * (c) it doesn't overlap an existing blueprint. The score prefers locations
-   * close to spawn and below it (the colony grows downward and outward like
-   * a real dwarf hold). Determinism: scan order is fixed; ties broken by
-   * (originY, originX, ...) — never by Math.random.
-   */
-  private placeBedroom(ctx: PlannerContext): Blueprint | null {
+  /** Find a placement and emit a blueprint of the given kind. */
+  private placeRoom(ctx: PlannerContext, kind: BlueprintKind): Blueprint | null {
+    const dims = ROOM_DIMS[kind];
     const { grid, spawn } = ctx;
     let best: { x: number; y: number; score: number } | null = null;
+
+    const xBias = (DEFAULT_STYLE as unknown as Record<string, number>)[kind] ?? 0;
 
     for (let dy = -SEARCH_RADIUS; dy <= SEARCH_RADIUS; dy++) {
       for (let dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS; dx++) {
         const ox = spawn.x + dx;
         const oy = spawn.y + dy;
-        if (!this.candidateValid(grid, ox, oy, BEDROOM_W, BEDROOM_H)) continue;
-        // Score: closer to spawn is better; below-spawn gets a bonus; small
-        // additional penalty if directly above spawn (we prefer sideways/down).
-        const distSq = dx * dx + dy * dy;
-        let score = -distSq;
-        if (dy > 0) score += 60;
-        if (dy < -1) score -= 25;
+        if (!this.candidateValid(grid, ox, oy, dims.w, dims.h)) continue;
+        const score = this.scoreCandidate(kind, dx, dy, xBias);
         if (best === null) {
           best = { x: ox, y: oy, score };
         } else if (
@@ -110,17 +146,17 @@ export class ColonyPlanner {
 
     if (!best) return null;
 
-    const cavity = rectCavity(best.x, best.y, BEDROOM_W, BEDROOM_H);
+    const cavity = rectCavity(best.x, best.y, dims.w, dims.h);
     const bp: Blueprint = {
       id: this.nextId++,
-      kind: "bedroom" as BlueprintKind,
+      kind,
       originX: best.x,
       originY: best.y,
-      width: BEDROOM_W,
-      height: BEDROOM_H,
+      width: dims.w,
+      height: dims.h,
       cavity,
       status: "digging",
-      priority: 1,
+      priority: dims.priority,
       createdTick: ctx.tick,
     };
     this.blueprints.push(bp);
@@ -129,8 +165,36 @@ export class ColonyPlanner {
     return bp;
   }
 
+  /**
+   * Scoring per kind:
+   *   - bedroom: prefer close to spawn, prefer below or alongside, light
+   *     bias on whichever side has fewer bedrooms.
+   *   - dining_hall: very strong "close to spawn, prefer left of spawn".
+   *   - stockpile: "close to spawn, prefer right of spawn".
+   *   - corridor: shortest viable connector (handled separately later).
+   *   - stairwell: descending bias.
+   */
+  private scoreCandidate(kind: BlueprintKind, dx: number, dy: number, xBias: number): number {
+    const distSq = dx * dx + dy * dy;
+    let score = -distSq;
+    // Slight downward bias for everything — the colony grows into the mountain.
+    if (dy > 0) score += 40;
+    if (dy < -2) score -= 40;
+
+    // Apply per-kind side bias.
+    if (xBias !== 0) {
+      // Reward placement on the preferred side, gently.
+      score += xBias * dx * 2;
+    }
+
+    if (kind === "stairwell") {
+      // Stairwells want to be deep — much stronger downward bias.
+      score += dy * 4;
+    }
+    return score;
+  }
+
   private candidateValid(grid: TileGrid, ox: number, oy: number, w: number, h: number): boolean {
-    // All cavity tiles must be solid (we excavate them) AND not already claimed.
     for (let y = oy; y < oy + h; y++) {
       for (let x = ox; x < ox + w; x++) {
         if (!grid.inBounds(x, y)) return false;
@@ -138,16 +202,14 @@ export class ColonyPlanner {
         if (this.isClaimed(grid, x, y)) return false;
       }
     }
-    // At least one tile in the 1-tile border must be walkable (an existing
-    // floor we can connect to).
+    // At least one tile in the 1-tile border must be walkable so there's an
+    // approach — without this, a dwarf can't reach any cavity tile.
     let touchesWalkable = false;
     for (let y = oy - 1; y <= oy + h && !touchesWalkable; y++) {
       for (let x = ox - 1; x <= ox + w && !touchesWalkable; x++) {
         if (!grid.inBounds(x, y)) continue;
         if (x >= ox && x < ox + w && y >= oy && y < oy + h) continue;
-        if (grid.isWalkable(x, y)) {
-          touchesWalkable = true;
-        }
+        if (grid.isWalkable(x, y)) touchesWalkable = true;
       }
     }
     return touchesWalkable;
@@ -170,25 +232,30 @@ export class ColonyPlanner {
     return n;
   }
 
+  private activeByKind(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const b of this.blueprints) {
+      if (b.status !== "digging") continue;
+      out[b.kind] = (out[b.kind] ?? 0) + 1;
+    }
+    return out;
+  }
+
   /**
    * Sweep blueprints whose cavity is fully excavated and mark them complete.
-   * In a later session this is also where "build the room" jobs get queued
-   * (place a bed, mark the room as a Bedroom for the room-quality system).
    */
   private harvestCompleted(grid: TileGrid): void {
     for (const b of this.blueprints) {
       if (b.status === "digging" && isComplete(b, grid)) {
         b.status = "complete";
         this.completed++;
-        // Clear designation overlay since the cavity is no longer being dug.
+        this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
         for (let i = 0; i < b.cavity.length; i++) {
           const c = b.cavity[i];
           const x = c & 0xffff;
           const y = (c >>> 16) & 0xffff;
           grid.setDesignation(x, y, 0);
         }
-        // Note: we leave the claimedBy entries in place so future placements
-        // continue to avoid stomping the same footprint (rooms persist).
       }
     }
   }
@@ -201,7 +268,6 @@ export class ColonyPlanner {
       arr.fill(-1);
       this.claimedBy = arr;
       this.claimedW = grid.width;
-      // Re-seed from existing blueprints (e.g. after restore).
       for (const b of this.blueprints) {
         for (let i = 0; i < b.cavity.length; i++) {
           const c = b.cavity[i];
@@ -229,10 +295,6 @@ export class ColonyPlanner {
     }
   }
 
-  /**
-   * Set or clear the Designation overlay on cavity tiles so the renderer can
-   * show the planned cavity. Called when a blueprint is added / completed.
-   */
   private markDesignations(grid: TileGrid, b: Blueprint, on: boolean): void {
     for (let i = 0; i < b.cavity.length; i++) {
       const c = b.cavity[i];
@@ -244,17 +306,32 @@ export class ColonyPlanner {
 
   /**
    * Re-apply spatial index + designation overlay after restore from save.
-   * Called by snapshot.restore once the planner has been populated.
    */
   rehydrate(grid: TileGrid): void {
     this.claimedBy = null;
     this.ensureClaimedIndex(grid);
+    // Rebuild completedByKind.
+    this.completedByKind = {};
     for (const b of this.blueprints) {
+      if (b.status === "complete") {
+        this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
+      }
       if (b.status === "digging") this.markDesignations(grid, b, true);
     }
   }
+
+  /** A snapshot of room counts for the HUD / digest rendering. */
+  buildSummary(): { kind: BlueprintKind; active: number; complete: number }[] {
+    const kinds: BlueprintKind[] = ["bedroom", "dining_hall", "stockpile", "corridor", "stairwell"];
+    const active = this.activeByKind();
+    const out: { kind: BlueprintKind; active: number; complete: number }[] = [];
+    for (const k of kinds) {
+      const a = active[k] ?? 0;
+      const c = this.completedByKind[k] ?? 0;
+      if (a + c > 0) out.push({ kind: k, active: a, complete: c });
+    }
+    return out;
+  }
 }
 
-// Re-exports for convenience.
-export { packCell };
 export type { Blueprint };

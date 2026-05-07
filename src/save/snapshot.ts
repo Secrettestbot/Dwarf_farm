@@ -28,7 +28,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
   const overrides = encodeOverrides(input.sim.grid, baseline.grid);
 
   const dwarves: SavedDwarf[] = [];
-  input.sim.forEachDwarf((_id, pos, dw) => {
+  input.sim.forEachDwarf((id, pos, dw) => {
+    const n = input.sim.needs.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -38,6 +39,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       profession: dw.profession,
       age: dw.age,
       lastJobTick: dw.lastJobTick,
+      needs: n
+        ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
+        : undefined,
     });
   });
 
@@ -119,6 +123,7 @@ export function restore(save: SaveV1): SimWorld {
       skills: d.skills ?? {},
       profession: d.profession ?? "Worker",
       age: d.age ?? 25,
+      initialNeeds: d.needs,
     });
     sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
   }
