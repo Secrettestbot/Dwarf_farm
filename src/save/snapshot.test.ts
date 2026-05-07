@@ -25,6 +25,16 @@ function hashSim(sim: SimWorld): number {
       h = Math.imul(h, 16777619);
     }
   });
+  for (const b of sim.planner.blueprints) {
+    h ^= b.id;
+    h = Math.imul(h, 16777619);
+    h ^= b.originX;
+    h = Math.imul(h, 16777619);
+    h ^= b.originY;
+    h = Math.imul(h, 16777619);
+    h ^= b.status === "complete" ? 1 : 0;
+    h = Math.imul(h, 16777619);
+  }
   h ^= sim.tick;
   h = Math.imul(h, 16777619);
   return h >>> 0;
@@ -51,5 +61,18 @@ describe("snapshot/restore", () => {
       tick(b);
     }
     expect(hashSim(b)).toBe(hashSim(a));
+  });
+
+  it("preserves blueprints across save/restore", () => {
+    const a = buildSim(42);
+    for (let i = 0; i < 200; i++) tick(a);
+    expect(a.planner.blueprints.length).toBeGreaterThan(0);
+    const save = snapshot({ sim: a, slotId: "slot0", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const b = restore(save);
+    expect(b.planner.blueprints.length).toBe(a.planner.blueprints.length);
+    expect(b.planner.blueprints[0].originX).toBe(a.planner.blueprints[0].originX);
+    expect(b.planner.blueprints[0].originY).toBe(a.planner.blueprints[0].originY);
+    expect(b.planner.nextId).toBe(a.planner.nextId);
+    expect(b.planner.completed).toBe(a.planner.completed);
   });
 });

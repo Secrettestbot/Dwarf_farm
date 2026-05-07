@@ -7,13 +7,10 @@ describe("save codec", () => {
   it("round-trips with no changes producing a tiny payload", () => {
     const a = generateWorld({ seed: 1, width: 200, height: 500 });
     const b = generateWorld({ seed: 1, width: 200, height: 500 });
-    const bytes = encodeOverrides(a.grid, b.grid, []);
-    // Spawn-cavern carving makes a small delta vs raw pre-carve baseline; both
-    // grids run carving so the delta should be 0. Header (8) + zones (2) = 10.
-    expect(bytes.length).toBe(10);
-    const decoded = decodeOverrides(bytes);
-    decoded.apply(b.grid);
-    expect(decoded.zones.length).toBe(0);
+    const bytes = encodeOverrides(a.grid, b.grid);
+    // No deltas: header (8 bytes) is the entire payload.
+    expect(bytes.length).toBe(8);
+    decodeOverrides(bytes).apply(b.grid);
   });
 
   it("preserves modifications across encode/decode", () => {
@@ -24,14 +21,11 @@ describe("save codec", () => {
     for (let i = 0; i < 50; i++) {
       a.grid.setTile(50 + i, 100, TileType.CorridorFloor);
     }
-    const zones = [{ x0: 10, y0: 30, x1: 40, y1: 60 }];
-    const bytes = encodeOverrides(a.grid, baseline.grid, zones);
+    const bytes = encodeOverrides(a.grid, baseline.grid);
 
     // Apply the delta to a fresh baseline regen.
     const restored = generateWorld({ seed: 42, width: 200, height: 500 });
-    const decoded = decodeOverrides(bytes);
-    decoded.apply(restored.grid);
-    expect(decoded.zones).toEqual(zones);
+    decodeOverrides(bytes).apply(restored.grid);
     for (let i = 0; i < 50; i++) {
       expect(restored.grid.getTile(50 + i, 100)).toBe(TileType.CorridorFloor);
     }
@@ -46,7 +40,7 @@ describe("save codec", () => {
         a.grid.setTile(x, y, TileType.CorridorFloor);
       }
     }
-    const bytes = encodeOverrides(a.grid, baseline.grid, []);
+    const bytes = encodeOverrides(a.grid, baseline.grid);
     expect(bytes.length).toBeLessThan(2000);
   });
 });

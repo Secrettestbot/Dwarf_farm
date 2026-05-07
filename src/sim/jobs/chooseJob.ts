@@ -1,8 +1,11 @@
 import { SimWorld } from "../world/simWorld";
 
-// BFS outward from a dwarf to find the nearest reachable solid tile that has at
-// least one walkable neighbor (so a dwarf can stand next to it). Deterministic:
-// neighbor expansion order is fixed, ties broken by (y, x).
+// BFS outward from a dwarf to find the nearest reachable solid tile that is
+// claimed by an active blueprint AND has at least one walkable neighbor (so a
+// dwarf can stand next to it). Tiles outside any blueprint are ignored —
+// dwarves never strip-mine: they only excavate what the Colony Planner has
+// committed the colony to. Determinism: neighbor expansion order is fixed,
+// ties broken by (y, x) and then by best-distance preservation.
 
 const DX = [1, -1, 0, 0];
 const DY = [0, 0, 1, -1];
@@ -12,9 +15,10 @@ export interface JobTarget {
   y: number;
 }
 
-export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes = 2000): JobTarget | null {
+export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes = 4000): JobTarget | null {
   const grid = sim.grid;
   if (!grid.inBounds(sx, sy)) return null;
+  if (!sim.planner.hasActive()) return null;
 
   // Generation-counter "seen" map: Int32Array can hold 2^31 generations before
   // wrapping, so resets are effectively never needed.
@@ -42,7 +46,6 @@ export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes =
   let bestY = -1;
   let bestDist = Infinity;
   let visited = 0;
-  const preferZones = !sim.digZones.isEmpty();
 
   while (qHead < qTail && visited < maxNodes) {
     const idx = queue[qHead++];
@@ -59,11 +62,10 @@ export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes =
       seen[nIdx] = gen;
 
       if (grid.isSolid(nx, ny)) {
-        // Solid neighbor: candidate target if (cx, cy) is walkable
-        // (the dwarf needs somewhere to stand to swing a pick).
+        // Solid neighbor: candidate target only if it's inside an active
+        // blueprint AND (cx, cy) is a walkable spot the dwarf can stand on.
+        if (!sim.planner.containsTile(grid, nx, ny)) continue;
         if (grid.isWalkable(cx, cy)) {
-          const inZone = preferZones && sim.digZones.contains(nx, ny);
-          if (preferZones && !inZone) continue;
           const dx = nx - sx;
           const dy = ny - sy;
           const dist = dx * dx + dy * dy;
@@ -89,18 +91,7 @@ export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes =
     if (bestX !== -1 && visited > 96) break;
   }
 
-  if (bestX === -1) {
-    // Zones excluded every reachable target — fall back to ignoring zones so
-    // the dwarf still has something to do.
-    if (preferZones) {
-      const oldZones = sim.digZones.zones;
-      sim.digZones.zones = [];
-      const fallback = findMineTarget(sim, sx, sy, maxNodes);
-      sim.digZones.zones = oldZones;
-      return fallback;
-    }
-    return null;
-  }
+  if (bestX === -1) return null;
   return { x: bestX, y: bestY };
 }
 
