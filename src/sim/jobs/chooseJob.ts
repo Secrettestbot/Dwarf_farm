@@ -63,8 +63,11 @@ export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes =
 
       if (grid.isSolid(nx, ny)) {
         // Solid neighbor: candidate target only if it's inside an active
-        // blueprint AND (cx, cy) is a walkable spot the dwarf can stand on.
+        // blueprint AND (cx, cy) is a walkable spot the dwarf can stand on
+        // AND the tile isn't already claimed by another dwarf — otherwise
+        // every dwarf would race to the same nearest mineable tile.
         if (!sim.planner.containsTile(grid, nx, ny)) continue;
+        if (sim.isMineClaimed(nx, ny)) continue;
         if (grid.isWalkable(cx, cy)) {
           const dx = nx - sx;
           const dy = ny - sy;

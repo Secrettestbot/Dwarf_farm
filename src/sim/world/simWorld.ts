@@ -27,6 +27,14 @@ export class SimWorld {
   // Forked RNG streams.
   readonly aiRng: Rng;
   readonly worldRng: Rng;
+  readonly plannerRng: Rng;
+
+  // Mining-target claims keyed by packed (y << 16 | x). Cleared when the
+  // owning dwarf's mine job is removed (success, abort, or replan). Without
+  // this, every idle dwarf's chooseTask BFS finds the same nearest tile and
+  // all 7 founders pile onto a single mining target — defeating the point
+  // of having several dwarves at all.
+  readonly mineClaims: Set<number> = new Set();
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
@@ -51,6 +59,7 @@ export class SimWorld {
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");
+    this.plannerRng = root.fork("planner");
     this.astar = new AStar(grid.width, grid.height);
   }
 
@@ -94,5 +103,19 @@ export class SimWorld {
       const dw = this.dwarf.get(e);
       if (pos && dw) fn(e, pos, dw);
     }
+  }
+
+  // ---- Mining claim helpers (dwarves disperse to different targets) ------
+
+  claimMineTarget(x: number, y: number): void {
+    this.mineClaims.add((y << 16) | x);
+  }
+
+  releaseMineTarget(x: number, y: number): void {
+    this.mineClaims.delete((y << 16) | x);
+  }
+
+  isMineClaimed(x: number, y: number): boolean {
+    return this.mineClaims.has((y << 16) | x);
   }
 }

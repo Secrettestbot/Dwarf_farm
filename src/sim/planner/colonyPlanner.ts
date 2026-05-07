@@ -22,6 +22,7 @@
 
 import { TileGrid } from "../world/grid";
 import { TileType } from "../world/tiles";
+import { Rng } from "../rng";
 import { Blueprint, BlueprintKind, isComplete, rectCavity } from "./blueprint";
 
 export interface PlannerContext {
@@ -30,6 +31,9 @@ export interface PlannerContext {
   tick: number;
   /** Live colony population — drives how aggressively the planner expands. */
   population: number;
+  /** Forked, deterministic RNG used to vary placement (corridor length,
+   * width, direction sampling). State is part of SimWorld and serialized. */
+  rng: Rng;
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
@@ -82,6 +86,13 @@ const CORRIDOR_DIRS: CorridorDir[] = [
 const REACH_DIRS: ReadonlyArray<readonly [number, number]> = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
 ];
+
+/** Perpendicular direction vector used to widen 2-wide corridors. */
+function perpendicularOf(dx: number, dy: number): { dx: number; dy: number } {
+  // Rotate 90° clockwise. For vertical corridors this gives a perpendicular
+  // along the x-axis; for horizontal, along the y-axis.
+  return { dx: -dy, dy: dx };
+}
 
 export class ColonyPlanner {
   blueprints: Blueprint[] = [];
@@ -230,8 +241,23 @@ export class ColonyPlanner {
    * preference, length achieved, and distance from spawn.
    */
   private placeCorridor(ctx: PlannerContext): Blueprint | null {
-    const { grid, spawn } = ctx;
-    let best: { startX: number; startY: number; len: number; dx: number; dy: number; score: number } | null = null;
+    const { grid, spawn, rng } = ctx;
+    // Per-emission variation. 30% chance of a 2-wide artery; otherwise 1.
+    const wantWidth = rng.nextFloat() < 0.3 ? 2 : 1;
+    const wantMaxLen = CORRIDOR_MIN_LEN + rng.nextRange(0, CORRIDOR_MAX_LEN - CORRIDOR_MIN_LEN + 1);
+
+    interface Candidate {
+      startX: number;
+      startY: number;
+      perpDx: number;
+      perpDy: number;
+      len: number;
+      dx: number;
+      dy: number;
+      width: number;
+      score: number;
+    }
+    const candidates: Candidate[] = [];
 
     for (let wy = -CORRIDOR_SEARCH_RADIUS; wy <= CORRIDOR_SEARCH_RADIUS; wy++) {
       for (let wx = -CORRIDOR_SEARCH_RADIUS; wx <= CORRIDOR_SEARCH_RADIUS; wx++) {
@@ -243,60 +269,121 @@ export class ColonyPlanner {
         // worldgen caverns the dwarves can never visit.
         if (!this.isReachable(ctx, ax, ay)) continue;
         for (const dir of CORRIDOR_DIRS) {
-          const sx = ax + dir.dx;
-          const sy = ay + dir.dy;
-          if (!grid.inBounds(sx, sy) || !grid.isSolid(sx, sy)) continue;
-          if (this.isClaimed(grid, sx, sy)) continue;
-          let len = 0;
-          for (let k = 1; k <= CORRIDOR_MAX_LEN; k++) {
-            const tx = ax + dir.dx * k;
-            const ty = ay + dir.dy * k;
-            if (!grid.inBounds(tx, ty)) break;
-            if (!grid.isSolid(tx, ty)) break;
-            if (this.isClaimed(grid, tx, ty)) break;
-            len++;
-          }
-          if (len < CORRIDOR_MIN_LEN) continue;
-          // Score blends direction preference, length achievable, distance
-          // from spawn (lightly), and a depth bonus on the corridor's exit
-          // tile so the colony reliably extends downward into the mountain
-          // rather than zig-zagging laterally near spawn.
-          const exitY = ay + dir.dy * len;
-          const depthBonus = Math.max(0, exitY - spawn.y) * 4;
-          const distSq = wx * wx + wy * wy;
-          const score = dir.pref + len * 5 - distSq * 0.1 + depthBonus;
-          if (
-            !best ||
-            score > best.score ||
-            (score === best.score && (sy < best.startY || (sy === best.startY && sx < best.startX)))
-          ) {
-            best = { startX: sx, startY: sy, len, dx: dir.dx, dy: dir.dy, score };
+          // Try the desired width first; if 2-wide doesn't fit, fall back
+          // to 1 (so we don't lose all candidates when wantWidth=2).
+          const widths = wantWidth === 2 ? [2, 1] : [1];
+          for (const tryWidth of widths) {
+            const perp = perpendicularOf(dir.dx, dir.dy);
+            const m = this.measureCorridor(grid, ax, ay, dir.dx, dir.dy, perp.dx, perp.dy, tryWidth, wantMaxLen);
+            if (m.len < CORRIDOR_MIN_LEN) continue;
+            const exitY = ay + dir.dy * m.len;
+            const depthBonus = Math.max(0, exitY - spawn.y) * 4;
+            const distSq = wx * wx + wy * wy;
+            const widthBonus = tryWidth === 2 ? 30 : 0;
+            const score = dir.pref + m.len * 5 - distSq * 0.1 + depthBonus + widthBonus;
+            candidates.push({
+              startX: m.startX,
+              startY: m.startY,
+              perpDx: perp.dx,
+              perpDy: perp.dy,
+              len: m.len,
+              dx: dir.dx,
+              dy: dir.dy,
+              width: tryWidth,
+              score,
+            });
+            break; // accept the widest fit for this (position, direction)
           }
         }
       }
     }
 
-    if (!best) return null;
+    if (candidates.length === 0) return null;
 
-    const cavity = new Int32Array(best.len);
-    for (let k = 0; k < best.len; k++) {
-      const tx = best.startX + best.dx * k;
-      const ty = best.startY + best.dy * k;
-      cavity[k] = (ty << 16) | tx;
-    }
-    let originX = best.startX;
-    let originY = best.startY;
-    let width = 1;
-    let height = best.len;
-    if (best.dx !== 0) {
-      width = best.len;
-      height = 1;
-      if (best.dx < 0) originX = best.startX - (best.len - 1);
-    } else if (best.dy < 0) {
-      originY = best.startY - (best.len - 1);
+    // Direction sampling: pick from the top-K weighted by rank. Pure argmax
+    // would always emit identical-shape corridors. Mixing in the runners-up
+    // is what makes the network feel like a network.
+    candidates.sort((a, b) =>
+      b.score - a.score ||
+      a.startY - b.startY ||
+      a.startX - b.startX,
+    );
+    const topK = Math.min(4, candidates.length);
+    const top = candidates.slice(0, topK);
+    const weights = top.map((_, i) => Math.pow(0.55, i));
+    const totalW = weights.reduce((s, w) => s + w, 0);
+    const r = rng.nextFloat() * totalW;
+    let acc = 0;
+    let chosen = top[0];
+    for (let i = 0; i < top.length; i++) {
+      acc += weights[i];
+      if (r < acc) {
+        chosen = top[i];
+        break;
+      }
     }
 
-    return this.commitBlueprint(ctx, "corridor", originX, originY, width, height, cavity);
+    // Build cavity for a width × len strip in (dx, dy) starting at the
+    // first solid tile out from the seed; the perpendicular axis covers
+    // `width` tiles.
+    const cavity = new Int32Array(chosen.len * chosen.width);
+    let idx = 0;
+    let minX = chosen.startX, maxX = chosen.startX, minY = chosen.startY, maxY = chosen.startY;
+    for (let k = 0; k < chosen.len; k++) {
+      for (let p = 0; p < chosen.width; p++) {
+        const tx = chosen.startX + chosen.dx * k + chosen.perpDx * p;
+        const ty = chosen.startY + chosen.dy * k + chosen.perpDy * p;
+        cavity[idx++] = (ty << 16) | tx;
+        if (tx < minX) minX = tx;
+        if (tx > maxX) maxX = tx;
+        if (ty < minY) minY = ty;
+        if (ty > maxY) maxY = ty;
+      }
+    }
+    return this.commitBlueprint(
+      ctx,
+      "corridor",
+      minX,
+      minY,
+      maxX - minX + 1,
+      maxY - minY + 1,
+      cavity,
+    );
+  }
+
+  /**
+   * Walk in (dx, dy) from (ax, ay) up to maxLen steps; at each step verify a
+   * `width`-wide perpendicular slab is solid + unclaimed. Returns the
+   * largest achievable length and the start cell of the corridor (one step
+   * out from the walkable seed).
+   */
+  private measureCorridor(
+    grid: TileGrid,
+    ax: number,
+    ay: number,
+    dx: number,
+    dy: number,
+    perpDx: number,
+    perpDy: number,
+    width: number,
+    maxLen: number,
+  ): { startX: number; startY: number; len: number } {
+    const startX = ax + dx;
+    const startY = ay + dy;
+    let len = 0;
+    for (let k = 1; k <= maxLen; k++) {
+      let slabOk = true;
+      for (let p = 0; p < width && slabOk; p++) {
+        const tx = ax + dx * k + perpDx * p;
+        const ty = ay + dy * k + perpDy * p;
+        if (!grid.inBounds(tx, ty)) { slabOk = false; break; }
+        if (!grid.isSolid(tx, ty)) { slabOk = false; break; }
+        if (this.isClaimed(grid, tx, ty)) { slabOk = false; break; }
+      }
+      if (!slabOk) break;
+      len++;
+    }
+    return { startX, startY, len };
   }
 
   // ---- Mine placement (cavities targeting ore veins) ---------------------
