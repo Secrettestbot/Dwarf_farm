@@ -231,8 +231,13 @@ function progressSleep(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     return;
   }
   job.progress++;
-  // Restore +1 sleep every 3 ticks of rest (so 240 ticks → +80).
-  if (job.progress % 3 === 0) {
+  // Sleeping on a bed restores ~3× faster than the bare floor — the
+  // mechanical reason a bedroom is more than just a labelled cavity.
+  const pos = sim.position.get(e);
+  const onBed = pos ? sim.grid.getTile(pos.x, pos.y) === TileType.Bed : false;
+  if (onBed) {
+    needs.sleep = Math.min(100, needs.sleep + 1);
+  } else if (job.progress % 3 === 0) {
     needs.sleep = Math.min(100, needs.sleep + 1);
   }
   if (job.progress >= SLEEP_TICKS || needs.sleep >= 95) {

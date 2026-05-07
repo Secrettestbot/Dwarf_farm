@@ -61,15 +61,17 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 }
 
 /**
- * Find a walkable tile to rest on. Preference order:
- *   1. A walkable tile inside a completed bedroom (dwarves prefer beds).
- *   2. The nearest walkable tile at all.
+ * Find a walkable tile to rest on. Preference order, strictest first:
+ *   1. An actual Bed tile (faster sleep restoration in progressSleep).
+ *   2. Any walkable tile inside a completed bedroom.
+ *   3. The nearest walkable tile at all.
  * BFS-style scan within a small radius for cheap.
  */
 function findRestSpot(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
   const grid = sim.grid;
   const planner = sim.planner;
   const R = 12;
+  let bestBed: { x: number; y: number; dist: number } | null = null;
   let bestBedroom: { x: number; y: number; dist: number } | null = null;
   let bestAny: { x: number; y: number; dist: number } | null = null;
   for (let dy = -R; dy <= R; dy++) {
@@ -78,7 +80,15 @@ function findRestSpot(sim: SimWorld, sx: number, sy: number): { x: number; y: nu
       const y = sy + dy;
       if (!grid.isWalkable(x, y)) continue;
       const dist = dx * dx + dy * dy;
-      // Inside a completed bedroom?
+      const tile = grid.getTile(x, y);
+      // Tier 1: an actual Bed.
+      if (tile === 11 /* TileType.Bed */) {
+        if (!bestBed || dist < bestBed.dist || (dist === bestBed.dist && (y < bestBed.y || (y === bestBed.y && x < bestBed.x)))) {
+          bestBed = { x, y, dist };
+        }
+        continue;
+      }
+      // Tier 2: walkable tile within a completed bedroom's footprint.
       const inBedroom = planner.blueprints.some(
         (b) =>
           b.kind === "bedroom" &&
@@ -99,6 +109,7 @@ function findRestSpot(sim: SimWorld, sx: number, sy: number): { x: number; y: nu
       }
     }
   }
+  if (bestBed) return { x: bestBed.x, y: bestBed.y };
   if (bestBedroom) return { x: bestBedroom.x, y: bestBedroom.y };
   if (bestAny) return { x: bestAny.x, y: bestAny.y };
   return null;
