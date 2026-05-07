@@ -257,7 +257,15 @@ export class ColonyPlanner {
       width: number;
       score: number;
     }
-    const candidates: Candidate[] = [];
+
+    // Collect the BEST candidate per cardinal direction. Selecting one per
+    // direction (rather than a flat top-K by score) is what enforces
+    // genuine variety: depth bias in the score makes every "down" candidate
+    // outrank every lateral one, so a flat top-K samples almost exclusively
+    // vertical strips. This way each direction competes only with itself
+    // for the best location, then we pick across directions on weighted
+    // probability — not score.
+    const bestByDir = new Map<string, Candidate>();
 
     for (let wy = -CORRIDOR_SEARCH_RADIUS; wy <= CORRIDOR_SEARCH_RADIUS; wy++) {
       for (let wx = -CORRIDOR_SEARCH_RADIUS; wx <= CORRIDOR_SEARCH_RADIUS; wx++) {
@@ -278,10 +286,13 @@ export class ColonyPlanner {
             if (m.len < CORRIDOR_MIN_LEN) continue;
             const exitY = ay + dir.dy * m.len;
             const depthBonus = Math.max(0, exitY - spawn.y) * 4;
-            const distSq = wx * wx + wy * wy;
             const widthBonus = tryWidth === 2 ? 30 : 0;
-            const score = dir.pref + m.len * 5 - distSq * 0.1 + depthBonus + widthBonus;
-            candidates.push({
+            // No distance penalty: corridors *should* reach outward. The
+            // squared penalty used previously made the score plateau around
+            // 30 tiles from spawn, so the colony stalled before reaching
+            // the ore-bearing Shallow Earth layer at y ≥ 80.
+            const score = dir.pref + m.len * 5 + depthBonus + widthBonus;
+            const cand: Candidate = {
               startX: m.startX,
               startY: m.startY,
               perpDx: perp.dx,
@@ -291,37 +302,56 @@ export class ColonyPlanner {
               dy: dir.dy,
               width: tryWidth,
               score,
-            });
+            };
+            const key = `${dir.dx},${dir.dy}`;
+            const existing = bestByDir.get(key);
+            if (
+              !existing ||
+              cand.score > existing.score ||
+              (cand.score === existing.score &&
+                (cand.startY < existing.startY ||
+                  (cand.startY === existing.startY && cand.startX < existing.startX)))
+            ) {
+              bestByDir.set(key, cand);
+            }
             break; // accept the widest fit for this (position, direction)
           }
         }
       }
     }
 
-    if (candidates.length === 0) return null;
+    if (bestByDir.size === 0) return null;
 
-    // Direction sampling: pick from the top-K weighted by rank. Pure argmax
-    // would always emit identical-shape corridors. Mixing in the runners-up
-    // is what makes the network feel like a network.
-    candidates.sort((a, b) =>
-      b.score - a.score ||
-      a.startY - b.startY ||
-      a.startX - b.startX,
-    );
-    const topK = Math.min(4, candidates.length);
-    const top = candidates.slice(0, topK);
-    const weights = top.map((_, i) => Math.pow(0.55, i));
-    const totalW = weights.reduce((s, w) => s + w, 0);
-    const r = rng.nextFloat() * totalW;
-    let acc = 0;
-    let chosen = top[0];
-    for (let i = 0; i < top.length; i++) {
-      acc += weights[i];
-      if (r < acc) {
-        chosen = top[i];
-        break;
+    // Pick a direction with fixed weights so each emission has a real
+    // chance of going laterally rather than always descending. Up direction
+    // gets 0% weight — it's only ever picked as a last resort if no other
+    // direction has any valid candidate.
+    const dirWeights: Array<{ key: string; weight: number }> = [
+      { key: "0,1", weight: 50 },   // down
+      { key: "1,0", weight: 25 },   // right
+      { key: "-1,0", weight: 25 },  // left
+    ];
+    const validWeighted = dirWeights.filter((d) => bestByDir.has(d.key));
+    let chosen: Candidate | undefined;
+    if (validWeighted.length > 0) {
+      const totalW = validWeighted.reduce((s, d) => s + d.weight, 0);
+      const r = rng.nextFloat() * totalW;
+      let acc = 0;
+      let pickedKey = validWeighted[0].key;
+      for (const d of validWeighted) {
+        acc += d.weight;
+        if (r < acc) {
+          pickedKey = d.key;
+          break;
+        }
       }
+      chosen = bestByDir.get(pickedKey);
+    } else {
+      // Last resort: try whatever's left (e.g. only up has a valid run).
+      const remaining = Array.from(bestByDir.values()).sort((a, b) => b.score - a.score);
+      chosen = remaining[0];
     }
+    if (!chosen) return null;
 
     // Build cavity for a width × len strip in (dx, dy) starting at the
     // first solid tile out from the seed; the perpendicular axis covers
