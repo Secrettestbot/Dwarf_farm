@@ -5,6 +5,11 @@ export const TICKS_PER_SECOND_AT_1X = 6;
 export const TICKS_PER_HOUR = 60;
 export const TICKS_PER_DAY = TICKS_PER_HOUR * 24;
 
+// GDD §3.1: 1 in-game year ≈ 96 real minutes at 1× = 4 in-game seasons of
+// ~24 real minutes (~6 in-game days each), so 24 in-game days per year.
+// Dwarves age accordingly (founders age 25 = 25 × TICKS_PER_YEAR ago).
+export const TICKS_PER_YEAR = TICKS_PER_DAY * 24;
+
 export const SPEED_LEVELS = [0, 1, 4, 16] as const;
 export type SpeedLevel = (typeof SPEED_LEVELS)[number];
 

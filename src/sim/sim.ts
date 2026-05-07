@@ -5,6 +5,7 @@ import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
 import { narrateOreFirstStrike } from "./events/narrator";
+import { TICKS_PER_YEAR } from "./time";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -36,10 +37,25 @@ export function tick(sim: SimWorld): void {
     rng: sim.plannerRng,
     events: sim.events,
   });
+  yearRolloverSystem(sim);
   needsSystem(sim);
   jobAssignmentSystem(sim);
   movementSystem(sim);
   workSystem(sim);
+}
+
+/**
+ * Emit a "Year N begins in the mountain." entry whenever the calendar
+ * crosses a year boundary. Cheap: a single integer comparison per tick.
+ */
+function yearRolloverSystem(sim: SimWorld): void {
+  const year = Math.floor(sim.tick / TICKS_PER_YEAR);
+  if (year > sim.lastYearAnnounced) {
+    sim.lastYearAnnounced = year;
+    if (year >= 1) {
+      sim.events.add(sim.tick, "milestone", `Year ${year + 1} begins in the mountain.`);
+    }
+  }
 }
 
 /**

@@ -5,6 +5,7 @@ import { TileGrid } from "./grid";
 import { ColonyPlanner } from "../planner/colonyPlanner";
 import { AStar } from "../pathing/astar";
 import { EventLog } from "../events/eventLog";
+import { TICKS_PER_YEAR } from "../time";
 
 export interface Stockpile {
   /** Generic ore tally — any TileType.Ore mined. Later sessions split into
@@ -60,6 +61,9 @@ export class SimWorld {
   // time discovery event the next time a dwarf strikes ore.
   oreEverStruck = false;
 
+  /** Last in-game year for which a year-rollover event was emitted. */
+  lastYearAnnounced = 0;
+
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
 
@@ -95,16 +99,22 @@ export class SimWorld {
     skills?: import("../dwarves/skills").SkillLevels;
     profession?: string;
     age?: number;
+    /** Optional explicit bornAtTick — used by save/restore. Otherwise we
+     * compute it from age + current tick so a freshly-spawned dwarf with
+     * age 25 has bornAtTick = sim.tick - 25 × TICKS_PER_YEAR. */
+    bornAtTick?: number;
     initialNeeds?: Partial<Needs>;
   }): EntityId {
     const e = this.ecs.create();
     this.position.set(e, { x: spec.x, y: spec.y });
+    const age = spec.age ?? 25;
+    const bornAtTick = spec.bornAtTick ?? this.tick - age * TICKS_PER_YEAR;
     this.dwarf.set(e, {
       name: spec.name,
       traitIds: spec.traitIds ?? [],
       skills: spec.skills ?? {},
       profession: spec.profession ?? "Worker",
-      age: spec.age ?? 25,
+      bornAtTick,
       lastJobTick: 0,
     });
     this.needs.set(e, {
@@ -127,6 +137,24 @@ export class SimWorld {
       const dw = this.dwarf.get(e);
       if (pos && dw) fn(e, pos, dw);
     }
+  }
+
+  /** Find the dwarf standing on (x, y), or null. Used for click-inspect. */
+  dwarfAt(x: number, y: number): EntityId | null {
+    const ents = this.dwarf.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
+      const p = this.position.get(e);
+      if (p && p.x === x && p.y === y) return e;
+    }
+    return null;
+  }
+
+  /** Compute a dwarf's current age in in-game years. */
+  ageOf(e: EntityId): number {
+    const dw = this.dwarf.get(e);
+    if (!dw) return 0;
+    return Math.max(0, Math.floor((this.tick - dw.bornAtTick) / TICKS_PER_YEAR));
   }
 
   // ---- Mining claim helpers (dwarves disperse to different targets) ------

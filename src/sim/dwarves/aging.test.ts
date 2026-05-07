@@ -1,0 +1,64 @@
+import { describe, it, expect } from "vitest";
+import { generateWorld } from "../world/worldgen";
+import { SimWorld } from "../world/simWorld";
+import { tick } from "../sim";
+import { TICKS_PER_YEAR } from "../time";
+
+function buildSim(seed: number): SimWorld {
+  const w = generateWorld({ seed, width: 200, height: 500 });
+  const sim = new SimWorld(seed, w.grid, w.surfaceY, w.spawn);
+  sim.spawnDwarf({ name: "Borin", x: w.spawn.x, y: w.spawn.y, age: 25 });
+  return sim;
+}
+
+describe("dwarf aging", () => {
+  it("reports the spawn age immediately after spawn", () => {
+    const sim = buildSim(1);
+    const e = sim.dwarf.entities[0];
+    expect(sim.ageOf(e)).toBe(25);
+  });
+
+  it("ages by one year after TICKS_PER_YEAR ticks elapse", () => {
+    const sim = buildSim(2);
+    const e = sim.dwarf.entities[0];
+    for (let i = 0; i < TICKS_PER_YEAR + 5; i++) tick(sim);
+    expect(sim.ageOf(e)).toBe(26);
+  });
+
+  it("ages multiple years correctly", () => {
+    const sim = buildSim(3);
+    const e = sim.dwarf.entities[0];
+    for (let i = 0; i < TICKS_PER_YEAR * 3 + 10; i++) tick(sim);
+    expect(sim.ageOf(e)).toBe(28);
+  });
+
+  it("emits a milestone event each new in-game year", () => {
+    const sim = buildSim(4);
+    for (let i = 0; i < TICKS_PER_YEAR * 2 + 5; i++) tick(sim);
+    const milestones = sim.events.events.filter((e) => e.category === "milestone");
+    // Two year rollovers expected: year 2 and year 3.
+    expect(milestones.length).toBeGreaterThanOrEqual(2);
+    expect(milestones[0].text).toContain("Year");
+  });
+
+  it("does not emit a year event before the first year completes", () => {
+    const sim = buildSim(5);
+    for (let i = 0; i < TICKS_PER_YEAR - 60; i++) tick(sim);
+    const milestones = sim.events.events.filter((e) => e.category === "milestone");
+    expect(milestones.length).toBe(0);
+  });
+});
+
+describe("dwarfAt hit-test", () => {
+  it("finds the dwarf at their exact position", () => {
+    const sim = buildSim(7);
+    const e = sim.dwarf.entities[0];
+    const pos = sim.position.get(e)!;
+    expect(sim.dwarfAt(pos.x, pos.y)).toBe(e);
+  });
+
+  it("returns null on an empty tile", () => {
+    const sim = buildSim(8);
+    expect(sim.dwarfAt(0, 0)).toBeNull();
+  });
+});

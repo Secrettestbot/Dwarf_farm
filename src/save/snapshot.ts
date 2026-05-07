@@ -65,7 +65,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       traitIds: dw.traitIds,
       skills: dw.skills,
       profession: dw.profession,
-      age: dw.age,
+      bornAtTick: dw.bornAtTick,
       lastJobTick: dw.lastJobTick,
       needs: n
         ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
@@ -124,6 +124,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     events: sim.events.events.map((e) => ({ tick: e.tick, category: e.category, text: e.text })),
     stockpile: { ore: sim.stockpile.ore, stone: sim.stockpile.stone, dirt: sim.stockpile.dirt },
     oreEverStruck: sim.oreEverStruck,
+    lastYearAnnounced: sim.lastYearAnnounced,
   };
 }
 
@@ -164,7 +165,9 @@ export function restore(save: SaveV1): SimWorld {
       traitIds: d.traitIds ?? [],
       skills: d.skills ?? {},
       profession: d.profession ?? "Worker",
-      age: d.age ?? 25,
+      // Prefer bornAtTick if present, else compute from legacy `age`.
+      bornAtTick: d.bornAtTick,
+      age: d.age,
       initialNeeds: d.needs,
     });
     sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
@@ -241,6 +244,7 @@ export function restore(save: SaveV1): SimWorld {
     sim.stockpile.dirt = save.stockpile.dirt;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
+  if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
 
   return sim;
 }
