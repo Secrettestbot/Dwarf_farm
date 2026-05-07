@@ -71,7 +71,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       bornAtTick: dw.bornAtTick,
       partnerIndex,
       lastJobTick: dw.lastJobTick,
-      health: h ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick } : undefined,
+      health: h
+        ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick, wasSevereWound: h.wasSevereWound }
+        : undefined,
       needs: n
         ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
         : undefined,
@@ -294,6 +296,7 @@ export function restore(save: SaveV1): SimWorld {
         hp.hp = d.health.hp;
         hp.maxHp = d.health.maxHp;
         hp.lastAttackTick = d.health.lastAttackTick;
+        hp.wasSevereWound = d.health.wasSevereWound;
       }
     }
   }

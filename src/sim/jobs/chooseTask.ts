@@ -14,6 +14,10 @@ const SOCIAL_RANGE = 10; // tiles
  * and wander like the children they are. GDD §6.1: childhood 0–18; light
  * hauling 5–18 lands once we have a hauling system. */
 const MIN_WORK_AGE = 18;
+/** A dwarf below half HP drops everything to find a bed. Recovery is much
+ * faster while sleeping (especially on a bed) so this is the sensible
+ * autonomous response. */
+const WOUNDED_HP_RATIO = 0.5;
 
 /**
  * Returns a JobAssignment proposal, or null if the dwarf should remain idle
@@ -24,8 +28,11 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   const needs = sim.needs.get(e);
   if (!pos) return null;
 
-  // 1. Critical sleep — drop everything.
-  if (needs && needs.sleep <= SLEEP_CRITICAL) {
+  // 1. Critical sleep, or a serious wound — either drops everything to find
+  //    a bed. Healing is much faster while sleeping, especially on a bed.
+  const health = sim.health.get(e);
+  const wounded = health !== undefined && health.hp < health.maxHp * WOUNDED_HP_RATIO;
+  if ((needs && needs.sleep <= SLEEP_CRITICAL) || wounded) {
     const sleepSpot = findRestSpot(sim, pos.x, pos.y);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };

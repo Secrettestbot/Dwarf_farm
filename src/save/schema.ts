@@ -40,7 +40,7 @@ export interface SavedDwarf {
     goalY: number;
   };
   /** Combat HP. Optional for back-compat with v2 saves. */
-  health?: { hp: number; maxHp: number; lastAttackTick: number };
+  health?: { hp: number; maxHp: number; lastAttackTick: number; wasSevereWound?: boolean };
 }
 
 /** Saved hostile entity. */

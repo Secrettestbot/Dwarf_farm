@@ -53,6 +53,7 @@ export function tick(sim: SimWorld): void {
   hostileSpawnSystem(sim);
   hostileMovementSystem(sim);
   combatSystem(sim);
+  healingSystem(sim);
 }
 
 // GDD §6.1 lifecycle: death at ~150 years naturally; dwarf-touched extends
@@ -537,7 +538,76 @@ function progressWander(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   }
 }
 
+// ---- Recovery ----------------------------------------------------------
+
+const HEAL_TICK_INTERVAL = 30;
+const HEAL_RATE_BED = 3;
+const HEAL_RATE_RESTING = 2; // sleeping anywhere
+const HEAL_RATE_IDLE = 1;    // wandering / socialising
+
+/**
+ * Passive recovery. Dwarves regain HP slowly — faster while sleeping,
+ * fastest while sleeping on a bed (the same mechanical reason that bedrooms
+ * matter for sleep restoration). Combat suspends healing: a dwarf adjacent
+ * to a hostile gets no benefit until the hostile is dead or out of reach.
+ *
+ * Also fires a "recovered" event when a previously-severely-wounded dwarf
+ * (HP below 30%) reaches full health, so the chronicle records the relief.
+ */
+function healingSystem(sim: SimWorld): void {
+  if (sim.tick % HEAL_TICK_INTERVAL !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  for (let i = 0; i < dwarves.length; i++) {
+    const e = dwarves[i];
+    const hp = sim.health.get(e);
+    if (!hp || hp.hp >= hp.maxHp) continue;
+    const pos = sim.position.get(e);
+    if (!pos) continue;
+
+    // Combat lock: no healing if any hostile is adjacent.
+    let inCombat = false;
+    const hEnts = sim.hostile.entities;
+    for (let j = 0; j < hEnts.length && !inCombat; j++) {
+      const hp2 = sim.position.get(hEnts[j]);
+      if (!hp2) continue;
+      if (Math.abs(hp2.x - pos.x) <= 1 && Math.abs(hp2.y - pos.y) <= 1) inCombat = true;
+    }
+    if (inCombat) continue;
+
+    let healing = 0;
+    const job = sim.job.get(e);
+    if (job?.kind === "sleep") {
+      healing = sim.grid.getTile(pos.x, pos.y) === TileType.Bed ? HEAL_RATE_BED : HEAL_RATE_RESTING;
+    } else if (!job || job.kind === "wander" || job.kind === "socialise") {
+      healing = HEAL_RATE_IDLE;
+    }
+    // Working (mining) suspends healing — the dwarf is exerting themselves.
+    if (healing === 0) continue;
+
+    hp.hp = Math.min(hp.maxHp, hp.hp + healing);
+    // Severe-recovery announcement: combat sets `wasSevereWound` when HP
+    // dropped below 30%; we clear it (and write to the chronicle) the
+    // first time the dwarf returns to full HP.
+    if (hp.wasSevereWound && hp.hp >= hp.maxHp) {
+      hp.wasSevereWound = false;
+      const dw = sim.dwarf.get(e);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} has recovered from their wounds.`,
+        );
+      }
+    }
+  }
+}
+
 // ---- Hazards: spawning, movement, combat ------------------------------
+
+/** HP fraction below which a wound counts as "severe" — used both to set
+ * the recovery-event flag in combat and to gate the "wounded seeks rest"
+ * branch in chooseTask. */
+const SEVERE_WOUND_RATIO = 0.3;
 
 const HOSTILE_SPAWN_INTERVAL_TICKS = TICKS_PER_DAY; // try once per in-game day
 const HOSTILE_SPAWN_CHANCE = 0.4;
@@ -678,6 +748,12 @@ function combatSystem(sim: SimWorld): void {
       const dwarfHealth = sim.health.get(target);
       if (dwarfHealth) {
         dwarfHealth.hp -= def.damage;
+        // Latch a "was severe wound" flag once HP crosses below 30% of
+        // max; the recovery event in healingSystem fires when the flag
+        // is still set and HP returns to full.
+        if (dwarfHealth.hp <= dwarfHealth.maxHp * SEVERE_WOUND_RATIO) {
+          dwarfHealth.wasSevereWound = true;
+        }
         if (dwarfHealth.hp <= 0) {
           killDwarf(sim, target, `slain by ${def.spawnArticle}`);
         }

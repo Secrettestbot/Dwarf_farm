@@ -58,4 +58,8 @@ export interface Health {
   maxHp: number;
   /** Last tick this entity attacked. Cooldown gating for retaliation. */
   lastAttackTick: number;
+  /** True if HP has dropped below the severe-wound threshold during the
+   * current injury episode. Cleared when the dwarf reaches full HP again
+   * (and triggers a 'recovered' event in the chronicle). */
+  wasSevereWound?: boolean;
 }
