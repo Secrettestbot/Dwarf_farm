@@ -35,17 +35,22 @@ describe("dwarf aging", () => {
   it("emits a milestone event each new in-game year", () => {
     const sim = buildSim(4);
     for (let i = 0; i < TICKS_PER_YEAR * 2 + 5; i++) tick(sim);
-    const milestones = sim.events.events.filter((e) => e.category === "milestone");
-    // Two year rollovers expected: year 2 and year 3.
-    expect(milestones.length).toBeGreaterThanOrEqual(2);
-    expect(milestones[0].text).toContain("Year");
+    // Filter to year-rollover entries specifically — other milestone
+    // categories (skill tier crossings, population thresholds) may also
+    // fire during this run.
+    const yearEvents = sim.events.events.filter(
+      (e) => e.category === "milestone" && e.text.includes("Year"),
+    );
+    expect(yearEvents.length).toBeGreaterThanOrEqual(2);
   });
 
   it("does not emit a year event before the first year completes", () => {
     const sim = buildSim(5);
     for (let i = 0; i < TICKS_PER_YEAR - 60; i++) tick(sim);
-    const milestones = sim.events.events.filter((e) => e.category === "milestone");
-    expect(milestones.length).toBe(0);
+    const yearEvents = sim.events.events.filter(
+      (e) => e.category === "milestone" && e.text.includes("Year"),
+    );
+    expect(yearEvents.length).toBe(0);
   });
 });
 

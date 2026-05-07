@@ -11,6 +11,8 @@ export interface SavedDwarf {
   y: number;
   traitIds: string[];
   skills: SkillLevels;
+  /** Per-skill cumulative XP. Optional for back-compat with v2 saves. */
+  skillXp?: Record<string, number>;
   profession: string;
   /** Tick at which this dwarf was "born". Negative for founders. */
   bornAtTick: number;
@@ -102,6 +104,7 @@ export interface SaveV1 {
   stockpile?: SavedStockpile;
   oreEverStruck?: boolean;
   lastYearAnnounced?: number;
+  populationMilestones?: number[];
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

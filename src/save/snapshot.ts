@@ -65,6 +65,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       y: pos.y,
       traitIds: dw.traitIds,
       skills: dw.skills,
+      skillXp: dw.skillXp as Record<string, number>,
       profession: dw.profession,
       bornAtTick: dw.bornAtTick,
       partnerIndex,
@@ -127,6 +128,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     stockpile: { ore: sim.stockpile.ore, stone: sim.stockpile.stone, dirt: sim.stockpile.dirt },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
+    populationMilestones: Array.from(sim.populationMilestones),
   };
 }
 
@@ -166,6 +168,7 @@ export function restore(save: SaveV1): SimWorld {
       y: d.y,
       traitIds: d.traitIds ?? [],
       skills: d.skills ?? {},
+      skillXp: d.skillXp as import("../sim/dwarves/skillProgress").SkillXp | undefined,
       profession: d.profession ?? "Worker",
       // Prefer bornAtTick if present, else compute from legacy `age`.
       bornAtTick: d.bornAtTick,
@@ -251,6 +254,9 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
+  if (save.populationMilestones) {
+    for (const m of save.populationMilestones) sim.populationMilestones.add(m);
+  }
 
   return sim;
 }

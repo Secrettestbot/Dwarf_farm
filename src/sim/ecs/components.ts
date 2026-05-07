@@ -1,6 +1,7 @@
 // Component data shapes. All POJO, all serializable.
 
 import { SkillLevels } from "../dwarves/skills";
+import { SkillXp } from "../dwarves/skillProgress";
 
 export interface Position {
   x: number;
@@ -13,6 +14,9 @@ export interface Dwarf {
   traitIds: string[];
   /** Per-skill level 1..20 (1 = Novice, 17+ = Legendary). */
   skills: SkillLevels;
+  /** Per-skill cumulative XP. Drives level advancement; level shown in
+   * `skills` is derived from this and stays in sync via the work systems. */
+  skillXp: SkillXp;
   /** Starting profession label (flavour). */
   profession: string;
   /** Tick at which this dwarf was "born". Negative means born before world

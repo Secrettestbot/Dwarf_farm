@@ -64,6 +64,9 @@ export class SimWorld {
   /** Last in-game year for which a year-rollover event was emitted. */
   lastYearAnnounced = 0;
 
+  /** Population thresholds that have already been announced as milestones. */
+  populationMilestones: Set<number> = new Set();
+
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
 
@@ -97,6 +100,7 @@ export class SimWorld {
     y: number;
     traitIds?: string[];
     skills?: import("../dwarves/skills").SkillLevels;
+    skillXp?: import("../dwarves/skillProgress").SkillXp;
     profession?: string;
     age?: number;
     /** Optional explicit bornAtTick — used by save/restore. Otherwise we
@@ -113,6 +117,7 @@ export class SimWorld {
       name: spec.name,
       traitIds: spec.traitIds ?? [],
       skills: spec.skills ?? {},
+      skillXp: spec.skillXp ?? {},
       profession: spec.profession ?? "Worker",
       bornAtTick,
       partnerId: null,

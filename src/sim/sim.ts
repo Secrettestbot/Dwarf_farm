@@ -7,6 +7,8 @@ import { EntityId } from "./ecs/world";
 import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement } from "./events/narrator";
 import { TICKS_PER_YEAR } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
+import { levelFromXp } from "./dwarves/skillProgress";
+import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -41,6 +43,7 @@ export function tick(sim: SimWorld): void {
   yearRolloverSystem(sim);
   pairingSystem(sim);
   reproductionSystem(sim);
+  populationMilestoneSystem(sim);
   deathSystem(sim);
   needsSystem(sim);
   jobAssignmentSystem(sim);
@@ -207,6 +210,32 @@ function reproductionSystem(sim: SimWorld): void {
   }
 }
 
+/**
+ * Increment a dwarf's XP in a skill. If the level advances and the new
+ * level crosses a tier boundary (Novice → Adequate, etc.), announce it
+ * in the chronicle so the player can watch their veterans become legends.
+ */
+function awardSkillXp(sim: SimWorld, e: EntityId, skill: SkillId, amount: number): void {
+  const dw = sim.dwarf.get(e);
+  if (!dw) return;
+  const oldXp = dw.skillXp[skill] ?? 0;
+  const newXp = oldXp + amount;
+  dw.skillXp[skill] = newXp;
+  const oldLevel = dw.skills[skill] ?? 1;
+  const newLevel = levelFromXp(newXp);
+  if (newLevel <= oldLevel) return;
+  dw.skills[skill] = newLevel;
+  if (skillTier(newLevel) !== skillTier(oldLevel)) {
+    const tier = skillTierLabel(newLevel);
+    const skillName = SKILLS_BY_ID[skill].name;
+    sim.events.add(
+      sim.tick,
+      "milestone",
+      `${dw.name} has become a ${tier} ${skillName}.`,
+    );
+  }
+}
+
 function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
   const mother = sim.dwarf.get(motherId);
   const father = sim.dwarf.get(fatherId);
@@ -230,6 +259,41 @@ function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void
   });
   void childId;
   sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));
+  // Population milestones (GDD §10.2). One-shot per threshold via Set.
+  checkPopulationMilestones(sim);
+}
+
+const POPULATION_MILESTONES: Array<{ count: number; text: string }> = [
+  { count: 25, text: "The fortress reaches twenty-five dwarves. The mountain echoes." },
+  { count: 50, text: "Fifty dwarves now live in the mountain. The corridors run hot with work." },
+  { count: 100, text: "A Hundred Beards. The fortress has grown to a hundred dwarves." },
+  { count: 200, text: "Two hundred dwarves. The colony is a small kingdom now." },
+];
+
+/** Year-boundary check for population milestones. Each threshold fires
+ * exactly once over a fortress's lifetime, captured in a Set on SimWorld
+ * that round-trips through save. */
+function populationMilestoneSystem(sim: SimWorld): void {
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  const pop = sim.dwarf.size();
+  for (const m of POPULATION_MILESTONES) {
+    if (pop >= m.count && !sim.populationMilestones.has(m.count)) {
+      sim.populationMilestones.add(m.count);
+      sim.events.add(sim.tick, "milestone", m.text);
+    }
+  }
+}
+
+function checkPopulationMilestones(sim: SimWorld): void {
+  // Also called on each birth so the chronicle records the milestone the
+  // year the threshold is crossed even between year-boundary checks.
+  const pop = sim.dwarf.size();
+  for (const m of POPULATION_MILESTONES) {
+    if (pop >= m.count && !sim.populationMilestones.has(m.count)) {
+      sim.populationMilestones.add(m.count);
+      sim.events.add(sim.tick, "milestone", m.text);
+    }
+  }
 }
 
 /**
@@ -385,6 +449,8 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.grid.setTile(job.targetX, job.targetY, TileType.CorridorFloor);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
     sim.releaseMineTarget(job.targetX, job.targetY);
+    // Grant mining XP and announce tier crossings ("become a Skilled Miner").
+    awardSkillXp(sim, e, "mining", 1);
 
     // Stockpile credit + first-strike narration. Real workshops in a later
     // session refine these into bars/blocks/etc.
