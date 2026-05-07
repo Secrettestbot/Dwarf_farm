@@ -15,6 +15,22 @@ export interface SavedDwarf {
   age: number;
   lastJobTick: number;
   needs?: { sleep: number; social: number; decayAccumSleep: number; decayAccumSocial: number };
+  /** In-flight job (mine / sleep / socialise / wander) at save time. */
+  job?: {
+    kind: "mine" | "sleep" | "socialise" | "wander";
+    targetX: number;
+    targetY: number;
+    progress: number;
+    /** Partner referenced by index into the saved dwarves array. */
+    partnerIndex?: number;
+  };
+  /** In-flight pathing if mid-walk at save time. */
+  pathing?: {
+    path: number[];
+    pathIndex: number;
+    goalX: number;
+    goalY: number;
+  };
 }
 
 export interface SavedBlueprint {

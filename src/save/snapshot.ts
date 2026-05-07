@@ -27,9 +27,37 @@ export function snapshot(input: SnapshotInput): SaveV1 {
   });
   const overrides = encodeOverrides(input.sim.grid, baseline.grid);
 
+  // Build an entity → dwarves[index] map first so we can encode partnerIndex
+  // on socialise jobs without holding entity references in the save.
+  const sim = input.sim;
+  const entityToIndex = new Map<number, number>();
+  let nextIdx = 0;
+  sim.forEachDwarf((id) => {
+    entityToIndex.set(id, nextIdx++);
+  });
+
   const dwarves: SavedDwarf[] = [];
-  input.sim.forEachDwarf((id, pos, dw) => {
-    const n = input.sim.needs.get(id);
+  sim.forEachDwarf((id, pos, dw) => {
+    const n = sim.needs.get(id);
+    const j = sim.job.get(id);
+    const p = sim.pathing.get(id);
+    const savedJob = j
+      ? {
+          kind: j.kind,
+          targetX: j.targetX,
+          targetY: j.targetY,
+          progress: j.progress,
+          partnerIndex: j.partnerId !== undefined ? entityToIndex.get(j.partnerId) : undefined,
+        }
+      : undefined;
+    const savedPathing = p
+      ? {
+          path: Array.from(p.path),
+          pathIndex: p.pathIndex,
+          goalX: p.goalX,
+          goalY: p.goalY,
+        }
+      : undefined;
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -42,6 +70,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       needs: n
         ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
         : undefined,
+      job: savedJob,
+      pathing: savedPathing,
     });
   });
 
@@ -113,7 +143,10 @@ export function restore(save: SaveV1): SimWorld {
     sim.worldRng.stateLo = worldState[1] >>> 0;
   }
 
-  // Restore dwarves.
+  // Restore dwarves. We spawn them in saved-array order so partnerIndex
+  // references resolve to predictable entity ids (the ECS allocates ids
+  // sequentially from the free list).
+  const spawnedEntities: number[] = [];
   for (const d of save.dwarves) {
     const e = sim.spawnDwarf({
       name: d.name,
@@ -126,6 +159,31 @@ export function restore(save: SaveV1): SimWorld {
       initialNeeds: d.needs,
     });
     sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
+    spawnedEntities.push(e);
+  }
+  // Re-apply in-flight job + pathing components so the worker / next session
+  // resumes at the exact mid-task state, not as freshly idle dwarves.
+  for (let i = 0; i < save.dwarves.length; i++) {
+    const d = save.dwarves[i];
+    const e = spawnedEntities[i];
+    if (d.job) {
+      const partnerId = d.job.partnerIndex !== undefined ? spawnedEntities[d.job.partnerIndex] : undefined;
+      sim.job.set(e, {
+        kind: d.job.kind,
+        targetX: d.job.targetX,
+        targetY: d.job.targetY,
+        progress: d.job.progress,
+        partnerId,
+      });
+    }
+    if (d.pathing) {
+      sim.pathing.set(e, {
+        path: Int32Array.from(d.pathing.path),
+        pathIndex: d.pathing.pathIndex,
+        goalX: d.pathing.goalX,
+        goalY: d.pathing.goalY,
+      });
+    }
   }
 
   // Restore Colony Planner.

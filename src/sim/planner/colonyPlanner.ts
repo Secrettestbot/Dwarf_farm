@@ -4,20 +4,24 @@
 // purpose. Dwarves consult the planner via chooseTask: they only mine inside
 // active blueprints.
 //
-// v2 (this session) adds:
-//   - Multiple kinds: bedroom, dining_hall, stockpile, corridor.
-//   - Multiple active blueprints (up to MAX_ACTIVE_BLUEPRINTS) so a colony of
-//     several dwarves can divide work and the player sees parallel progress.
-//   - Population-driven kind dispatch: at certain pop thresholds the planner
-//     emits the colony's first dining hall, then its first stockpile, etc.
-//   - Per-kind placement heuristics: bedrooms cluster near the spawn axis,
-//     dining halls bias to one side of the spawn, stockpiles to the other,
-//     so the colony develops a recognizable "shape" rather than a jumble.
+// v3 (this session) adds the colony's exploration urge:
+//   - Corridor blueprints: 1-tile-wide tunnels extending outward into solid
+//     rock, preferring downward, then lateral, then upward. They exist to
+//     extend the colony's walkable reach so future room/mine blueprints have
+//     somewhere new to land.
+//   - Mine blueprints: 3×3 cavities centered on Ore tiles within sensing
+//     range of walkable space. The colony harvests minerals by following ore
+//     veins as soon as a corridor exposes them.
+//   - Periodic corridor emission: every two completed rooms, the planner
+//     wants another corridor so the colony keeps growing outward instead of
+//     sealing itself into a tight cluster around spawn.
 //
-// The richer signal mix (geology, the Architect dwarf, soft tendency dials)
-// arrives in later sessions per the roadmap.
+// Future sessions add the geology signal proper (sense ore vein density to
+// steer corridor direction), the Architect dwarf signal (style preferences
+// per leader), and stairwells as a distinct kind for descending floors.
 
 import { TileGrid } from "../world/grid";
+import { TileType } from "../world/tiles";
 import { Blueprint, BlueprintKind, isComplete, rectCavity } from "./blueprint";
 
 export interface PlannerContext {
@@ -34,31 +38,50 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   bedroom: { w: 4, h: 3, priority: 1 },
   dining_hall: { w: 8, h: 5, priority: 3 },
   stockpile: { w: 5, h: 4, priority: 2 },
-  corridor: { w: 4, h: 2, priority: 4 },
+  // Corridors are placed by a custom routine; this dim entry just holds the
+  // per-segment metadata used by the renderer / blueprint commit path.
+  corridor: { w: 8, h: 1, priority: 4 },
+  // Mines are 3×3 cavities centered on an ore tile.
+  mine: { w: 3, h: 3, priority: 2 },
   stairwell: { w: 2, h: 6, priority: 5 },
 };
 
-const SEARCH_RADIUS = 60;
+const ROOM_SEARCH_RADIUS = 60;
+const CORRIDOR_SEARCH_RADIUS = 50;
+const CORRIDOR_MIN_LEN = 4;
+const CORRIDOR_MAX_LEN = 10;
+const ORE_SENSE_RADIUS = 8; // an ore tile is sense-able this many tiles from walkable
 const MAX_ACTIVE_BLUEPRINTS = 3;
 
-/** Architectural style preference — biases planner placement decisions. */
 interface StylePref {
-  /**
-   * Horizontal bias for each kind, expressed as a sign factor.
-   * -1 = prefer left of spawn, +1 = prefer right, 0 = no bias.
-   */
   bedroom: number;
   dining_hall: number;
   stockpile: number;
 }
 
 const DEFAULT_STYLE: StylePref = {
-  // Bedrooms cluster on both sides; we let the candidate scorer break ties.
   bedroom: 0,
-  // Dining hall on one side, stockpile on the other, gives the colony a spine.
   dining_hall: -1,
   stockpile: +1,
 };
+
+// Direction preferences for corridor placement. Higher pref = more attractive.
+// Downward is most-preferred so the colony sinks into the mountain.
+interface CorridorDir {
+  dx: number;
+  dy: number;
+  pref: number;
+}
+const CORRIDOR_DIRS: CorridorDir[] = [
+  { dx: 0, dy: 1, pref: 100 },   // down
+  { dx: 1, dy: 0, pref: 60 },    // right
+  { dx: -1, dy: 0, pref: 60 },   // left
+  { dx: 0, dy: -1, pref: -120 }, // up — strongly disfavored
+];
+
+const REACH_DIRS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0], [-1, 0], [0, 1], [0, -1],
+];
 
 export class ColonyPlanner {
   blueprints: Blueprint[] = [];
@@ -66,12 +89,17 @@ export class ColonyPlanner {
   private accum = 0;
   completed = 0;
 
-  // Per-kind completed counts so dispatch can ask "do we have a dining hall yet?".
   completedByKind: Record<string, number> = {};
-
-  // Spatial index: tile-index → blueprintId. -1 = unclaimed. Lazily allocated.
   private claimedBy: Int32Array | null = null;
   private claimedW = 0;
+
+  // Reachable-from-spawn mask. The planner only emits blueprints whose
+  // cavity is adjacent to a walkable tile reachable from spawn — otherwise
+  // dwarves end up with blueprints in disconnected caverns they can't path
+  // to. Recomputed lazily when walkable space changes.
+  private reachable: Uint8Array | null = null;
+  private reachableW = 0;
+  private reachableDirty = true;
 
   /** Run one planning step. Called from sim.tick BEFORE job assignment. */
   tick(ctx: PlannerContext): void {
@@ -81,58 +109,94 @@ export class ColonyPlanner {
     if (this.accum < PLAN_INTERVAL_TICKS) return;
     this.accum = 0;
 
-    // Allow several active blueprints so the colony actually progresses with
-    // multiple dwarves, but cap so the planner doesn't sprawl.
     while (this.activeCount() < MAX_ACTIVE_BLUEPRINTS) {
-      const kind = this.pickNextKind(ctx);
-      if (!kind) break;
-      const placed = this.placeRoom(ctx, kind);
-      if (!placed) break; // couldn't find a spot for this kind right now; bail.
+      if (!this.tryPlaceNext(ctx)) break;
     }
   }
 
   /**
-   * Decide what kind of room to emit next, in priority order:
-   *   1. Dining hall when population ≥ 4 and none exists.
-   *   2. Stockpile when population ≥ 5 and none exists.
-   *   3. Bedrooms until ceil(pop × 1.5) bedrooms exist.
-   * Returns null if nothing is needed right now.
+   * Try to emit one new blueprint, in priority order. Returns true if a
+   * blueprint was placed; false if nothing fit. The dispatch logic interleaves
+   * infrastructure (rooms) with exploration (corridors, mines) so the colony
+   * keeps growing outward instead of stalling once the spawn cavern is full.
    */
-  private pickNextKind(ctx: PlannerContext): BlueprintKind | null {
-    const pop = Math.max(1, ctx.population);
-    const built = this.completedByKind;
+  private tryPlaceNext(ctx: PlannerContext): boolean {
     const active = this.activeByKind();
 
-    // Priority 1: dining hall for ≥4 dwarves.
-    if (pop >= 4 && (built["dining_hall"] ?? 0) === 0 && (active["dining_hall"] ?? 0) === 0) {
-      return "dining_hall";
-    }
-    // Priority 2: stockpile for ≥5 dwarves.
-    if (pop >= 5 && (built["stockpile"] ?? 0) === 0 && (active["stockpile"] ?? 0) === 0) {
-      return "stockpile";
-    }
-    // Priority 3: bedrooms up to target.
-    const bedroomTarget = Math.max(2, Math.ceil(pop * 1.5));
-    const bedroomTotal = (built["bedroom"] ?? 0) + (active["bedroom"] ?? 0);
-    if (bedroomTotal < bedroomTarget) return "bedroom";
+    // 1. Mine — if ore is sensed and reachable, harvest it. High priority so
+    //    the colony pursues minerals as soon as a corridor exposes them.
+    if ((active["mine"] ?? 0) === 0 && this.placeMine(ctx)) return true;
 
-    return null;
+    // 2. Dining hall and stockpile — emit once at population thresholds.
+    if (this.needsDiningHall(ctx) && this.placeRoom(ctx, "dining_hall")) return true;
+    if (this.needsStockpile(ctx) && this.placeRoom(ctx, "stockpile")) return true;
+
+    // 3. Periodic corridor — every two completed rooms the colony wants
+    //    another corridor segment so its reach keeps growing. This is what
+    //    turns "a cluster of rooms around spawn" into "a network of tunnels".
+    if (this.wantsExplorationCorridor() && this.placeCorridor(ctx)) return true;
+
+    // 4. Bedrooms — fill up to population target.
+    if (this.needsBedroom(ctx) && this.placeRoom(ctx, "bedroom")) return true;
+
+    // 5. Fallback corridor — when nothing else fit, dig outward. Critical:
+    //    without this the planner stops cold once the immediate neighborhood
+    //    is full of rooms, and the dwarves go idle.
+    if ((active["corridor"] ?? 0) === 0 && this.placeCorridor(ctx)) return true;
+
+    return false;
   }
 
-  /** Find a placement and emit a blueprint of the given kind. */
+  // ---- Dispatch predicates -----------------------------------------------
+
+  private needsDiningHall(ctx: PlannerContext): boolean {
+    if (ctx.population < 4) return false;
+    return this.totalOfKind("dining_hall") === 0;
+  }
+
+  private needsStockpile(ctx: PlannerContext): boolean {
+    if (ctx.population < 5) return false;
+    return this.totalOfKind("stockpile") === 0;
+  }
+
+  private needsBedroom(ctx: PlannerContext): boolean {
+    const target = Math.max(2, Math.ceil(Math.max(1, ctx.population) * 1.5));
+    return this.totalOfKind("bedroom") < target;
+  }
+
+  /**
+   * True if the planner wants to dig another exploration corridor right now.
+   * Tied to *completed* rooms (not just active emissions) so the colony
+   * actually finishes some infrastructure before chasing tunnels — otherwise
+   * the very first hour produces a corridor before any room exists.
+   */
+  private wantsExplorationCorridor(): boolean {
+    if ((this.activeByKind()["corridor"] ?? 0) > 0) return false;
+    const corridorTotal = this.totalOfKind("corridor");
+    const completedRooms =
+      (this.completedByKind["bedroom"] ?? 0) +
+      (this.completedByKind["dining_hall"] ?? 0) +
+      (this.completedByKind["stockpile"] ?? 0) +
+      (this.completedByKind["mine"] ?? 0);
+    const corridorTarget = Math.floor(completedRooms / 2);
+    return corridorTotal < corridorTarget;
+  }
+
+  // ---- Room placement (rectangles adjacent to walkable) ------------------
+
   private placeRoom(ctx: PlannerContext, kind: BlueprintKind): Blueprint | null {
     const dims = ROOM_DIMS[kind];
-    const { grid, spawn } = ctx;
+    const { spawn } = ctx;
     let best: { x: number; y: number; score: number } | null = null;
 
     const xBias = (DEFAULT_STYLE as unknown as Record<string, number>)[kind] ?? 0;
 
-    for (let dy = -SEARCH_RADIUS; dy <= SEARCH_RADIUS; dy++) {
-      for (let dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS; dx++) {
+    for (let dy = -ROOM_SEARCH_RADIUS; dy <= ROOM_SEARCH_RADIUS; dy++) {
+      for (let dx = -ROOM_SEARCH_RADIUS; dx <= ROOM_SEARCH_RADIUS; dx++) {
         const ox = spawn.x + dx;
         const oy = spawn.y + dy;
-        if (!this.candidateValid(grid, ox, oy, dims.w, dims.h)) continue;
-        const score = this.scoreCandidate(kind, dx, dy, xBias);
+        if (!this.candidateValid(ctx, ox, oy, dims.w, dims.h)) continue;
+        const score = this.scoreRoomCandidate(dx, dy, xBias);
         if (best === null) {
           best = { x: ox, y: oy, score };
         } else if (
@@ -145,56 +209,189 @@ export class ColonyPlanner {
     }
 
     if (!best) return null;
+    return this.commitBlueprint(ctx, kind, best.x, best.y, dims.w, dims.h, rectCavity(best.x, best.y, dims.w, dims.h));
+  }
 
-    const cavity = rectCavity(best.x, best.y, dims.w, dims.h);
+  private scoreRoomCandidate(dx: number, dy: number, xBias: number): number {
+    const distSq = dx * dx + dy * dy;
+    let score = -distSq;
+    if (dy > 0) score += 40;
+    if (dy < -2) score -= 40;
+    if (xBias !== 0) score += xBias * dx * 2;
+    return score;
+  }
+
+  // ---- Corridor placement (1-wide tunnels extending outward) -------------
+
+  /**
+   * Place a 1-tile-wide corridor whose first cell is adjacent to walkable
+   * space and which extends CORRIDOR_MIN_LEN..CORRIDOR_MAX_LEN tiles in a
+   * cardinal direction (preferring downward). Scoring blends direction
+   * preference, length achieved, and distance from spawn.
+   */
+  private placeCorridor(ctx: PlannerContext): Blueprint | null {
+    const { grid, spawn } = ctx;
+    let best: { startX: number; startY: number; len: number; dx: number; dy: number; score: number } | null = null;
+
+    for (let wy = -CORRIDOR_SEARCH_RADIUS; wy <= CORRIDOR_SEARCH_RADIUS; wy++) {
+      for (let wx = -CORRIDOR_SEARCH_RADIUS; wx <= CORRIDOR_SEARCH_RADIUS; wx++) {
+        const ax = spawn.x + wx;
+        const ay = spawn.y + wy;
+        if (!grid.isWalkable(ax, ay)) continue;
+        // The corridor must start from a walkable tile actually reachable
+        // from the spawn — otherwise we'd dig tunnels in disconnected
+        // worldgen caverns the dwarves can never visit.
+        if (!this.isReachable(ctx, ax, ay)) continue;
+        for (const dir of CORRIDOR_DIRS) {
+          const sx = ax + dir.dx;
+          const sy = ay + dir.dy;
+          if (!grid.inBounds(sx, sy) || !grid.isSolid(sx, sy)) continue;
+          if (this.isClaimed(grid, sx, sy)) continue;
+          let len = 0;
+          for (let k = 1; k <= CORRIDOR_MAX_LEN; k++) {
+            const tx = ax + dir.dx * k;
+            const ty = ay + dir.dy * k;
+            if (!grid.inBounds(tx, ty)) break;
+            if (!grid.isSolid(tx, ty)) break;
+            if (this.isClaimed(grid, tx, ty)) break;
+            len++;
+          }
+          if (len < CORRIDOR_MIN_LEN) continue;
+          // Score blends direction preference, length achievable, distance
+          // from spawn (lightly), and a depth bonus on the corridor's exit
+          // tile so the colony reliably extends downward into the mountain
+          // rather than zig-zagging laterally near spawn.
+          const exitY = ay + dir.dy * len;
+          const depthBonus = Math.max(0, exitY - spawn.y) * 4;
+          const distSq = wx * wx + wy * wy;
+          const score = dir.pref + len * 5 - distSq * 0.1 + depthBonus;
+          if (
+            !best ||
+            score > best.score ||
+            (score === best.score && (sy < best.startY || (sy === best.startY && sx < best.startX)))
+          ) {
+            best = { startX: sx, startY: sy, len, dx: dir.dx, dy: dir.dy, score };
+          }
+        }
+      }
+    }
+
+    if (!best) return null;
+
+    const cavity = new Int32Array(best.len);
+    for (let k = 0; k < best.len; k++) {
+      const tx = best.startX + best.dx * k;
+      const ty = best.startY + best.dy * k;
+      cavity[k] = (ty << 16) | tx;
+    }
+    let originX = best.startX;
+    let originY = best.startY;
+    let width = 1;
+    let height = best.len;
+    if (best.dx !== 0) {
+      width = best.len;
+      height = 1;
+      if (best.dx < 0) originX = best.startX - (best.len - 1);
+    } else if (best.dy < 0) {
+      originY = best.startY - (best.len - 1);
+    }
+
+    return this.commitBlueprint(ctx, "corridor", originX, originY, width, height, cavity);
+  }
+
+  // ---- Mine placement (cavities targeting ore veins) ---------------------
+
+  /**
+   * Find an Ore tile within ORE_SENSE_RADIUS of any walkable tile, then
+   * place a 3×3 cavity that includes the ore and is itself adjacent to
+   * walkable. Returns null if no valid placement exists yet — usually the
+   * planner will then emit a corridor toward the nearest ore vein on a
+   * later evaluation, exposing more candidates.
+   */
+  private placeMine(ctx: PlannerContext): Blueprint | null {
+    const { grid } = ctx;
+    const { w: mw, h: mh } = ROOM_DIMS["mine"];
+
+    let bestOre: { x: number; y: number; score: number } | null = null;
+    for (let y = 0; y < grid.height; y++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (grid.getTile(x, y) !== TileType.Ore) continue;
+        if (this.isClaimed(grid, x, y)) continue;
+        if (!this.tileNearReachable(ctx, x, y, ORE_SENSE_RADIUS)) continue;
+        const dx = x - ctx.spawn.x;
+        const dy = y - ctx.spawn.y;
+        const score = -(dx * dx + dy * dy) + (dy > 0 ? 30 : 0);
+        if (
+          !bestOre ||
+          score > bestOre.score ||
+          (score === bestOre.score && (y < bestOre.y || (y === bestOre.y && x < bestOre.x)))
+        ) {
+          bestOre = { x, y, score };
+        }
+      }
+    }
+    if (!bestOre) return null;
+
+    // Slide the 3×3 origin around the ore tile until candidateValid passes.
+    for (let oyOff = -1; oyOff <= 1; oyOff++) {
+      for (let oxOff = -1; oxOff <= 1; oxOff++) {
+        const ox = bestOre.x - 1 - oxOff;
+        const oy = bestOre.y - 1 - oyOff;
+        if (bestOre.x < ox || bestOre.x >= ox + mw) continue;
+        if (bestOre.y < oy || bestOre.y >= oy + mh) continue;
+        if (!this.candidateValid(ctx, ox, oy, mw, mh)) continue;
+        return this.commitBlueprint(ctx, "mine", ox, oy, mw, mh, rectCavity(ox, oy, mw, mh));
+      }
+    }
+    return null;
+  }
+
+  /** True if there's a reachable walkable tile within `radius` of (x, y). */
+  private tileNearReachable(ctx: PlannerContext, x: number, y: number, radius: number): boolean {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (this.isReachable(ctx, x + dx, y + dy)) return true;
+      }
+    }
+    return false;
+  }
+
+  // ---- Common ------------------------------------------------------------
+
+  /**
+   * Common emit path: register the blueprint, mark claimed tiles, paint the
+   * designation overlay so the renderer can show the planner's intent.
+   */
+  private commitBlueprint(
+    ctx: PlannerContext,
+    kind: BlueprintKind,
+    originX: number,
+    originY: number,
+    width: number,
+    height: number,
+    cavity: Int32Array,
+  ): Blueprint {
+    const dims = ROOM_DIMS[kind];
     const bp: Blueprint = {
       id: this.nextId++,
       kind,
-      originX: best.x,
-      originY: best.y,
-      width: dims.w,
-      height: dims.h,
+      originX,
+      originY,
+      width,
+      height,
       cavity,
       status: "digging",
       priority: dims.priority,
       createdTick: ctx.tick,
     };
     this.blueprints.push(bp);
-    this.markClaimed(grid, bp);
-    this.markDesignations(grid, bp, true);
+    this.markClaimed(ctx.grid, bp);
+    this.markDesignations(ctx.grid, bp, true);
     return bp;
   }
 
-  /**
-   * Scoring per kind:
-   *   - bedroom: prefer close to spawn, prefer below or alongside, light
-   *     bias on whichever side has fewer bedrooms.
-   *   - dining_hall: very strong "close to spawn, prefer left of spawn".
-   *   - stockpile: "close to spawn, prefer right of spawn".
-   *   - corridor: shortest viable connector (handled separately later).
-   *   - stairwell: descending bias.
-   */
-  private scoreCandidate(kind: BlueprintKind, dx: number, dy: number, xBias: number): number {
-    const distSq = dx * dx + dy * dy;
-    let score = -distSq;
-    // Slight downward bias for everything — the colony grows into the mountain.
-    if (dy > 0) score += 40;
-    if (dy < -2) score -= 40;
-
-    // Apply per-kind side bias.
-    if (xBias !== 0) {
-      // Reward placement on the preferred side, gently.
-      score += xBias * dx * 2;
-    }
-
-    if (kind === "stairwell") {
-      // Stairwells want to be deep — much stronger downward bias.
-      score += dy * 4;
-    }
-    return score;
-  }
-
-  private candidateValid(grid: TileGrid, ox: number, oy: number, w: number, h: number): boolean {
+  private candidateValid(ctx: PlannerContext, ox: number, oy: number, w: number, h: number): boolean {
+    const grid = ctx.grid;
     for (let y = oy; y < oy + h; y++) {
       for (let x = ox; x < ox + w; x++) {
         if (!grid.inBounds(x, y)) return false;
@@ -202,20 +399,78 @@ export class ColonyPlanner {
         if (this.isClaimed(grid, x, y)) return false;
       }
     }
-    // At least one tile in the 1-tile border must be walkable so there's an
-    // approach — without this, a dwarf can't reach any cavity tile.
-    let touchesWalkable = false;
-    for (let y = oy - 1; y <= oy + h && !touchesWalkable; y++) {
-      for (let x = ox - 1; x <= ox + w && !touchesWalkable; x++) {
+    // The cavity must touch a walkable tile that is itself reachable from
+    // spawn — otherwise we'd be designating a cavity in a disconnected
+    // worldgen cavern that the dwarves can never path to.
+    let touchesReachable = false;
+    for (let y = oy - 1; y <= oy + h && !touchesReachable; y++) {
+      for (let x = ox - 1; x <= ox + w && !touchesReachable; x++) {
         if (!grid.inBounds(x, y)) continue;
         if (x >= ox && x < ox + w && y >= oy && y < oy + h) continue;
-        if (grid.isWalkable(x, y)) touchesWalkable = true;
+        if (this.isReachable(ctx, x, y)) touchesReachable = true;
       }
     }
-    return touchesWalkable;
+    return touchesReachable;
   }
 
-  /** True if any active blueprint owns this tile. O(1) via spatial index. */
+  // ---- Reachable-from-spawn flood fill -----------------------------------
+
+  /** True if (x, y) is walkable AND connected to spawn via walkable tiles. */
+  private isReachable(ctx: PlannerContext, x: number, y: number): boolean {
+    if (!ctx.grid.inBounds(x, y)) return false;
+    const r = this.ensureReachable(ctx);
+    return r[y * ctx.grid.width + x] === 1;
+  }
+
+  private ensureReachable(ctx: PlannerContext): Uint8Array {
+    const grid = ctx.grid;
+    if (
+      !this.reachable ||
+      this.reachableW !== grid.width ||
+      this.reachable.length !== grid.width * grid.height
+    ) {
+      this.reachable = new Uint8Array(grid.width * grid.height);
+      this.reachableW = grid.width;
+      this.reachableDirty = true;
+    }
+    if (!this.reachableDirty) return this.reachable;
+    this.reachable.fill(0);
+    if (!grid.isWalkable(ctx.spawn.x, ctx.spawn.y)) {
+      // Spawn somehow not walkable — leave mask empty (no candidates valid).
+      this.reachableDirty = false;
+      return this.reachable;
+    }
+    const w = grid.width;
+    const queue = new Int32Array(grid.width * grid.height);
+    let head = 0;
+    let tail = 0;
+    const startIdx = ctx.spawn.y * w + ctx.spawn.x;
+    queue[tail++] = startIdx;
+    this.reachable[startIdx] = 1;
+    while (head < tail) {
+      const idx = queue[head++];
+      const cx = idx % w;
+      const cy = (idx / w) | 0;
+      // 4-connected; pathing is 8-connected but the reachable check is
+      // conservative. A 4-connected flood-fill is a subset of 8-connected
+      // reachability — every 4-reachable tile is also 8-reachable.
+      for (const [dx, dy] of REACH_DIRS) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= grid.height) continue;
+        if (!grid.isWalkable(nx, ny)) continue;
+        const nidx = ny * w + nx;
+        if (this.reachable[nidx]) continue;
+        this.reachable[nidx] = 1;
+        queue[tail++] = nidx;
+      }
+    }
+    this.reachableDirty = false;
+    return this.reachable;
+  }
+
+  // ---- Inspection / counts -----------------------------------------------
+
   containsTile(grid: TileGrid, x: number, y: number): boolean {
     if (!grid.inBounds(x, y)) return false;
     return this.isClaimed(grid, x, y);
@@ -241,9 +496,10 @@ export class ColonyPlanner {
     return out;
   }
 
-  /**
-   * Sweep blueprints whose cavity is fully excavated and mark them complete.
-   */
+  private totalOfKind(kind: BlueprintKind): number {
+    return (this.completedByKind[kind] ?? 0) + (this.activeByKind()[kind] ?? 0);
+  }
+
   private harvestCompleted(grid: TileGrid): void {
     for (const b of this.blueprints) {
       if (b.status === "digging" && isComplete(b, grid)) {
@@ -258,6 +514,11 @@ export class ColonyPlanner {
         }
       }
     }
+    // Walkable area changes whenever a tile gets mined, not just when a
+    // blueprint fully completes — partial digs in long corridors expand the
+    // reachable set too. Just invalidate every tick; the rebuild is only
+    // actually run on demand in the next planner evaluation (hourly).
+    this.reachableDirty = true;
   }
 
   // ---- Spatial index helpers ---------------------------------------------
@@ -304,13 +565,9 @@ export class ColonyPlanner {
     }
   }
 
-  /**
-   * Re-apply spatial index + designation overlay after restore from save.
-   */
   rehydrate(grid: TileGrid): void {
     this.claimedBy = null;
     this.ensureClaimedIndex(grid);
-    // Rebuild completedByKind.
     this.completedByKind = {};
     for (const b of this.blueprints) {
       if (b.status === "complete") {
@@ -320,9 +577,8 @@ export class ColonyPlanner {
     }
   }
 
-  /** A snapshot of room counts for the HUD / digest rendering. */
   buildSummary(): { kind: BlueprintKind; active: number; complete: number }[] {
-    const kinds: BlueprintKind[] = ["bedroom", "dining_hall", "stockpile", "corridor", "stairwell"];
+    const kinds: BlueprintKind[] = ["bedroom", "dining_hall", "stockpile", "corridor", "mine", "stairwell"];
     const active = this.activeByKind();
     const out: { kind: BlueprintKind; active: number; complete: number }[] = [];
     for (const k of kinds) {
