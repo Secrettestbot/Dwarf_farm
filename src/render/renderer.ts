@@ -9,6 +9,7 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   dining_hall: { fill: "rgba(140, 200, 230, 0.12)", stroke: "rgba(140, 200, 230, 0.6)" },
   stockpile: { fill: "rgba(180, 230, 130, 0.10)", stroke: "rgba(180, 230, 130, 0.55)" },
   corridor: { fill: "rgba(180, 180, 180, 0.10)", stroke: "rgba(180, 180, 180, 0.50)" },
+  mine: { fill: "rgba(220, 130, 60, 0.14)", stroke: "rgba(240, 150, 70, 0.7)" },
   stairwell: { fill: "rgba(230, 130, 200, 0.10)", stroke: "rgba(230, 130, 200, 0.55)" },
 };
 
@@ -105,7 +106,8 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "bedroom": return "bed";
     case "dining_hall": return "dining";
     case "stockpile": return "stockpile";
-    case "corridor": return "corr";
+    case "corridor": return "tunnel";
+    case "mine": return "mine";
     case "stairwell": return "stair";
   }
 }

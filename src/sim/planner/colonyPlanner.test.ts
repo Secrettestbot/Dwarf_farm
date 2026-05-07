@@ -36,14 +36,19 @@ describe("ColonyPlanner", () => {
     }
   });
 
-  it("emissions at population 1 are bedrooms only", () => {
+  it("emits the first 2 bedrooms at population 1 before anything else", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 60; t++) {
       planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1 });
     }
-    expect(planner.blueprints.length).toBeGreaterThanOrEqual(1);
-    for (const b of planner.blueprints) expect(b.kind).toBe("bedroom");
+    // pop=1 → ceil(1*1.5)=2 bedrooms target. The first two emissions must
+    // both be bedrooms; a 3rd active slot is filled by a fallback corridor
+    // so the colony begins to explore in parallel.
+    expect(planner.blueprints[0]?.kind).toBe("bedroom");
+    expect(planner.blueprints[1]?.kind).toBe("bedroom");
+    const kinds = planner.blueprints.map((b) => b.kind);
+    expect(kinds.filter((k) => k === "bedroom").length).toBe(2);
   });
 
   it("emits multiple blueprints as completed cavities free the gate (population 7)", () => {
@@ -82,25 +87,25 @@ describe("ColonyPlanner", () => {
     }
   });
 
-  it("stops emitting once the population target is met", () => {
+  it("caps bedrooms at the population target — but keeps exploring via corridors", () => {
     const w = generateWorld({ seed: 31, width: 200, height: 500 });
     const planner = new ColonyPlanner();
-    // Population 1: target = max(2, ceil(1*1.5)) = 2 rooms.
+    // Population 1: target = max(2, ceil(1*1.5)) = 2 bedrooms. The colony
+    // never emits a 3rd bedroom but does keep digging exploration corridors.
     for (let t = 1; t <= 4000; t++) {
       planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1 });
-      if (planner.blueprints.length > 0) {
-        const bp = planner.blueprints[planner.blueprints.length - 1];
-        if (bp.status === "digging") {
-          for (let i = 0; i < bp.cavity.length; i++) {
-            const c = bp.cavity[i];
-            const x = c & 0xffff;
-            const y = (c >>> 16) & 0xffff;
-            w.grid.setTile(x, y, 7);
-          }
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
         }
       }
     }
-    expect(planner.completed).toBeLessThanOrEqual(2);
+    expect(planner.completedByKind["bedroom"] ?? 0).toBeLessThanOrEqual(2);
+    expect(planner.completedByKind["corridor"] ?? 0).toBeGreaterThan(0);
   });
 
   it("emits a dining hall once population reaches 4", () => {
@@ -140,6 +145,51 @@ describe("ColonyPlanner", () => {
     const kinds = planner.blueprints.map((b) => b.kind);
     expect(kinds).toContain("dining_hall");
     expect(kinds).toContain("stockpile");
+  });
+
+  it("emits exploration corridors so the colony's reach keeps growing", () => {
+    const w = generateWorld({ seed: 51, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    // Hand-excavate so blueprints complete and the planner keeps emitting.
+    for (let t = 1; t <= 2400; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    expect(planner.completedByKind["corridor"] ?? 0).toBeGreaterThan(0);
+    // At least one corridor should head downward (extending into deeper rock).
+    const corridors = planner.blueprints.filter((b) => b.kind === "corridor");
+    const downward = corridors.some((b) => b.height >= b.width && b.originY > w.spawn.y);
+    expect(downward).toBe(true);
+  });
+
+  it("emits a mine blueprint once a corridor exposes ore", () => {
+    const w = generateWorld({ seed: 67, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    for (let t = 1; t <= 6000; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: POP_DEFAULT });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    // Corridors descend through the Skin layer (sandstone/dirt) into Shallow
+    // Earth (stone with ore). After enough corridor work, ore should be in
+    // sense range and a mine should have been emitted.
+    const mineEmitted = planner.blueprints.some((b) => b.kind === "mine");
+    expect(mineEmitted).toBe(true);
   });
 
   it("placement is deterministic across runs with the same seed", () => {
