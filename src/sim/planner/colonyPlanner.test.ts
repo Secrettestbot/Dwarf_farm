@@ -219,14 +219,15 @@ describe("ColonyPlanner", () => {
     }
     const corridors = planner.blueprints.filter((b) => b.kind === "corridor");
     expect(corridors.length).toBeGreaterThanOrEqual(3);
-    // At least two distinct corridor sizes (length × width product).
     const sizes = new Set(corridors.map((b) => b.cavity.length));
     expect(sizes.size).toBeGreaterThanOrEqual(2);
-    // At least one horizontal and one vertical corridor (variation in
-    // direction, not just identical 1×N vertical strips).
+    // The user complaint that drove this test: "It's still doing exclusively
+    // vertical tunnels." With direction-weighted sampling the colony must
+    // emit BOTH horizontal and vertical corridors over a long-enough run.
     const verticals = corridors.filter((b) => b.height > b.width).length;
     const horizontals = corridors.filter((b) => b.width > b.height).length;
-    expect(verticals + horizontals).toBeGreaterThanOrEqual(2);
+    expect(verticals).toBeGreaterThan(0);
+    expect(horizontals).toBeGreaterThan(0);
   });
 
   it("placement is deterministic across runs with the same seed", () => {
