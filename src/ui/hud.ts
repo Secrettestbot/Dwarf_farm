@@ -15,6 +15,7 @@ export class Hud {
   private clockLabel: HTMLDivElement;
   private dwarfLabel: HTMLDivElement;
   private plannerLabel: HTMLDivElement;
+  private stockpileLabel!: HTMLDivElement;
 
   constructor(host: HTMLElement, handlers: HudHandlers) {
     const top = document.createElement("div");
@@ -44,6 +45,11 @@ export class Hud {
     this.plannerLabel.style.fontSize = "11px";
     this.plannerLabel.style.color = "#888";
     top.appendChild(this.plannerLabel);
+
+    this.stockpileLabel = document.createElement("div");
+    this.stockpileLabel.style.fontSize = "11px";
+    this.stockpileLabel.style.color = "#888";
+    top.appendChild(this.stockpileLabel);
 
     const speedRow = document.createElement("div");
     speedRow.style.cssText = "display:flex;gap:4px;margin-top:4px;";
@@ -89,6 +95,8 @@ export class Hud {
     const active = sim.planner.activeCount();
     const built = sim.planner.completed;
     this.plannerLabel.textContent = `Plans: ${active} digging · ${built} done`;
+    const sp = sim.stockpile;
+    this.stockpileLabel.textContent = `Ore ${sp.ore} · Stone ${sp.stone} · Dirt ${sp.dirt}`;
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }

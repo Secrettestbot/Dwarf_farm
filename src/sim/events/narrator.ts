@@ -1,0 +1,121 @@
+// Narrator: turns sim happenings into log lines in a consistent voice.
+// The voice (GDD §9.2): short sentences, slightly wry, written as record
+// rather than UI status. Every line uses a deterministic seeded RNG so the
+// catch-up worker generates the same chronicle as live play.
+
+import { Rng } from "../rng";
+import { Blueprint, BlueprintKind } from "../planner/blueprint";
+
+/** Choose deterministically from a non-empty array. */
+function pick<T>(rng: Rng, arr: readonly T[]): T {
+  return arr[rng.nextRange(0, arr.length)];
+}
+
+/** Free-form depth phrasing for use in event text. */
+function depthPhrase(y: number, spawnY: number): string {
+  const delta = y - spawnY;
+  if (delta < -2) return "above the entrance";
+  if (delta < 4) return "near the surface";
+  if (delta < 20) return "in the upper halls";
+  if (delta < 60) return "in the shallow earth";
+  if (delta < 150) return "deep beneath the entrance";
+  return "in the deep rock";
+}
+
+const KIND_LABEL: Record<BlueprintKind, string> = {
+  bedroom: "bedroom",
+  dining_hall: "dining hall",
+  stockpile: "stockpile",
+  corridor: "tunnel",
+  mine: "mine",
+  stairwell: "stairwell",
+};
+
+export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): string {
+  const where = depthPhrase(b.originY, spawnY);
+  switch (b.kind) {
+    case "bedroom":
+      return pick(rng, [
+        `Plans for a new bedroom are laid out ${where}.`,
+        `The colony decides on another sleeping room ${where}.`,
+        `Markers are placed for a new bedroom ${where}.`,
+      ]);
+    case "dining_hall":
+      return pick(rng, [
+        `The colony breaks ground on a grand dining hall.`,
+        `Long lines are scratched into the stone — the first dining hall begins.`,
+      ]);
+    case "stockpile":
+      return pick(rng, [
+        `A new stockpile is laid out ${where}.`,
+        `The dwarves agree on a place to put things, ${where}.`,
+      ]);
+    case "corridor": {
+      const horizontal = b.width > b.height;
+      const lateralDir = horizontal ? "lateral" : "descending";
+      return pick(rng, [
+        `A ${lateralDir} tunnel is begun ${where}.`,
+        `Pickaxes ring as a new ${lateralDir} passage opens ${where}.`,
+      ]);
+    }
+    case "mine":
+      return pick(rng, [
+        `An ore vein has been sensed ${where}. The colony moves to dig it out.`,
+        `The deep stone hums with metal ${where}; a mine is begun.`,
+      ]);
+    case "stairwell":
+      return `A stairwell is laid out, descending into the rock.`;
+  }
+}
+
+export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number): string {
+  const where = depthPhrase(b.originY, spawnY);
+  switch (b.kind) {
+    case "bedroom":
+      return pick(rng, [
+        `The bedroom ${where} is complete.`,
+        `A new bedroom is finished ${where}; some dwarf will claim it tonight.`,
+      ]);
+    case "dining_hall":
+      return pick(rng, [
+        `The dining hall is complete. Dwarves have already begun complaining about the chairs.`,
+        `The grand dining hall stands finished, awaiting its first feast.`,
+      ]);
+    case "stockpile":
+      return pick(rng, [
+        `The stockpile is finished. A few dwarves have started arguing about how to organise it.`,
+        `The new stockpile is open. The hauling has already begun.`,
+      ]);
+    case "corridor":
+      return pick(rng, [
+        `A new tunnel is finished, ${where}.`,
+        `The dwarves cheer — briefly — and move on. Another passage is open ${where}.`,
+      ]);
+    case "mine":
+      return pick(rng, [
+        `The new mine is open ${where}. The first ore has been drawn from the rock.`,
+        `Ore tumbles into the dust ${where}; the mine is complete.`,
+      ]);
+    case "stairwell":
+      return `The stairwell is finished. The colony reaches further into the mountain.`;
+  }
+}
+
+export function narrateOreFirstStrike(rng: Rng, dwarfName: string, depth: number, spawnY: number): string {
+  const where = depthPhrase(depth, spawnY);
+  return pick(rng, [
+    `${dwarfName} strikes the first ore vein the colony has seen, ${where}.`,
+    `${dwarfName} is the first to break ore, ${where}. There will be more.`,
+  ]);
+}
+
+export function narrateFounding(names: string[]): string {
+  if (names.length === 0) return `Seven dwarves enter the mountain.`;
+  // List the first 2-3 founders by name; the rest as count.
+  const head = names.slice(0, 2).join(", ");
+  const remaining = names.length - 2;
+  if (remaining <= 0) return `${head} enter the mountain.`;
+  return `${head}, and ${remaining} others enter the mountain.`;
+}
+
+export { KIND_LABEL };

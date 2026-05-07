@@ -4,6 +4,7 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
+import { narrateOreFirstStrike } from "./events/narrator";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -33,6 +34,7 @@ export function tick(sim: SimWorld): void {
     tick: sim.tick,
     population: sim.dwarf.size(),
     rng: sim.plannerRng,
+    events: sim.events,
   });
   needsSystem(sim);
   jobAssignmentSystem(sim);
@@ -174,9 +176,31 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   job.progress++;
   if (job.progress >= MINE_TICKS) {
+    // What was the rock made of? Determines stockpile credit.
+    const tileType = sim.grid.getTile(job.targetX, job.targetY);
     sim.grid.setTile(job.targetX, job.targetY, TileType.CorridorFloor);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
     sim.releaseMineTarget(job.targetX, job.targetY);
+
+    // Stockpile credit + first-strike narration. Real workshops in a later
+    // session refine these into bars/blocks/etc.
+    if (tileType === TileType.Ore) {
+      sim.stockpile.ore++;
+      if (!sim.oreEverStruck) {
+        sim.oreEverStruck = true;
+        const dw = sim.dwarf.get(e)!;
+        sim.events.add(
+          sim.tick,
+          "discovery",
+          narrateOreFirstStrike(sim.plannerRng, dw.name, job.targetY, sim.spawn.y),
+        );
+      }
+    } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
+      sim.stockpile.stone++;
+    } else if (tileType === TileType.Dirt || tileType === TileType.Sand) {
+      sim.stockpile.dirt++;
+    }
+
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
