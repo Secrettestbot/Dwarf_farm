@@ -57,7 +57,32 @@ const TILE_PIXELS: Record<TileType, string[]> = {
   [TileType.Bed]: bedSprite(),
   [TileType.Table]: tableSprite(),
   [TileType.Bin]: binSprite(),
+  [TileType.Memorial]: memorialSprite(),
 };
+
+/** Memorial: a small upright stone marker (cairn) on the corridor floor. */
+function memorialSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Pillar at columns 6-9, rows 4-13.
+  for (let y = 4; y <= 13; y++) {
+    let row = base[y];
+    for (let x = 6; x <= 9; x++) {
+      // Light at row 4 (top), darker midbody, darkest base.
+      let c = "9"; // granite
+      if (y === 4) c = "B"; // top highlight
+      else if (y >= 11) c = "8"; // shadow base
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Cap row at row 3 — slightly wider top.
+  let cap = base[3];
+  for (let x = 5; x <= 10; x++) cap = cap.substring(0, x) + "B" + cap.substring(x + 1);
+  base[3] = cap;
+  // Single torch glow pixel at row 6.
+  base[6] = base[6].substring(0, 7) + "C" + base[6].substring(8);
+  return base;
+}
 
 /** Bed: dark wood frame, red mattress on top of corridor-floor base. */
 function bedSprite(): string[] {

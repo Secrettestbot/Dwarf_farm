@@ -109,6 +109,20 @@ export function narrateOreFirstStrike(rng: Rng, dwarfName: string, depth: number
   ]);
 }
 
+export function narrateDeath(rng: Rng, name: string, profession: string, age: number, cause: string): string {
+  const opts = cause === "old age"
+    ? [
+        `${name}, ${profession}, has died of old age. Aged ${age} years.`,
+        `Old ${name} is dead. ${age} years in the mountain, the last of them spent watching the young.`,
+        `${name} the ${profession.toLowerCase()} did not wake this morning. ${age} years.`,
+        `${name}, ${profession}, has passed peacefully in their sleep at ${age}.`,
+      ]
+    : [
+        `${name}, ${profession}, has died (${cause}). Aged ${age} years.`,
+      ];
+  return pick(rng, opts);
+}
+
 export function narrateFounding(names: string[]): string {
   if (names.length === 0) return `Seven dwarves enter the mountain.`;
   // List the first 2-3 founders by name; the rest as count.

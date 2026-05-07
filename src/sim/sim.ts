@@ -4,7 +4,7 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike } from "./events/narrator";
+import { narrateOreFirstStrike, narrateDeath } from "./events/narrator";
 import { TICKS_PER_YEAR } from "./time";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
@@ -38,10 +38,72 @@ export function tick(sim: SimWorld): void {
     events: sim.events,
   });
   yearRolloverSystem(sim);
+  deathSystem(sim);
   needsSystem(sim);
   jobAssignmentSystem(sim);
   movementSystem(sim);
   workSystem(sim);
+}
+
+// GDD §6.1 lifecycle: death at ~150 years naturally; dwarf-touched extends
+// to 250+. Beyond a 20-year warning window the chance increases each year
+// until the threshold age is certain. Rolls are seeded RNG so catch-up
+// produces the same lifecycle as live play.
+const DEFAULT_DEATH_AGE = 150;
+const DWARF_TOUCHED_DEATH_AGE = 250;
+const DEATH_WARNING_WINDOW_YEARS = 20;
+
+function deathSystem(sim: SimWorld): void {
+  // Only check at year boundaries — cheap and matches the calendar grain.
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  if (sim.tick === 0) return; // skip the founding tick
+  const ents = sim.dwarf.entities;
+  // Iterate backwards so killDwarf can mutate the array as we go.
+  for (let i = ents.length - 1; i >= 0; i--) {
+    const e = ents[i];
+    const dw = sim.dwarf.get(e);
+    if (!dw) continue;
+    const age = sim.ageOf(e);
+    const threshold = dw.traitIds.includes("dwarf_touched")
+      ? DWARF_TOUCHED_DEATH_AGE
+      : DEFAULT_DEATH_AGE;
+    if (age >= threshold) {
+      killDwarf(sim, e, "old age");
+      continue;
+    }
+    if (age >= threshold - DEATH_WARNING_WINDOW_YEARS) {
+      // Linear ramp from 0% chance at the warning edge to ~50% per year at
+      // the threshold itself. Most dwarves succumb within the window.
+      const overage = age - (threshold - DEATH_WARNING_WINDOW_YEARS);
+      const chance = (overage / DEATH_WARNING_WINDOW_YEARS) * 0.5;
+      if (sim.aiRng.nextFloat() < chance) {
+        killDwarf(sim, e, "old age");
+      }
+    }
+  }
+}
+
+/**
+ * Remove a dwarf from the sim, log the death in the chronicle, and place a
+ * Memorial tile where they fell. Releases any in-flight job claim so the
+ * planner state stays consistent.
+ */
+function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
+  const dw = sim.dwarf.get(e);
+  const pos = sim.position.get(e);
+  if (!dw || !pos) return;
+  const age = sim.ageOf(e);
+  // Free any mining claim before removing the job component.
+  const job = sim.job.get(e);
+  if (job?.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
+  // Memorial on the death tile if it's walkable space (a dwarf in transit
+  // through a tunnel; not a solid tile that another dwarf is mining).
+  if (sim.grid.isWalkable(pos.x, pos.y)) {
+    sim.grid.setTile(pos.x, pos.y, TileType.Memorial);
+  }
+  sim.events.add(sim.tick, "social", narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause));
+  // Remove from the ECS, which strips all component stores.
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs]);
 }
 
 /**
