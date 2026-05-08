@@ -155,11 +155,30 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
  * `lastMaintainedTick`, resetting the architect's neglect clock for that
  * room. Returns null if every standing room has been kept up — the colony
  * is then free to dig new ones.
+ *
+ * Rooms that already have another dwarf en-route to maintain them are
+ * skipped, so a colony of seven spreads across multiple neglected rooms
+ * instead of all converging on the same one.
  */
 function findMaintainTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  // Build the set of blueprint ids that already have a maintainer assigned.
+  const claimedBlueprintIds = new Set<number>();
+  const jEnts = sim.job.entities;
+  for (let i = 0; i < jEnts.length; i++) {
+    const j = sim.job.get(jEnts[i]);
+    if (!j || j.kind !== "maintain") continue;
+    for (const b of sim.planner.blueprints) {
+      if (b.status !== "complete") continue;
+      if (j.targetX < b.originX || j.targetX >= b.originX + b.width) continue;
+      if (j.targetY < b.originY || j.targetY >= b.originY + b.height) continue;
+      claimedBlueprintIds.add(b.id);
+      break;
+    }
+  }
   let best: { x: number; y: number; d: number } | null = null;
   for (const b of sim.planner.blueprints) {
     if (!isRoomNeglected(b, sim.tick)) continue;
+    if (claimedBlueprintIds.has(b.id)) continue;
     for (let i = 0; i < b.cavity.length; i++) {
       const c = b.cavity[i];
       const x = c & 0xffff;
@@ -254,8 +273,12 @@ function findFoodTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
  * TEND_VALIDITY_TICKS ago. The returned tile is the farm cell itself; the
  * dwarf walks onto it and the work system advances `cellTendedAt` while
  * they stand there. Returns null if every cell on every farm is fresh.
+ *
+ * Cells already targeted by another dwarf's tend job are skipped so the
+ * colony spreads its tending instead of swarming one plot.
  */
 function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "tend");
   let best: { x: number; y: number; d: number } | null = null;
   for (const b of sim.planner.blueprints) {
     if (b.kind !== "farm" || b.status !== "complete") continue;
@@ -270,6 +293,7 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
       const tendedAt = b.cellTendedAt[i];
       const overdue = tendedAt < 0 || sim.tick - tendedAt > TEND_VALIDITY_TICKS;
       if (!overdue) continue;
+      if (claimed.has((y << 16) | x)) continue;
       const dx = x - sx;
       const dy = y - sy;
       const d = dx * dx + dy * dy;
@@ -283,6 +307,20 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
     }
   }
   return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Set of packed cells currently targeted by jobs of the given kind.
+ * Used to spread work across rooms instead of every dwarf piling onto the
+ * same tile. Cheap: a single linear scan over the dense job array. */
+function collectJobTargets(sim: SimWorld, kind: JobKind): Set<number> {
+  const out = new Set<number>();
+  const ents = sim.job.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const j = sim.job.get(ents[i]);
+    if (!j || j.kind !== kind) continue;
+    out.add((j.targetY << 16) | j.targetX);
+  }
+  return out;
 }
 
 /**
