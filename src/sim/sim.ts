@@ -10,7 +10,7 @@ import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
 import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
-import { HOSTILE_DEFS } from "./hostiles/types";
+import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 import { recipeFor } from "./planner/recipes";
 import { effectsFor } from "./dwarves/traitEffects";
@@ -1130,13 +1130,19 @@ function hostileSpawnSystem(sim: SimWorld): void {
   if (sim.hostile.size() >= cap) return;
   if (sim.aiRng.nextFloat() >= HOSTILE_SPAWN_CHANCE) return;
 
-  // Pick a reachable walkable tile deep enough for cave_rat. We sample by
-  // scanning the planner's reachable mask deterministically.
+  // Pick a creature kind weighted by the deepest dwarf the colony has —
+  // a surface fortress sees rats and spiders; a colony pushing into Deep
+  // Rock starts seeing goblin scouts and the occasional troll.
   const reachable = sim.planner.exposeReachable(sim);
   if (!reachable) return;
   const grid = sim.grid;
   const w = grid.width;
-  const def = HOSTILE_DEFS["cave_rat"];
+  let deepestY = sim.spawn.y;
+  sim.forEachDwarf((_id, p) => {
+    if (p.y > deepestY) deepestY = p.y;
+  });
+  const kind = pickHostileKind(sim, deepestY);
+  const def = HOSTILE_DEFS[kind];
   const minY = sim.spawn.y + def.minDepth;
   const candidates: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < reachable.length; i++) {
@@ -1159,12 +1165,25 @@ function hostileSpawnSystem(sim: SimWorld): void {
   }
   if (candidates.length === 0) return;
   const pick = candidates[sim.aiRng.nextRange(0, candidates.length)];
-  sim.spawnHostile({ kind: "cave_rat", x: pick.x, y: pick.y });
+  sim.spawnHostile({ kind, x: pick.x, y: pick.y });
   sim.events.add(
     sim.tick,
     "crisis",
     narrateHostileSpawn(sim.aiRng, def.spawnArticle, pick.y, sim.spawn.y),
   );
+}
+
+/** Weighted random hostile kind. Each kind only enters the pool once
+ * the colony has actually reached its minDepth — the player should see
+ * a fortress at the surface get only rats, while one in the deep rock
+ * starts seeing the harder kinds. */
+function pickHostileKind(sim: SimWorld, deepestY: number): HostileKind {
+  const reachableDepth = deepestY - sim.spawn.y;
+  const eligible: HostileKind[] = ["cave_rat"]; // always available
+  if (reachableDepth >= HOSTILE_DEFS.cave_spider.minDepth) eligible.push("cave_spider");
+  if (reachableDepth >= HOSTILE_DEFS.goblin_scout.minDepth) eligible.push("goblin_scout", "goblin_scout");
+  if (reachableDepth >= HOSTILE_DEFS.cave_troll.minDepth) eligible.push("cave_troll");
+  return eligible[sim.aiRng.nextRange(0, eligible.length)];
 }
 
 /**

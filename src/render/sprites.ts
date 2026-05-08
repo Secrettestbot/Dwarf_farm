@@ -359,7 +359,10 @@ export function getDwarfSprite(): HTMLCanvasElement | OffscreenCanvas {
   return s;
 }
 
-// Cave rat: small, low to the ground, palette-red.
+// Hostile pixel art. Each row uses palette indices (0 = transparent);
+// 1 = dark outline, the body uses kind-specific palette slots.
+
+// Cave rat: small, low to the ground, palette-red (E = blonde).
 const CAVE_RAT_PIXELS: string[] = [
   "0000000000000000",
   "0000000000000000",
@@ -379,11 +382,79 @@ const CAVE_RAT_PIXELS: string[] = [
   "0000000000000000",
 ];
 
+// Cave spider: eight legs, low body, palette-purple-ish (5 = dusk).
+const CAVE_SPIDER_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0001000000010000",
+  "0010111111100000",
+  "0010155555100100",
+  "0101555555510010",
+  "0105555555550010",
+  "1015555555510100",
+  "0115555555511000",
+  "0010111111100000",
+  "0001000000010000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+// Goblin scout: humanoid silhouette, palette-green (A = sprout).
+const GOBLIN_SCOUT_PIXELS: string[] = [
+  "0000000000000000",
+  "0000001111000000",
+  "0000011AA1100000",
+  "0000011AA1100000",
+  "0000011AA1100000",
+  "0000111AA1110000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001A11AA11A1000",
+  "0001A1100AA1A100",
+  "0011A1000AA1A100",
+  "0010100000110000",
+  "0000000000000000",
+];
+
+// Cave troll: hulking, slow, palette-grey-blue (4 = dusk).
+const CAVE_TROLL_PIXELS: string[] = [
+  "0000111111100000",
+  "0001144444411000",
+  "0011144444441100",
+  "0011144444441100",
+  "0001144444411000",
+  "0011144444441100",
+  "0114444444444110",
+  "1444444444444441",
+  "1444444444444441",
+  "1444444444444441",
+  "1444444444444441",
+  "0144444444444410",
+  "0114111111141100",
+  "0011100000111000",
+  "0010000000001000",
+  "0000000000000000",
+];
+
+const HOSTILE_PIXELS: Record<string, string[]> = {
+  cave_rat: CAVE_RAT_PIXELS,
+  cave_spider: CAVE_SPIDER_PIXELS,
+  goblin_scout: GOBLIN_SCOUT_PIXELS,
+  cave_troll: CAVE_TROLL_PIXELS,
+};
+
 export function getHostileSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {
   const key = `hostile:${kind}`;
   let s = cache.get(key);
   if (!s) {
-    s = paintFromRows(CAVE_RAT_PIXELS);
+    const rows = HOSTILE_PIXELS[kind] ?? CAVE_RAT_PIXELS;
+    s = paintFromRows(rows);
     cache.set(key, s);
   }
   return s;
