@@ -69,7 +69,79 @@ export function tick(sim: SimWorld): void {
   combatSystem(sim);
   healingSystem(sim);
   farmSystem(sim);
+  tradeSystem(sim);
   visibilitySystem(sim);
+}
+
+// ---- Trade caravans (GDD §8.3) ---------------------------------------
+//
+// Once per in-game season a caravan arrives at the colony's Trade Depot
+// (if one exists). The deal is computed from the colony's needs — short
+// on food, the caravan brings food; short on drink, it brings drink;
+// otherwise the caravan trades for tools to seed future production.
+// Stone is the currency (the colony has plenty after digging). Lockdown
+// blocks caravans entirely. The Trading skill of the dwarf with the
+// highest skill level acts as the broker — they get the XP and a small
+// bonus to the deal.
+
+const TRADE_INTERVAL_TICKS = TICKS_PER_DAY * 6; // four caravans per in-game year
+const TRADE_BASE_COST = 30;
+const TRADE_BASE_GAIN = 50;
+
+function tradeSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TRADE_INTERVAL_TICKS !== 0) return;
+  if (sim.emergency.mode === "lockdown") return;
+  // Need an active Trade Depot.
+  let hasDepot = false;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind === "trade_depot" && b.status === "complete") {
+      hasDepot = true;
+      break;
+    }
+  }
+  if (!hasDepot) return;
+  // Need stone to trade.
+  if (sim.stockpile.stone < TRADE_BASE_COST) {
+    sim.events.add(
+      sim.tick,
+      "social",
+      "A caravan arrives, but the colony has no stone to trade. They depart empty-handed.",
+    );
+    return;
+  }
+  // Pick the broker — best Trading skill, tie-break by entity id.
+  let bestBroker = -1;
+  let bestSkill = -1;
+  for (const id of sim.dwarf.entities) {
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    const skill = dw.skills.trading ?? 1;
+    if (skill > bestSkill || (skill === bestSkill && id < bestBroker)) {
+      bestBroker = id;
+      bestSkill = skill;
+    }
+  }
+  // Decide the deal based on the colony's lowest-stocked food / drink.
+  const foodLow = sim.stockpile.food < 200;
+  const drinkLow = sim.stockpile.drink < 200;
+  let kind: "food" | "drink" | "tools";
+  if (foodLow && (!drinkLow || sim.stockpile.food <= sim.stockpile.drink)) kind = "food";
+  else if (drinkLow) kind = "drink";
+  else kind = "tools";
+  // Broker bonus: each level above 1 adds 4% to the gain.
+  const brokerBonus = 1 + Math.max(0, bestSkill - 1) * 0.04;
+  const gain = Math.round(TRADE_BASE_GAIN * brokerBonus);
+  sim.stockpile.stone -= TRADE_BASE_COST;
+  sim.stockpile[kind] += gain;
+  // Award XP to the broker.
+  if (bestBroker !== -1) awardSkillXp(sim, bestBroker, "trading", 1);
+  const brokerName = bestBroker !== -1 ? sim.dwarf.get(bestBroker)?.name ?? "the broker" : "the broker";
+  sim.events.add(
+    sim.tick,
+    "social",
+    `A caravan from the western kingdoms arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${kind} for ${TRADE_BASE_COST} stone.`,
+  );
 }
 
 // ---- Military draft ----------------------------------------------------

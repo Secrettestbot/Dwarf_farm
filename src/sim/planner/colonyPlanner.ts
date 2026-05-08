@@ -65,6 +65,9 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   brewery: { w: 3, h: 3, priority: 2 },
   smelter: { w: 3, h: 3, priority: 2 },
   forge: { w: 3, h: 3, priority: 2 },
+  // Trade depot: a wider open room near the entrance for caravans to
+  // park. Placed once per colony at moderate size.
+  trade_depot: { w: 5, h: 4, priority: 3 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -177,6 +180,7 @@ export class ColonyPlanner {
     if (this.needsBrewery(ctx) && this.placeRoom(ctx, "brewery")) return true;
     if (this.needsSmelter(ctx) && this.placeRoom(ctx, "smelter")) return true;
     if (this.needsForge(ctx) && this.placeRoom(ctx, "forge")) return true;
+    if (this.needsTradeDepot(ctx) && this.placeRoom(ctx, "trade_depot")) return true;
 
     // 3. Periodic corridor — every two completed rooms the colony wants
     //    another corridor segment so its reach keeps growing. This is what
@@ -245,6 +249,13 @@ export class ColonyPlanner {
     if (ctx.population < 10) return false;
     if (this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0) return false;
     return this.maintainedAndActiveOfKind("forge", ctx.tick) === 0;
+  }
+
+  private needsTradeDepot(ctx: PlannerContext): boolean {
+    // Caravans only show up once the colony is large enough to be worth
+    // visiting — and only one depot per fortress.
+    if (ctx.population < 6) return false;
+    return this.maintainedAndActiveOfKind("trade_depot", ctx.tick) === 0;
   }
 
   /**

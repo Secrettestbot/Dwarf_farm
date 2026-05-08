@@ -79,6 +79,8 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A smelter is planned ${where}. Smoke will follow.`;
     case "forge":
       return `A forge is sketched in the stone ${where}.`;
+    case "trade_depot":
+      return `A trade depot is mapped out ${where}. The colony plans for visitors.`;
   }
 }
 
@@ -125,6 +127,8 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The smelter is fired ${where}. The first bars are cast.`;
     case "forge":
       return `The forge rings to life ${where}. The first tool is hammered out.`;
+    case "trade_depot":
+      return `The trade depot is finished ${where}. The first caravan will be welcome.`;
   }
 }
 
