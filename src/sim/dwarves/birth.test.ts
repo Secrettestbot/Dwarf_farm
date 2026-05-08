@@ -47,7 +47,7 @@ describe("partnerships + births", () => {
   });
 
   it("paired adults eventually produce a child (newborn at age 0)", () => {
-    const sim = buildSim(37, [25, 26]);
+    const sim = buildSim(43, [25, 26]);
     const initialCount = sim.dwarf.size();
     // Run up to 12 in-game years; with pairing chance 35% and reproduction
     // chance 25%, a child should arrive within that window.

@@ -909,11 +909,23 @@ const MORALE_TICK_INTERVAL = 60; // one morale step per in-game hour
 const INTERRUPT_THIRST = 30;
 const INTERRUPT_HUNGER = 25;
 
+/** Stagger chooseTask across this many ticks per dwarf (GDD §12.3). At
+ * 6 ticks/sec live and AI_BUCKET_COUNT = 4, an idle dwarf gets a job
+ * within ~0.7 real seconds of becoming free — imperceptible to the
+ * player but a 4× cut in chooseTask cost as the population grows. The
+ * interrupt check above still runs every tick so a critical need
+ * doesn't wait for the dwarf's bucket to come round. */
+const AI_BUCKET_COUNT = 4;
+
 /** For each idle dwarf, run chooseTask and assign the resulting job + path.
  * Also interrupts in-flight non-survival jobs when a critical need crosses
  * the interrupt threshold so the dwarf can divert to food / drink. */
 function jobAssignmentSystem(sim: SimWorld): void {
   const dwarves = sim.dwarf.entities;
+  // Staggering only pays off once there are more dwarves than buckets
+  // — a four-dwarf fortress would just feel slower for no real gain.
+  // Below the threshold every dwarf runs chooseTask every tick.
+  const stagger = dwarves.length > AI_BUCKET_COUNT;
   for (let i = 0; i < dwarves.length; i++) {
     const e = dwarves[i];
     // Interrupt: critical need overrides a non-survival job in flight.
@@ -934,6 +946,12 @@ function jobAssignmentSystem(sim: SimWorld): void {
       }
     }
     if (sim.job.has(e)) continue;
+    // Staggered AI (GDD §12.3): each dwarf gets a chooseTask check on
+    // its own bucket tick. With AI_BUCKET_COUNT=4 a fortress of 200
+    // dwarves runs ~50 choose-task calls per tick instead of 200. The
+    // interrupt check above is *not* gated — survival overrides still
+    // fire the same tick they trip.
+    if (stagger && e % AI_BUCKET_COUNT !== sim.tick % AI_BUCKET_COUNT) continue;
     const pos = sim.position.get(e);
     if (!pos) continue;
 
