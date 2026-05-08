@@ -109,6 +109,29 @@ export function narrateOreFirstStrike(rng: Rng, dwarfName: string, depth: number
   ]);
 }
 
+export function narrateArrival(rng: Rng, names: string[]): string {
+  const count = names.length;
+  if (count === 1) {
+    return pick(rng, [
+      `${names[0]} has arrived at the gate, looking for work.`,
+      `A lone dwarf, ${names[0]}, has joined the fortress.`,
+      `${names[0]} walks out of the dust and asks to stay. The colony agrees.`,
+    ]);
+  }
+  if (count <= 3) {
+    const list = count === 2 ? `${names[0]} and ${names[1]}` : `${names[0]}, ${names[1]}, and ${names[2]}`;
+    return pick(rng, [
+      `${list} arrive at the gate, seeking work. They are welcomed in.`,
+      `${list} have joined the fortress.`,
+    ]);
+  }
+  return pick(rng, [
+    `${count} dwarves arrive at the gate, seeking refuge in the mountain. They are welcomed in.`,
+    `A small caravan brings ${count} new dwarves to the fortress.`,
+    `${count} new dwarves have joined the fortress: ${names.slice(0, 2).join(", ")} and ${count - 2} others.`,
+  ]);
+}
+
 export function narrateHostileSpawn(rng: Rng, kindArticle: string, depth: number, spawnY: number): string {
   const where = depthPhrase(depth, spawnY);
   return pick(rng, [

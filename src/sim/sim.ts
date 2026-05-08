@@ -4,9 +4,10 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain } from "./events/narrator";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival } from "./events/narrator";
 import { TICKS_PER_YEAR, TICKS_PER_DAY } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
+import { generateFounder } from "./dwarves/founders";
 import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS } from "./hostiles/types";
@@ -44,6 +45,7 @@ export function tick(sim: SimWorld): void {
   yearRolloverSystem(sim);
   pairingSystem(sim);
   reproductionSystem(sim);
+  migrationSystem(sim);
   populationMilestoneSystem(sim);
   deathSystem(sim);
   needsSystem(sim);
@@ -239,6 +241,65 @@ function awardSkillXp(sim: SimWorld, e: EntityId, skill: SkillId, amount: number
       `${dw.name} has become a ${tier} ${skillName}.`,
     );
   }
+}
+
+// ---- Migration --------------------------------------------------------
+
+const SEASON_TICKS = TICKS_PER_DAY * 6; // 4 seasons per in-game year (≈24 days)
+
+/** Per-population chance of an arrival group landing each season. The
+ * curve is intentionally generous early — a young fortress needs hands —
+ * and tapers to zero past 200 dwarves so the colony has a soft cap. */
+export function migrationChance(pop: number): number {
+  if (pop >= 200) return 0;
+  if (pop >= 100) return 0.10;
+  if (pop >= 50) return 0.30;
+  if (pop >= 20) return 0.45;
+  return 0.60;
+}
+
+/**
+ * Once per in-game season, roll for an arrival group. On a hit, 1–4 fully
+ * generated adult dwarves spawn at the colony's spawn tile (the founders'
+ * chamber, which sits just below the entrance shaft). They go straight
+ * into the autonomous loop alongside the existing dwarves — chooseTask
+ * does not differentiate by origin.
+ */
+function migrationSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % SEASON_TICKS !== 0) return;
+  const pop = sim.dwarf.size();
+  const chance = migrationChance(pop);
+  if (chance === 0) return;
+  if (sim.aiRng.nextFloat() >= chance) return;
+
+  // 1–4 arrivals per season, weighted toward small groups.
+  const r = sim.aiRng.nextFloat();
+  const count = r < 0.45 ? 1 : r < 0.80 ? 2 : r < 0.95 ? 3 : 4;
+
+  // Collect existing first names so immigrants don't collide with the locals.
+  const used = new Set<string>();
+  sim.forEachDwarf((_id, _pos, dw) => used.add(dw.name.split(" ")[0]));
+
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const f = generateFounder(sim.aiRng, used);
+    used.add(f.name.split(" ")[0]);
+    sim.spawnDwarf({
+      name: f.name,
+      x: sim.spawn.x,
+      y: sim.spawn.y,
+      traitIds: f.traits.map((t) => t.id),
+      skills: f.skills,
+      profession: f.profession,
+      age: f.age,
+    });
+    names.push(f.name);
+  }
+  sim.events.add(sim.tick, "social", narrateArrival(sim.aiRng, names));
+  // Population threshold may have just been crossed — let the milestone
+  // system fire its event the same tick, not the next year boundary.
+  checkPopulationMilestones(sim);
 }
 
 function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
