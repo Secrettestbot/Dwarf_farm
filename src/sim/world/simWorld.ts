@@ -119,6 +119,11 @@ export class SimWorld {
    * arrive when their gates land. */
   research: ResearchState = defaultResearch();
 
+  /** True once any dwarf has stood at depth ≥ 1601 — the moment the
+   * Hollow King becomes aware of the colony (GDD §9.4). Gates the
+   * nightmare-event cadence and (later) the King's siege. */
+  hollowKingAware = false;
+
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
 

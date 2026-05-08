@@ -170,6 +170,9 @@ export interface SaveV1 {
   items?: SavedItem[];
   /** Research progress. Optional for back-compat with v2 saves. */
   research?: { current: string | null; progress: number; completed: string[] };
+  /** Whether the Hollow King has noticed the colony yet. Optional for
+   * back-compat — older saves treat the King as dormant. */
+  hollowKingAware?: boolean;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

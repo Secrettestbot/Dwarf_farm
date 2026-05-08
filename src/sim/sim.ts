@@ -72,7 +72,73 @@ export function tick(sim: SimWorld): void {
   healingSystem(sim);
   farmSystem(sim);
   tradeSystem(sim);
+  hollowKingSystem(sim);
   visibilitySystem(sim);
+}
+
+// ---- Hollow King arc (GDD §9.4) --------------------------------------
+//
+// When the first dwarf stands at depth ≥ 1601 the Hollow King becomes
+// aware of the colony. Awareness is one-shot — a moment in the
+// chronicle. Once awake the King's influence builds: every few
+// in-game days a Void-Sensitive dwarf (or any dwarf, if there are
+// none) records a nightmare in the event log. The full siege arc —
+// dwarves carving symbols in their sleep, the sustained campaign —
+// lands when the cosmology systems catch up; this commit ships the
+// awakening + the slow drumbeat of dread.
+
+const NIGHTMARE_INTERVAL_TICKS = TICKS_PER_DAY * 3;
+const HOLLOW_KING_DEPTH = 1601;
+
+function hollowKingSystem(sim: SimWorld): void {
+  if (!sim.hollowKingAware) {
+    let reached = false;
+    sim.forEachDwarf((_id, p) => {
+      if (reached) return;
+      if (p.y - sim.spawn.y >= HOLLOW_KING_DEPTH) reached = true;
+    });
+    if (reached) {
+      sim.hollowKingAware = true;
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        "Something deep beneath the stone has noticed the colony. The dwarves at the deepest face go quiet for a long minute.",
+      );
+    }
+    return;
+  }
+  if (sim.tick === 0) return;
+  if (sim.tick % NIGHTMARE_INTERVAL_TICKS !== 0) return;
+  // Pick a dreamer — prefer Void-Sensitive, else Dream-Touched, else any.
+  const ents = sim.dwarf.entities;
+  let dreamer: EntityId | null = null;
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    if (dw.traitIds.includes("void_sensitive")) { dreamer = id; break; }
+  }
+  if (dreamer === null) {
+    for (const id of ents) {
+      const dw = sim.dwarf.get(id);
+      if (!dw) continue;
+      if (dw.traitIds.includes("dream_touched")) { dreamer = id; break; }
+    }
+  }
+  if (dreamer === null && ents.length > 0) {
+    dreamer = ents[sim.aiRng.nextRange(0, ents.length)];
+  }
+  if (dreamer === null) return;
+  const dw = sim.dwarf.get(dreamer);
+  if (!dw) return;
+  const dreams = [
+    `${dw.name} dreams of a great hollow eye opening in the dark.`,
+    `${dw.name} wakes shouting. They will not say what they saw.`,
+    `${dw.name} carves a symbol into the wall in their sleep, then weeps to find it.`,
+    `${dw.name} dreams of a name that cannot be spoken aloud.`,
+    `${dw.name} stands at the deepest face for an hour, listening to nothing in particular.`,
+  ];
+  const text = dreams[sim.aiRng.nextRange(0, dreams.length)];
+  sim.events.add(sim.tick, "crisis", text);
 }
 
 /** Friendly depth phrasing — used by gem-strike narration. Mirrors the
@@ -1118,17 +1184,31 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     } else if (
       tileType === TileType.RawDiamond ||
       tileType === TileType.RawRuby ||
-      tileType === TileType.RawEmerald
+      tileType === TileType.RawEmerald ||
+      tileType === TileType.SoulCrystal
     ) {
       itemKind = "gem";
       const dw = sim.dwarf.get(e)!;
       const gemName =
         tileType === TileType.RawDiamond ? "diamond" :
-        tileType === TileType.RawRuby ? "ruby" : "emerald";
+        tileType === TileType.RawRuby ? "ruby" :
+        tileType === TileType.RawEmerald ? "emerald" : "soul-crystal";
       sim.events.add(
         sim.tick,
         "discovery",
         `${dw.name} strikes a ${gemName} cluster, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
+      );
+    } else if (tileType === TileType.Adamantite || tileType === TileType.VoidOre) {
+      // Treated as ore for now — Tier 5 Adamantite Smelting and Tier 6
+      // Void Metallurgy split these out into their own counters when
+      // their research lands.
+      itemKind = "ore";
+      const dw = sim.dwarf.get(e)!;
+      const name = tileType === TileType.Adamantite ? "adamantite" : "void-ore";
+      sim.events.add(
+        sim.tick,
+        "discovery",
+        `${dw.name} strikes ${name}, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
       );
     } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
       itemKind = "stone";

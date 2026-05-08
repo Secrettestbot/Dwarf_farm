@@ -93,7 +93,54 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   },
 ];
 
-export const ALL_TOPICS: ResearchTopic[] = [...TIER_1_TOPICS, ...TIER_2_TOPICS];
+/** GDD Tier 3 — Advanced Craft & Military. Unlocks military depth and
+ * the gem economy. */
+export const TIER_3_TOPICS: ResearchTopic[] = [
+  { id: "advanced_metallurgy", name: "Advanced Metallurgy", tier: 3, cost: 1400, prereqs: ["steel_alloying"] },
+  { id: "weaponsmithing", name: "Weaponsmithing", tier: 3, cost: 1300, prereqs: ["armoury_basics", "advanced_metallurgy"] },
+  { id: "military_tactics", name: "Military Tactics", tier: 3, cost: 1500, prereqs: ["weaponsmithing"] },
+  { id: "fortification_design", name: "Fortification Design", tier: 3, cost: 1500, prereqs: ["masonry_and_mortaring", "carpentry_mechanisms"] },
+  { id: "gem_cutting", name: "Gem Cutting", tier: 3, cost: 1200, prereqs: [] },
+  { id: "gem_inlay", name: "Gem Inlay", tier: 3, cost: 1300, prereqs: ["gem_cutting"] },
+  { id: "advanced_medicine", name: "Advanced Medicine", tier: 3, cost: 1300, prereqs: ["medical_practice"] },
+];
+
+/** GDD Tier 4 — Deep Knowledge. Most require Layer 4 access in the
+ * GDD, but our system doesn't gate on world-state today, so they
+ * unlock by prereq alone. */
+export const TIER_4_TOPICS: ResearchTopic[] = [
+  { id: "magma_tapping", name: "Magma Tapping", tier: 4, cost: 1800, prereqs: ["advanced_metallurgy"] },
+  { id: "magma_forge_craft", name: "Magma Forge Craft", tier: 4, cost: 1900, prereqs: ["magma_tapping"] },
+  { id: "relic_analysis", name: "Relic Analysis", tier: 4, cost: 2000, prereqs: ["advanced_medicine"] },
+  { id: "alchemy_basics", name: "Alchemy Basics", tier: 4, cost: 1700, prereqs: ["advanced_medicine"] },
+  { id: "deep_cartography", name: "Deep Cartography", tier: 4, cost: 1600, prereqs: ["advanced_metallurgy"] },
+];
+
+/** GDD Tier 5 — Ancient Lore. The GDD requires deciphered ancient
+ * texts; here we gate on prereqs only. Reaching these still means
+ * a long, sustained research effort. */
+export const TIER_5_TOPICS: ResearchTopic[] = [
+  { id: "adamantite_smelting", name: "Adamantite Smelting", tier: 5, cost: 2500, prereqs: ["magma_forge_craft"] },
+  { id: "rune_inscription", name: "Rune Inscription", tier: 5, cost: 2500, prereqs: ["relic_analysis"] },
+  { id: "void_engineering", name: "Void Engineering", tier: 5, cost: 2700, prereqs: ["alchemy_basics", "relic_analysis"] },
+  { id: "the_deep_breath", name: "The Deep Breath", tier: 5, cost: 2400, prereqs: ["alchemy_basics"] },
+];
+
+/** GDD Tier 6 — Void Science. The final research topics. */
+export const TIER_6_TOPICS: ResearchTopic[] = [
+  { id: "void_metallurgy", name: "Void Metallurgy", tier: 6, cost: 3500, prereqs: ["adamantite_smelting", "void_engineering"] },
+  { id: "anchor_runes", name: "Anchor Runes", tier: 6, cost: 3500, prereqs: ["rune_inscription", "void_engineering"] },
+  { id: "the_kings_name", name: "The King's Name", tier: 6, cost: 5000, prereqs: ["void_metallurgy", "anchor_runes"] },
+];
+
+export const ALL_TOPICS: ResearchTopic[] = [
+  ...TIER_1_TOPICS,
+  ...TIER_2_TOPICS,
+  ...TIER_3_TOPICS,
+  ...TIER_4_TOPICS,
+  ...TIER_5_TOPICS,
+  ...TIER_6_TOPICS,
+];
 
 export const TOPICS_BY_ID: Record<string, ResearchTopic> = (() => {
   const m: Record<string, ResearchTopic> = {};

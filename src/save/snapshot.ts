@@ -169,6 +169,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       progress: sim.research.progress,
       completed: [...sim.research.completed],
     },
+    hollowKingAware: sim.hollowKingAware,
   };
 }
 
@@ -370,6 +371,7 @@ export function restore(save: SaveV1): SimWorld {
     sim.research.progress = save.research.progress ?? 0;
     sim.research.completed = [...(save.research.completed ?? [])];
   }
+  if (save.hollowKingAware) sim.hollowKingAware = true;
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).

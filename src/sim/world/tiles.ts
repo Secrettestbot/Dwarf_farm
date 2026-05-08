@@ -53,6 +53,15 @@ export const enum TileType {
    * distinct visual marker, signalling places where future Tier 5
    * ancient-text research can be performed. */
   AncientRuin = 25,
+  // Layer 5+ content: the Ancient Dark and the Underworld below it.
+  /** Adamantite vein — Layer 5 ore (§5.2). Mined like ore but counts as
+   * its own metal once a smelter / forge integration arrives. */
+  Adamantite = 26,
+  /** Void-ore — found in Layer 6 (§5.2 Underworld). The only material
+   * the Hollow King's physical form cannot destroy. */
+  VoidOre = 27,
+  /** Soul-crystal — Tier 5 special gem with attunement properties. */
+  SoulCrystal = 28,
 }
 
 export interface TileInfo {
@@ -90,6 +99,9 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.RawEmerald]: { name: "raw emerald", walkable: false, solid: true, color: 0x40a058 },
   [TileType.MagmaVent]: { name: "magma vent", walkable: true, solid: false, color: 0xd84020 },
   [TileType.AncientRuin]: { name: "ancient ruin", walkable: true, solid: false, color: 0x9080a0 },
+  [TileType.Adamantite]: { name: "adamantite", walkable: false, solid: true, color: 0xc8d0ff },
+  [TileType.VoidOre]: { name: "void-ore", walkable: false, solid: true, color: 0x402850 },
+  [TileType.SoulCrystal]: { name: "soul-crystal", walkable: false, solid: true, color: 0x7090e0 },
 };
 
 export function tileIsGem(t: number): boolean {

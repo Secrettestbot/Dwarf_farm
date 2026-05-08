@@ -89,13 +89,29 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
           } else if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.78) {
             t = TileType.Ore;
           }
-        } else {
-          // Ancient Dark + below: solid granite, near-silent. Sparse
-          // ancient ruins poke through. The Hollow King content arrives
-          // alongside Layer 6 in a later session.
+        } else if (y < 1600) {
+          // Ancient Dark (Layer 5): solid granite, near-silent. Sparse
+          // ancient ruins poke through, plus the first adamantite veins
+          // and rare soul-crystal pockets.
           t = TileType.Granite;
-          if (noise2(oreSeed + 137, x * 0.06, y * 0.06) > 0.86) t = TileType.AncientRuin;
+          const ruinN = noise2(oreSeed + 137, x * 0.06, y * 0.06);
+          const adaN = noise2(oreSeed + 149, x * 0.18, y * 0.18);
+          const soulN = noise2(oreSeed + 163, x * 0.32, y * 0.32);
+          if (ruinN > 0.86) t = TileType.AncientRuin;
+          else if (soulN > 0.88) t = TileType.SoulCrystal;
+          else if (adaN > 0.78) t = TileType.Adamantite;
           else if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.80) t = TileType.Ore;
+        } else {
+          // Underworld (Layer 6, §5.2): impossible architecture. Mostly
+          // dense rock with veins of void-ore and the occasional ancient
+          // ruin. The Hollow King's domain — narrative awakens when the
+          // first dwarf stands at this depth.
+          t = TileType.Granite;
+          const voidN = noise2(oreSeed + 191, x * 0.20, y * 0.20);
+          const adaN = noise2(oreSeed + 211, x * 0.18, y * 0.18);
+          if (voidN > 0.74) t = TileType.VoidOre;
+          else if (adaN > 0.74) t = TileType.Adamantite;
+          else if (noise2(oreSeed + 137, x * 0.06, y * 0.06) > 0.86) t = TileType.AncientRuin;
         }
 
         // 3. Carve natural caverns. fbm gives big blob shapes; threshold cuts holes.
