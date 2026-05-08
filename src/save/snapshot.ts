@@ -153,6 +153,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     populationMilestones: Array.from(sim.populationMilestones),
     hostiles: collectHostiles(sim),
     sliders: { ...sim.sliders },
+    emergency: { ...sim.emergency },
   };
 }
 
@@ -318,6 +319,9 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.sliders) {
     sim.sliders = { ...sim.sliders, ...save.sliders };
+  }
+  if (save.emergency) {
+    sim.emergency = { ...sim.emergency, ...save.emergency };
   }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them

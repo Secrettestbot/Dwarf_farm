@@ -3,6 +3,7 @@
 
 import { SkillLevels } from "../sim/dwarves/skills";
 import { SliderState } from "../sim/sliders";
+import { EmergencyState } from "../sim/emergency";
 
 export type GameMode = "legacy" | "saga";
 
@@ -35,7 +36,7 @@ export interface SavedDwarf {
   };
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter";
     targetX: number;
     targetY: number;
     progress: number;
@@ -145,6 +146,8 @@ export interface SaveV1 {
   /** Player priority sliders. Optional for back-compat with v2 saves —
    * older saves restore to the neutral defaults. */
   sliders?: SliderState;
+  /** Active emergency-button state. Optional for back-compat. */
+  emergency?: EmergencyState;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

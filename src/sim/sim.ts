@@ -11,6 +11,7 @@ import { generateFounder } from "./dwarves/founders";
 import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS } from "./hostiles/types";
+import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -50,6 +51,7 @@ export function tick(sim: SimWorld): void {
     events: sim.events,
   });
   yearRolloverSystem(sim);
+  emergencySystem(sim);
   pairingSystem(sim);
   reproductionSystem(sim);
   migrationSystem(sim);
@@ -65,6 +67,20 @@ export function tick(sim: SimWorld): void {
   healingSystem(sim);
   farmSystem(sim);
   visibilitySystem(sim);
+}
+
+// ---- Emergency state machine ------------------------------------------
+//
+// Auto-cancels Alarm after one in-game hour and writes the cooldown.
+// Evacuate and Lockdown only end on player input.
+
+function emergencySystem(sim: SimWorld): void {
+  const e = sim.emergency;
+  if (e.mode === "alarm" && sim.tick - e.startedAtTick >= ALARM_DURATION_TICKS) {
+    e.mode = "none";
+    e.alarmCooldownUntil = sim.tick + ALARM_COOLDOWN_TICKS;
+    sim.events.add(sim.tick, "crisis", "The alarm has been lifted. The fortress returns to its work.");
+  }
 }
 
 // ---- Visibility / fog of war ------------------------------------------
@@ -345,6 +361,9 @@ export function migrationChance(pop: number): number {
 function migrationSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
   if (sim.tick % SEASON_TICKS !== 0) return;
+  // Lockdown blocks immigrants — the GDD's "any immigrant group currently
+  // travelling to the fortress cannot enter" rule.
+  if (sim.emergency.mode === "lockdown") return;
   const pop = sim.dwarf.size();
   const chance = migrationChance(pop);
   if (chance === 0) return;
@@ -595,8 +614,23 @@ function workSystem(sim: SimWorld): void {
       case "maintain":
         progressMaintain(sim, e, job, pos);
         break;
+      case "shelter":
+        progressShelter(sim, e, job, pos);
+        break;
     }
   }
+}
+
+/** Sit at the Safe Zone tile until the emergency lifts. The job is dropped
+ * and chooseTask re-evaluates as soon as the shelter mode ends. */
+function progressShelter(sim: SimWorld, e: EntityId, _job: JobAssignment, _pos: { x: number; y: number }): void {
+  if (sim.emergency.mode !== "alarm" && sim.emergency.mode !== "evacuate") {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+  // While sheltering, the job sticks. The dwarf has already pathed to the
+  // spawn (or as close as they can reach); they stand idle there.
 }
 
 function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {

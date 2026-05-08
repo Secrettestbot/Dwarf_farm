@@ -9,6 +9,7 @@ import { findMineTarget } from "./chooseJob";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
 import { BlueprintKind, isRoomNeglected } from "../planner/blueprint";
+import { isShelterMode } from "../emergency";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
@@ -48,6 +49,21 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // Priority order, strictest survival need first. Each branch may fall
   // through if no target is found, so a dwarf never gets stuck idle when a
   // lower-priority alternative is reachable.
+
+  // 0. Emergency shelter override — Alarm and Evacuate both pull every
+  //    civilian to the Safe Zone (currently the spawn tile). Even hunger
+  //    and thirst defer until the panic subsides; that matches the GDD's
+  //    "drop their current job (including eating, sleeping, and
+  //    socialising)" rule. Lockdown does not pull dwarves — it just
+  //    blocks the perimeter and the migration system.
+  if (isShelterMode(sim.emergency)) {
+    return {
+      kind: "shelter" as JobKind,
+      targetX: sim.spawn.x,
+      targetY: sim.spawn.y,
+      progress: 0,
+    };
+  }
 
   // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours. The
   //    dwarf walks to the nearest stockpile (or dining hall) — they don't

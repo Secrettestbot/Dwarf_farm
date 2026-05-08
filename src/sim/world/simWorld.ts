@@ -8,6 +8,7 @@ import { EventLog } from "../events/eventLog";
 import { TICKS_PER_YEAR } from "../time";
 import { Hostile, Health, HOSTILE_DEFS, HostileKind } from "../hostiles/types";
 import { SliderState, defaultSliders } from "../sliders";
+import { EmergencyState, defaultEmergency } from "../emergency";
 
 const DWARF_BASE_MAX_HP = 100;
 
@@ -85,6 +86,10 @@ export class SimWorld {
   /** Player-tweakable priority sliders (GDD §4.1). Mutated directly by the
    * UI; read by chooseTask each tick. Round-trips through save. */
   sliders: SliderState = defaultSliders();
+
+  /** Active emergency mode (GDD §4.3) plus cooldown bookkeeping. Same
+   * mutate-from-UI, read-from-sim contract as `sliders`. */
+  emergency: EmergencyState = defaultEmergency();
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;

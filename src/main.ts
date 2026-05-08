@@ -7,6 +7,7 @@ import { renderWorld } from "./render/renderer";
 import { Minimap } from "./render/minimap";
 import { Hud } from "./ui/hud";
 import { SliderPanel } from "./ui/sliders";
+import { EmergencyPanel } from "./ui/emergency";
 import { EventLogPanel } from "./ui/eventLogPanel";
 import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
@@ -196,6 +197,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
   const inspector = new DwarfInspector(uiHost);
   const sliders = new SliderPanel(uiHost, sim);
   void sliders;
+  const emergency = new EmergencyPanel(uiHost, sim);
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
   canvas.addEventListener("pointerdown", (e) => {
@@ -288,6 +290,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
     hud.update(clock, sim);
     eventPanel.update(sim.events.events);
     inspector.update(sim);
+    emergency.update();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
