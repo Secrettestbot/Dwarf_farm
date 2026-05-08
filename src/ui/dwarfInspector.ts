@@ -112,6 +112,8 @@ export class DwarfInspector {
       : "";
     const needsHtml = needs
       ? `
+        ${bar("Hunger", needs.hunger)}
+        ${bar("Thirst", needs.thirst)}
         ${bar("Sleep", needs.sleep)}
         ${bar("Social", needs.social)}
       `

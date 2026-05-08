@@ -22,8 +22,15 @@ export const WANDER_LINGER_TICKS = 12; // after arrival, pause briefly before ne
 
 // Need decay rates: units lost per tick. Stored as 1/RATE so we can use the
 // per-need accumulator pattern without floating-point determinism worries.
-const SLEEP_DECAY_TICKS_PER_UNIT = 30; // 100 → 0 over ~3000 ticks (~50h)
+const SLEEP_DECAY_TICKS_PER_UNIT = 30;  // 100 → 0 over ~3000 ticks (~50h)
 const SOCIAL_DECAY_TICKS_PER_UNIT = 60; // 100 → 0 over ~6000 ticks (~100h)
+// Hunger and thirst are the real survival pressures: thirst decays fastest
+// (hits 0 in ~24 in-game hours), hunger second-fastest (~48h). Numbers tuned
+// so a healthy adult in a stocked colony eats / drinks roughly daily.
+const HUNGER_DECAY_TICKS_PER_UNIT = 30; // 100 → 0 over ~3000 ticks (~50h)
+const THIRST_DECAY_TICKS_PER_UNIT = 15; // 100 → 0 over ~1500 ticks (~25h)
+export const EAT_TICKS = 30;
+export const DRINK_TICKS = 18;
 
 /**
  * Single deterministic tick. Used by both the main thread game loop and the
@@ -383,12 +390,15 @@ function yearRolloverSystem(sim: SimWorld): void {
  */
 function needsSystem(sim: SimWorld): void {
   const ents = sim.dwarf.entities;
-  for (let i = 0; i < ents.length; i++) {
+  // Iterate backwards so killDwarf-from-starvation can mutate the list.
+  for (let i = ents.length - 1; i >= 0; i--) {
     const e = ents[i];
     const n = sim.needs.get(e);
     if (!n) continue;
     n.decayAccumSleep++;
     n.decayAccumSocial++;
+    n.decayAccumHunger++;
+    n.decayAccumThirst++;
     if (n.decayAccumSleep >= SLEEP_DECAY_TICKS_PER_UNIT) {
       n.sleep = Math.max(0, n.sleep - 1);
       n.decayAccumSleep -= SLEEP_DECAY_TICKS_PER_UNIT;
@@ -396,6 +406,21 @@ function needsSystem(sim: SimWorld): void {
     if (n.decayAccumSocial >= SOCIAL_DECAY_TICKS_PER_UNIT) {
       n.social = Math.max(0, n.social - 1);
       n.decayAccumSocial -= SOCIAL_DECAY_TICKS_PER_UNIT;
+    }
+    if (n.decayAccumHunger >= HUNGER_DECAY_TICKS_PER_UNIT) {
+      n.hunger = Math.max(0, n.hunger - 1);
+      n.decayAccumHunger -= HUNGER_DECAY_TICKS_PER_UNIT;
+    }
+    if (n.decayAccumThirst >= THIRST_DECAY_TICKS_PER_UNIT) {
+      n.thirst = Math.max(0, n.thirst - 1);
+      n.decayAccumThirst -= THIRST_DECAY_TICKS_PER_UNIT;
+    }
+    // Death from starvation / dehydration. Thirst kills first because it
+    // decays faster; the chronicle records the cause.
+    if (n.thirst <= 0) {
+      killDwarf(sim, e, "dehydration");
+    } else if (n.hunger <= 0) {
+      killDwarf(sim, e, "starvation");
     }
   }
 }
@@ -487,6 +512,12 @@ function workSystem(sim: SimWorld): void {
         break;
       case "wander":
         progressWander(sim, e, job);
+        break;
+      case "eat":
+        progressEat(sim, e, job);
+        break;
+      case "drink":
+        progressDrink(sim, e, job);
         break;
     }
   }
@@ -582,6 +613,47 @@ function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void
     if (partnerNeeds) partnerNeeds.social = Math.min(100, partnerNeeds.social + 2);
   }
   if (job.progress >= SOCIALISE_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+}
+
+function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
+  const needs = sim.needs.get(e);
+  if (!needs) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // The dwarf consumes one unit of food on the first tick of the meal so
+  // a starving dwarf with food in the stockpile recovers immediately;
+  // the rest of EAT_TICKS is the visible "eating" duration.
+  if (job.progress === 0 && sim.stockpile.food > 0) {
+    sim.stockpile.food -= 1;
+    needs.hunger = Math.min(100, needs.hunger + 60);
+  }
+  job.progress++;
+  if (job.progress >= EAT_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+}
+
+function progressDrink(sim: SimWorld, e: EntityId, job: JobAssignment): void {
+  const needs = sim.needs.get(e);
+  if (!needs) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  if (job.progress === 0 && sim.stockpile.drink > 0) {
+    sim.stockpile.drink -= 1;
+    needs.thirst = Math.min(100, needs.thirst + 60);
+  }
+  job.progress++;
+  if (job.progress >= DRINK_TICKS) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);

@@ -62,7 +62,10 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
 const CORRIDOR_MIN_LEN = 4;
 const CORRIDOR_MAX_LEN = 10;
 const ORE_SENSE_RADIUS = 12; // an ore tile is sense-able this many tiles from walkable
-const MAX_ACTIVE_BLUEPRINTS = 3;
+/** One architect per ARCHITECT_PER_DWARVES dwarves: a small colony of seven
+ * gets one active blueprint at a time, but a larger colony parallelises the
+ * work and expands faster. */
+const ARCHITECT_PER_DWARVES = 7;
 
 interface StylePref {
   bedroom: number;
@@ -127,7 +130,11 @@ export class ColonyPlanner {
     if (this.accum < PLAN_INTERVAL_TICKS) return;
     this.accum = 0;
 
-    while (this.activeCount() < MAX_ACTIVE_BLUEPRINTS) {
+    // Architect count scales with population: 1 architect per 7 dwarves,
+    // minimum 1. As the colony grows, more parallel blueprints can be
+    // active, so growth speeds up.
+    const architects = Math.max(1, Math.ceil(ctx.population / ARCHITECT_PER_DWARVES));
+    while (this.activeCount() < architects) {
       if (!this.tryPlaceNext(ctx)) break;
     }
   }
@@ -204,7 +211,7 @@ export class ColonyPlanner {
 
   private placeRoom(ctx: PlannerContext, kind: BlueprintKind): Blueprint | null {
     const dims = ROOM_DIMS[kind];
-    const { grid, spawn } = ctx;
+    const { grid } = ctx;
     let best: { x: number; y: number; score: number } | null = null;
 
     const xBias = (DEFAULT_STYLE as unknown as Record<string, number>)[kind] ?? 0;
@@ -238,9 +245,7 @@ export class ColonyPlanner {
         if (seen.has(key)) continue;
         seen.add(key);
         if (!this.candidateValid(ctx, ox, oy, dims.w, dims.h)) continue;
-        const dx = ox - spawn.x;
-        const dy = oy - spawn.y;
-        const score = this.scoreRoomCandidate(dx, dy, xBias);
+        const score = this.scoreRoomCandidate(ox, oy, kind, ctx.spawn, xBias);
         if (
           best === null ||
           score > best.score ||
@@ -255,12 +260,50 @@ export class ColonyPlanner {
     return this.commitBlueprint(ctx, kind, best.x, best.y, dims.w, dims.h, rectCavity(best.x, best.y, dims.w, dims.h));
   }
 
-  private scoreRoomCandidate(dx: number, dy: number, xBias: number): number {
-    const distSq = dx * dx + dy * dy;
-    let score = -distSq;
-    if (dy > 0) score += 40;
-    if (dy < -2) score -= 40;
-    if (xBias !== 0) score += xBias * dx * 2;
+  /**
+   * Score a candidate room placement. The previous version used a
+   * −dist² penalty against the spawn, which made every bedroom land
+   * within spitting distance of the entrance. The new shape:
+   *
+   *   - Reward depth (+0.4 per tile below spawn, capped) so rooms follow
+   *     the colony's descent rather than clustering at the surface.
+   *   - Reward spread from the *nearest same-kind* room (capped at 30
+   *     tiles distance) — bedrooms scatter, dining halls don't pile up.
+   *   - Style bias (the existing left/right pull for dining/stockpile).
+   *
+   * The result: bedrooms place along the colony's descending shaft, not
+   * shoulder-to-shoulder under the entrance.
+   */
+  private scoreRoomCandidate(
+    ox: number,
+    oy: number,
+    kind: BlueprintKind,
+    spawn: { x: number; y: number },
+    xBias: number,
+  ): number {
+    let score = 0;
+    // Depth reward: rooms further below the surface score better, with a
+    // soft cap so absurdly-deep candidates aren't overweight.
+    const depth = oy - spawn.y;
+    score += Math.min(80, Math.max(0, depth)) * 0.4;
+    if (depth < -2) score -= 40; // discourage placing rooms above the spawn
+    // Spread bonus: prefer placement far from existing same-kind rooms.
+    let nearest = Infinity;
+    for (const b of this.blueprints) {
+      if (b.kind !== kind) continue;
+      const dx = ox - b.originX;
+      const dy = oy - b.originY;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < nearest) nearest = d;
+    }
+    if (nearest === Infinity) {
+      // No same-kind rooms exist yet — neutral spread score.
+      score += 30;
+    } else {
+      score += Math.min(60, nearest);
+    }
+    // Style bias (left/right pull) — preserved.
+    if (xBias !== 0) score += xBias * (ox - spawn.x) * 0.5;
     return score;
   }
 

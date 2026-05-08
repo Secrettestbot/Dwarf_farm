@@ -96,7 +96,10 @@ export class Hud {
     const built = sim.planner.completed;
     this.plannerLabel.textContent = `Plans: ${active} digging · ${built} done`;
     const sp = sim.stockpile;
-    this.stockpileLabel.textContent = `Ore ${sp.ore} · Stone ${sp.stone} · Dirt ${sp.dirt}`;
+    this.stockpileLabel.innerHTML =
+      `<span style="color:#9ad3a3;">Food ${sp.food}</span> · ` +
+      `<span style="color:#8aa9ff;">Drink ${sp.drink}</span> · ` +
+      `Ore ${sp.ore} · Stone ${sp.stone}`;
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }

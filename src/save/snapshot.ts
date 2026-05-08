@@ -75,7 +75,16 @@ export function snapshot(input: SnapshotInput): SaveV1 {
         ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick, wasSevereWound: h.wasSevereWound }
         : undefined,
       needs: n
-        ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
+        ? {
+            sleep: n.sleep,
+            social: n.social,
+            hunger: n.hunger,
+            thirst: n.thirst,
+            decayAccumSleep: n.decayAccumSleep,
+            decayAccumSocial: n.decayAccumSocial,
+            decayAccumHunger: n.decayAccumHunger,
+            decayAccumThirst: n.decayAccumThirst,
+          }
         : undefined,
       job: savedJob,
       pathing: savedPathing,
@@ -129,7 +138,13 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     cameraY: input.cameraY,
     zoomIndex: input.zoomIndex,
     events: sim.events.events.map((e) => ({ tick: e.tick, category: e.category, text: e.text })),
-    stockpile: { ore: sim.stockpile.ore, stone: sim.stockpile.stone, dirt: sim.stockpile.dirt },
+    stockpile: {
+      ore: sim.stockpile.ore,
+      stone: sim.stockpile.stone,
+      dirt: sim.stockpile.dirt,
+      food: sim.stockpile.food,
+      drink: sim.stockpile.drink,
+    },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
     populationMilestones: Array.from(sim.populationMilestones),
@@ -278,6 +293,8 @@ export function restore(save: SaveV1): SimWorld {
     sim.stockpile.ore = save.stockpile.ore;
     sim.stockpile.stone = save.stockpile.stone;
     sim.stockpile.dirt = save.stockpile.dirt;
+    if (save.stockpile.food !== undefined) sim.stockpile.food = save.stockpile.food;
+    if (save.stockpile.drink !== undefined) sim.stockpile.drink = save.stockpile.drink;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;

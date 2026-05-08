@@ -43,20 +43,28 @@ export interface Pathing {
 /**
  * Internal drives. All in 0..100. Decays over real time, restored by
  * matching activity. Once a need crosses a low threshold the dwarf will drop
- * non-emergency work to address it. Hunger / thirst lands when farming &
- * stockpiles arrive in a later session.
+ * non-emergency work to address it. Hunger / thirst are the most urgent —
+ * they can kill if neglected.
  */
 export interface Needs {
   /** Sleep — drops continuously; restored by sleeping. */
   sleep: number;
   /** Social — drops slowly; restored by talking with another dwarf. */
   social: number;
-  /** Internal accumulator for sub-tick decay. Carries fractional need loss. */
+  /** Hunger — drops faster than sleep; restored by eating. At 0, the dwarf
+   * starves to death. */
+  hunger: number;
+  /** Thirst — drops fastest; restored by drinking. At 0, the dwarf dies of
+   * dehydration. */
+  thirst: number;
+  /** Internal accumulators for sub-tick decay. */
   decayAccumSleep: number;
   decayAccumSocial: number;
+  decayAccumHunger: number;
+  decayAccumThirst: number;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander";
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink";
 
 export interface JobAssignment {
   kind: JobKind;

@@ -22,10 +22,19 @@ export interface SavedDwarf {
   /** Partner referenced by index into the saved dwarves array, or null. */
   partnerIndex?: number | null;
   lastJobTick: number;
-  needs?: { sleep: number; social: number; decayAccumSleep: number; decayAccumSocial: number };
-  /** In-flight job (mine / sleep / socialise / wander) at save time. */
+  needs?: {
+    sleep: number;
+    social: number;
+    hunger?: number;
+    thirst?: number;
+    decayAccumSleep: number;
+    decayAccumSocial: number;
+    decayAccumHunger?: number;
+    decayAccumThirst?: number;
+  };
+  /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink";
     targetX: number;
     targetY: number;
     progress: number;
@@ -77,6 +86,8 @@ export interface SavedStockpile {
   ore: number;
   stone: number;
   dirt: number;
+  food?: number;
+  drink?: number;
 }
 
 export interface SaveV1 {

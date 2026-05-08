@@ -19,7 +19,16 @@ export interface Stockpile {
   /** Loose dirt and sand pulled from the Skin layer. Mostly useless
    * structurally but tracked because the dwarves did the work. */
   dirt: number;
+  /** Food units. Each meal a dwarf eats consumes 1. Replenished by
+   * farming + hauling in a later session; for now the founders bring a
+   * sizeable starter cache. */
+  food: number;
+  /** Drink units (water, ale). Same model as food. */
+  drink: number;
 }
+
+const STARTER_FOOD = 1000;
+const STARTER_DRINK = 1000;
 
 /**
  * Aggregate of everything the deterministic tick function needs. The same
@@ -60,7 +69,7 @@ export class SimWorld {
   // Resource accumulation — a real stockpile system with workshops arrives
   // in a later session, but tracking what's been pulled from the rock now
   // gives the player something concrete to watch grow.
-  readonly stockpile: Stockpile = { ore: 0, stone: 0, dirt: 0 };
+  readonly stockpile: Stockpile = { ore: 0, stone: 0, dirt: 0, food: STARTER_FOOD, drink: STARTER_DRINK };
 
   // True once the colony has hit its first ore tile. Used to fire a one-
   // time discovery event the next time a dwarf strikes ore.
@@ -134,8 +143,12 @@ export class SimWorld {
     this.needs.set(e, {
       sleep: spec.initialNeeds?.sleep ?? 100,
       social: spec.initialNeeds?.social ?? 100,
+      hunger: spec.initialNeeds?.hunger ?? 100,
+      thirst: spec.initialNeeds?.thirst ?? 100,
       decayAccumSleep: spec.initialNeeds?.decayAccumSleep ?? 0,
       decayAccumSocial: spec.initialNeeds?.decayAccumSocial ?? 0,
+      decayAccumHunger: spec.initialNeeds?.decayAccumHunger ?? 0,
+      decayAccumThirst: spec.initialNeeds?.decayAccumThirst ?? 0,
     });
     return e;
   }

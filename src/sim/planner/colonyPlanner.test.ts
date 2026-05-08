@@ -13,6 +13,53 @@ describe("ColonyPlanner", () => {
     testRng = Rng.fromSeed(2024);
   });
 
+  it("active blueprint cap scales with population (1 architect per 7)", () => {
+    const w = generateWorld({ seed: 31, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    // With population 14 the cap is ceil(14/7) = 2 architects → up to 2
+    // active blueprints at once. Run one evaluation cycle.
+    for (let t = 1; t <= 60; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 14, rng: testRng });
+    }
+    expect(planner.activeCount()).toBeLessThanOrEqual(2);
+    expect(planner.activeCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("a 21-dwarf colony places up to 3 blueprints in parallel", () => {
+    const w = generateWorld({ seed: 33, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    for (let t = 1; t <= 60; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 21, rng: testRng });
+    }
+    expect(planner.activeCount()).toBeLessThanOrEqual(3);
+  });
+
+  it("bedrooms spread out instead of clustering at the surface", () => {
+    const w = generateWorld({ seed: 35, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    // Run long enough to emit several bedrooms; hand-excavate so the
+    // colony's reachable area expands.
+    for (let t = 1; t <= 4000; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 14, rng: testRng });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    const beds = planner.blueprints.filter((b) => b.kind === "bedroom");
+    expect(beds.length).toBeGreaterThanOrEqual(3);
+    // Range of bedroom Y should span at least 8 tiles — they're not all at
+    // the surface.
+    const ys = beds.map((b) => b.originY);
+    const span = Math.max(...ys) - Math.min(...ys);
+    expect(span).toBeGreaterThan(8);
+  });
+
   it("does not emit anything before its evaluation cadence elapses", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
@@ -44,19 +91,16 @@ describe("ColonyPlanner", () => {
     }
   });
 
-  it("emits the first 2 bedrooms at population 1 before anything else", () => {
+  it("emits the first bedroom at population 1", () => {
     const w = generateWorld({ seed: 17, width: 200, height: 500 });
     const planner = new ColonyPlanner();
     for (let t = 1; t <= 60; t++) {
       planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1, rng: testRng });
     }
-    // pop=1 → ceil(1*1.5)=2 bedrooms target. The first two emissions must
-    // both be bedrooms; a 3rd active slot is filled by a fallback corridor
-    // so the colony begins to explore in parallel.
+    // pop=1 → 1 architect → 1 active blueprint at a time. Subsequent
+    // blueprints emit only after the first is dug.
+    expect(planner.blueprints.length).toBe(1);
     expect(planner.blueprints[0]?.kind).toBe("bedroom");
-    expect(planner.blueprints[1]?.kind).toBe("bedroom");
-    const kinds = planner.blueprints.map((b) => b.kind);
-    expect(kinds.filter((k) => k === "bedroom").length).toBe(2);
   });
 
   it("emits multiple blueprints as completed cavities free the gate (population 7)", () => {

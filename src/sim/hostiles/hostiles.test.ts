@@ -55,7 +55,27 @@ describe("hostiles: spawn + combat", () => {
     const dwarfId = sim.dwarf.entities[0];
     const dwarfPos = sim.position.get(dwarfId)!;
     const ratId = sim.spawnHostile({ kind: "cave_rat", x: dwarfPos.x + 1, y: dwarfPos.y });
-    for (let i = 0; i < 4000; i++) tick(sim);
+    // Pin survival needs so the dwarf doesn't break off to eat / drink /
+    // sleep at night — we're testing combat, not life support.
+    for (let i = 0; i < 4000; i++) {
+      const n = sim.needs.get(dwarfId);
+      if (n) {
+        n.hunger = 100;
+        n.thirst = 100;
+        n.sleep = 100;
+      }
+      const h = sim.health.get(dwarfId);
+      if (h) h.hp = h.maxHp; // pin HP so wounded-priority can't pull the dwarf away from the fight
+      // Pin the rat adjacent to the dwarf so combat fires every tick —
+      // otherwise the dwarf wanders and the slow rat can't keep up.
+      const dPos = sim.position.get(dwarfId);
+      const rPos = sim.position.get(ratId);
+      if (dPos && rPos) {
+        rPos.x = dPos.x + 1;
+        rPos.y = dPos.y;
+      }
+      tick(sim);
+    }
     // At least one of them should be dead. With base damage 6 vs rat HP 30
     // and rat damage 4 vs dwarf HP 100, the dwarf usually wins.
     const bothAlive = sim.ecs.isAlive(dwarfId) && sim.ecs.isAlive(ratId);
@@ -63,13 +83,31 @@ describe("hostiles: spawn + combat", () => {
   });
 
   it("hostile death emits a 'crisis' event with the dwarf's name", () => {
-    // Seed 5 reproducibly produces a finished fight. The dwarf may wander
-    // briefly but combat resumes once the rat catches up.
     const sim = buildSim(5, 1);
     const dwarfId = sim.dwarf.entities[0];
     const dwarfPos = sim.position.get(dwarfId)!;
     const ratId = sim.spawnHostile({ kind: "cave_rat", x: dwarfPos.x + 1, y: dwarfPos.y });
-    for (let i = 0; i < 8000; i++) tick(sim);
+    // Pin needs so combat doesn't keep getting interrupted by survival
+    // priorities — we want a clean combat resolution.
+    for (let i = 0; i < 8000; i++) {
+      const n = sim.needs.get(dwarfId);
+      if (n) {
+        n.hunger = 100;
+        n.thirst = 100;
+        n.sleep = 100;
+      }
+      const h = sim.health.get(dwarfId);
+      if (h) h.hp = h.maxHp; // pin HP so wounded-priority can't pull the dwarf away from the fight
+      // Pin the rat adjacent to the dwarf so combat fires every tick —
+      // otherwise the dwarf wanders and the slow rat can't keep up.
+      const dPos = sim.position.get(dwarfId);
+      const rPos = sim.position.get(ratId);
+      if (dPos && rPos) {
+        rPos.x = dPos.x + 1;
+        rPos.y = dPos.y;
+      }
+      tick(sim);
+    }
     // The originally-spawned rat (ratId) must be gone. Other hostiles
     // may have spawned via the periodic spawn system, but this specific
     // entity's combat must have resolved.

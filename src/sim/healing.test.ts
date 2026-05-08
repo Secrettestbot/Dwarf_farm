@@ -89,17 +89,21 @@ describe("healing", () => {
 
   it("sleeping on a Bed tile heals faster than sleeping elsewhere", () => {
     // Compare two sims: one with the spawn tile as Bed, one as plain
-    // walkable. After equal ticks of forced sleep, bed dwarf has more HP.
+    // walkable. Pin survival needs to keep both dwarves on the wounded-
+    // priority sleep branch and not diverting to drink.
     const a = buildSim(7);
     const b = buildSim(7);
     const eA = a.dwarf.entities[0];
     const eB = b.dwarf.entities[0];
-    a.health.get(eA)!.hp = 40;
-    b.health.get(eB)!.hp = 40;
     const posA = a.position.get(eA)!;
     a.grid.setTile(posA.x, posA.y, TileType.Bed);
-    // Run; both will go to sleep due to wound threshold.
-    for (let i = 0; i < 1500; i++) {
+    a.health.get(eA)!.hp = 40;
+    b.health.get(eB)!.hp = 40;
+    for (let i = 0; i < 600; i++) {
+      const na = a.needs.get(eA)!;
+      const nb = b.needs.get(eB)!;
+      na.thirst = 100; na.hunger = 100; na.sleep = 100;
+      nb.thirst = 100; nb.hunger = 100; nb.sleep = 100;
       tick(a);
       tick(b);
     }

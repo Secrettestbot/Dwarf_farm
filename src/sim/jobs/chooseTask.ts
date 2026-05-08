@@ -6,10 +6,13 @@ import { SimWorld } from "../world/simWorld";
 import { JobAssignment, JobKind } from "../ecs/components";
 import { EntityId } from "../ecs/world";
 import { findMineTarget } from "./chooseJob";
+import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
 const SOCIAL_RANGE = 10; // tiles
+const HUNGER_CRITICAL = 30;
+const THIRST_CRITICAL = 35;
 /** Below this age, dwarves don't take mining work — they sleep, socialise,
  * and wander like the children they are. GDD §6.1: childhood 0–18; light
  * hauling 5–18 lands once we have a hauling system. */
@@ -18,6 +21,14 @@ const MIN_WORK_AGE = 18;
  * faster while sleeping (especially on a bed) so this is the sensible
  * autonomous response. */
 const WOUNDED_HP_RATIO = 0.5;
+/** During these in-game hours dwarves prefer sleep over work — circadian
+ * rhythm. Range is [22:00, 06:00). Night-shift dwarves (later session,
+ * night-owl trait) will invert this. */
+const NIGHT_START_HOUR = 22;
+const NIGHT_END_HOUR = 6;
+/** Sleep need below which a night-time dwarf will choose to rest (rather
+ * than the harder SLEEP_CRITICAL gate). */
+const NIGHT_REST_THRESHOLD = 80;
 
 /**
  * Returns a JobAssignment proposal, or null if the dwarf should remain idle
@@ -28,8 +39,31 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   const needs = sim.needs.get(e);
   if (!pos) return null;
 
-  // 1. Critical sleep, or a serious wound — either drops everything to find
-  //    a bed. Healing is much faster while sleeping, especially on a bed.
+  // Priority order, strictest survival need first. Each branch may fall
+  // through if no target is found, so a dwarf never gets stuck idle when a
+  // lower-priority alternative is reachable.
+
+  // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours.
+  if (needs && needs.thirst <= THIRST_CRITICAL && sim.stockpile.drink > 0) {
+    const target = findRestSpot(sim, pos.x, pos.y);
+    if (target) {
+      return { kind: "drink" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };
+    }
+  }
+
+  // 2. Hunger — second-fastest. Same model: walk somewhere walkable to eat.
+  //    Real food sources (bins in stockpile rooms) replace this in a later
+  //    session once hauling is implemented.
+  if (needs && needs.hunger <= HUNGER_CRITICAL && sim.stockpile.food > 0) {
+    const target = findRestSpot(sim, pos.x, pos.y);
+    if (target) {
+      return { kind: "eat" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };
+    }
+  }
+
+  // 3. Critical sleep, or a serious wound — either drops everything to
+  //    find a bed. Healing is much faster while sleeping (especially on a
+  //    bed), so this is the right autonomous response to a near-fatal hit.
   const health = sim.health.get(e);
   const wounded = health !== undefined && health.hp < health.maxHp * WOUNDED_HP_RATIO;
   if ((needs && needs.sleep <= SLEEP_CRITICAL) || wounded) {
@@ -37,11 +71,22 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
     }
-    // No spot found — fall through and try other behaviors so the dwarf
-    // doesn't get stuck.
   }
 
-  // 2. Work: mine inside an active blueprint. Children are skipped — they
+  // 4. Circadian rest — at night, a dwarf with at-least-mildly-low sleep
+  //    heads to bed instead of starting a new mining job. Survival needs
+  //    above (1-3) still come first; this is the soft preference that
+  //    gives the colony a visible day / night rhythm.
+  const hour = (sim.tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
+  const isNight = hour < NIGHT_END_HOUR || hour >= NIGHT_START_HOUR;
+  if (isNight && needs && needs.sleep <= NIGHT_REST_THRESHOLD) {
+    const sleepSpot = findRestSpot(sim, pos.x, pos.y);
+    if (sleepSpot) {
+      return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
+    }
+  }
+
+  // 5. Work: mine inside an active blueprint. Children are skipped — they
   //    play / sleep / socialise instead, falling through to wander below.
   const age = sim.ageOf(e);
   if (age >= MIN_WORK_AGE) {
@@ -51,7 +96,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 3. Social: find an idle nearby dwarf to talk to.
+  // 6. Social: find an idle nearby dwarf to talk to.
   if (needs && needs.social <= SOCIAL_THRESHOLD) {
     const partner = findSocialPartner(sim, e, pos.x, pos.y);
     if (partner !== -1) {
@@ -66,7 +111,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 4. Wander: pick a random reachable walkable tile.
+  // 7. Wander: pick a random reachable walkable tile.
   const wanderTarget = pickWanderTarget(sim, pos.x, pos.y);
   if (wanderTarget) {
     return { kind: "wander" as JobKind, targetX: wanderTarget.x, targetY: wanderTarget.y, progress: 0 };
