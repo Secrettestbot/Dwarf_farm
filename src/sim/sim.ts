@@ -414,6 +414,31 @@ function draftSystem(sim: SimWorld): void {
       sim.squad.remove(id);
     }
   }
+
+  // Legends of the Deep (GDD §10.2): the colony has fielded a squad
+  // where every soldier has at least one Legendary skill (level ≥ 17).
+  // Requires at least three soldiers — a single legendary lone-wolf
+  // shouldn't trigger the milestone.
+  const finalSquad = sim.squad.entities;
+  if (finalSquad.length >= 3) {
+    let allLegendary = true;
+    for (const id of finalSquad) {
+      const dw = sim.dwarf.get(id);
+      if (!dw) { allLegendary = false; break; }
+      let hasLegendary = false;
+      for (const lvl of Object.values(dw.skills)) {
+        if ((lvl ?? 0) >= 17) { hasLegendary = true; break; }
+      }
+      if (!hasLegendary) { allLegendary = false; break; }
+    }
+    if (allLegendary) {
+      fireMilestone(
+        sim,
+        "legends_of_the_deep",
+        "Legends of the Deep. Every soldier in the standing guard has reached Legendary in at least one skill.",
+      );
+    }
+  }
 }
 
 // ---- Emergency state machine ------------------------------------------
@@ -830,11 +855,22 @@ function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void
     skills: newbornSkills(),
     profession: "Child",
     age: 0,
+    bornInColony: true,
   });
   void childId;
   sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));
   // Population milestones (GDD §10.2). One-shot per threshold via Set.
   checkPopulationMilestones(sim);
+  // Three Generations (GDD §10.2): a child is born to two parents who
+  // were themselves born in the colony — every grandparent of this
+  // newborn lived in the fortress.
+  if (mother.bornInColony && father.bornInColony) {
+    fireMilestone(
+      sim,
+      "three_generations",
+      `Three Generations. ${childName} is the first dwarf born to two in-colony parents — every grandparent lived in the mountain.`,
+    );
+  }
 }
 
 const POPULATION_MILESTONES: Array<{ count: number; text: string }> = [
@@ -1521,6 +1557,21 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         sim.tick,
         "discovery",
         `${dw.name} strikes ${name}, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
+      );
+    } else if (tileType === TileType.Silver) {
+      // Drops as ore for now (Silver smelting is its own future tier);
+      // the milestone fires here regardless.
+      itemKind = "ore";
+      const dw = sim.dwarf.get(e)!;
+      sim.events.add(
+        sim.tick,
+        "discovery",
+        `${dw.name} strikes silver, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
+      );
+      fireMilestone(
+        sim,
+        "the_silver_halls",
+        `The Silver Halls. ${dw.name} has cut silver from the deep rock.`,
       );
     } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
       itemKind = "stone";

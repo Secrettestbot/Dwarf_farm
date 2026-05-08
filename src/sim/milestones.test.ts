@@ -103,4 +103,82 @@ describe("narrative milestones (GDD §10.2)", () => {
     const matches = sim.events.events.filter((e) => e.text.startsWith("The Gem Seam"));
     expect(matches.length).toBe(1);
   });
+
+  it("The Silver Halls fires the first time a silver vein is mined", () => {
+    const w = generateWorld({ seed: 811, width: 200, height: 500 });
+    const sim = new SimWorld(811, w.grid, w.surfaceY, w.spawn);
+    // Plant a silver tile inside an active mine blueprint at spawn.
+    sim.grid.setTile(w.spawn.x + 1, w.spawn.y, 30 /* TileType.Silver */);
+    sim.planner.blueprints.push({
+      id: 9402,
+      kind: "mine",
+      originX: w.spawn.x + 1,
+      originY: w.spawn.y,
+      width: 1,
+      height: 1,
+      cavity: new Int32Array([(w.spawn.y << 16) | (w.spawn.x + 1)]),
+      status: "digging",
+      priority: 1,
+      createdTick: 0,
+    });
+    sim.sliders.hauling = 0;
+    sim.spawnDwarf({ name: "Borin", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    const e = sim.dwarf.entities[0];
+    for (let i = 0; i < 200; i++) {
+      const n = sim.needs.get(e)!;
+      n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
+      tick(sim);
+      if (sim.narrativeMilestones.has("the_silver_halls")) break;
+    }
+    expect(sim.narrativeMilestones.has("the_silver_halls")).toBe(true);
+  });
+
+  it("Three Generations fires when both parents were themselves born in-colony", () => {
+    const w = generateWorld({ seed: 813, width: 200, height: 500 });
+    const sim = new SimWorld(813, w.grid, w.surfaceY, w.spawn);
+    // Hand-spawn two adults flagged as in-colony births. Pair them, run
+    // a year, expect a child + the milestone.
+    const m = sim.spawnDwarf({ name: "Mother", x: w.spawn.x, y: w.spawn.y, age: 25, bornInColony: true });
+    const f = sim.spawnDwarf({ name: "Father", x: w.spawn.x + 1, y: w.spawn.y, age: 27, bornInColony: true });
+    sim.dwarf.get(m)!.partnerId = f;
+    sim.dwarf.get(f)!.partnerId = m;
+    let fired = false;
+    for (let y = 1; y <= 12 && !fired; y++) {
+      for (let i = 0; i < 24 * 60 * 24; i++) {
+        for (const id of sim.dwarf.entities) {
+          const n = sim.needs.get(id);
+          if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+        }
+        tick(sim);
+      }
+      if (sim.narrativeMilestones.has("three_generations")) fired = true;
+    }
+    expect(fired).toBe(true);
+  });
+
+  it("Legends of the Deep fires when every drafted soldier has a Legendary skill", () => {
+    const w = generateWorld({ seed: 815, width: 200, height: 500 });
+    const sim = new SimWorld(815, w.grid, w.surfaceY, w.spawn);
+    // Spawn 30 adults all with Legendary Military so any year-end
+    // draft (whatever the cap rolls to after migration mid-year) picks
+    // a fully-legendary squad. Migrants brought in by migration
+    // arrive with rolled skills and could dilute the squad — to keep
+    // the test deterministic we lock the migration slider off. (The
+    // emergency lockdown blocks immigrants per its own rules.)
+    sim.emergency.mode = "lockdown";
+    sim.emergency.startedAtTick = 0;
+    for (let i = 0; i < 30; i++) {
+      const id = sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x, y: w.spawn.y, age: 30 });
+      sim.dwarf.get(id)!.skills.military = 18;
+    }
+    // Run a year so the draft fires.
+    for (let i = 0; i < 24 * 60 * 24 + 5; i++) {
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      }
+      tick(sim);
+    }
+    expect(sim.narrativeMilestones.has("legends_of_the_deep")).toBe(true);
+  });
 });

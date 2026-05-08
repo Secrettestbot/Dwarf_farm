@@ -18,6 +18,10 @@ export interface SavedDwarf {
   profession: string;
   /** Tick at which this dwarf was "born". Negative for founders. */
   bornAtTick: number;
+  /** True iff this dwarf was born in the colony (not a founder, not a
+   * migrant). Optional for back-compat with pre-Three-Generations
+   * saves; missing flag treats the dwarf as not-born-in-colony. */
+  bornInColony?: boolean;
   /** Legacy field kept for back-compat with v2 saves; restore code falls
    * back to computing bornAtTick from age + tick if bornAtTick is missing. */
   age?: number;

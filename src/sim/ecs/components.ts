@@ -29,6 +29,13 @@ export interface Dwarf {
   /** Tick at which this dwarf last finished a job. Used for tie-breaking idle
    * selection in deterministic order. */
   lastJobTick: number;
+  /** True iff this dwarf was born in the colony (mother and father both
+   * present at birth). Founders and migrants are false. Used by the
+   * Three Generations milestone — it fires when a dwarf is born to two
+   * in-colony parents, i.e. all four grandparents lived in the
+   * fortress. Optional in saved data: older saves treat everyone as
+   * not-born-in-colony, which is the conservative default. */
+  bornInColony: boolean;
 }
 
 export interface Pathing {

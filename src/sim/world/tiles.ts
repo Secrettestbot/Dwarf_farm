@@ -67,6 +67,12 @@ export const enum TileType {
    * mechanical effect (equipping a soldier) lands on the draft tick;
    * this tile is the visual signal that a fortress has armed itself. */
   ArmouryRack = 29,
+  /** Silver vein — sits in Deep Rock per GDD §5.2 ("silver, gold, coal
+   * seams"). Mined like ore, drops an ore item, and triggers the
+   * Silver Halls milestone the first time a dwarf strikes one. A
+   * future commit can split it into its own item kind once silver-as-
+   * trade-good has a downstream consumer. */
+  Silver = 30,
 }
 
 export interface TileInfo {
@@ -108,6 +114,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.VoidOre]: { name: "void-ore", walkable: false, solid: true, color: 0x402850 },
   [TileType.SoulCrystal]: { name: "soul-crystal", walkable: false, solid: true, color: 0x7090e0 },
   [TileType.ArmouryRack]: { name: "armoury rack", walkable: true, solid: false, color: 0x8090a8 },
+  [TileType.Silver]: { name: "silver vein", walkable: false, solid: true, color: 0xd0d8e8 },
 };
 
 export function tileIsGem(t: number): boolean {

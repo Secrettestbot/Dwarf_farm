@@ -70,9 +70,12 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
           t = TileType.Stone;
           if (noise2(oreSeed, x * 0.18, y * 0.18) > 0.62) t = TileType.Ore;
         } else if (y < 700) {
-          // Deep rock: granite with rare ore.
+          // Deep rock: granite with rare ore and the first silver veins.
           t = TileType.Granite;
           if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.72) t = TileType.Ore;
+          // Silver pockets — rarer than iron ore. GDD §5.2 places
+          // silver / gold / coal seams in this band.
+          if (noise2(oreSeed + 67, x * 0.30, y * 0.30) > 0.86) t = TileType.Silver;
           // Occasional stone vein for variety.
           if (noise2(oreSeed + 53, x * 0.05, y * 0.05) > 0.55) t = TileType.Stone;
         } else if (y < 1200) {

@@ -189,6 +189,10 @@ export class SimWorld {
      * age 25 has bornAtTick = sim.tick - 25 × TICKS_PER_YEAR. */
     bornAtTick?: number;
     initialNeeds?: Partial<Needs>;
+    /** True iff this dwarf was born in the colony (a real birth, not a
+     * founder or migrant). Defaults to false — birthDwarf overrides it
+     * to true. Round-trips through save. */
+    bornInColony?: boolean;
   }): EntityId {
     const e = this.ecs.create();
     this.position.set(e, { x: spec.x, y: spec.y });
@@ -203,6 +207,7 @@ export class SimWorld {
       bornAtTick,
       partnerId: null,
       lastJobTick: 0,
+      bornInColony: spec.bornInColony ?? false,
     });
     const effects = effectsFor(spec.traitIds ?? []);
     const maxHp = Math.max(20, Math.round(DWARF_BASE_MAX_HP * effects.hpScale));

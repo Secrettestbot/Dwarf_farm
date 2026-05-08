@@ -72,6 +72,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       skillXp: dw.skillXp as Record<string, number>,
       profession: dw.profession,
       bornAtTick: dw.bornAtTick,
+      bornInColony: dw.bornInColony,
       partnerIndex,
       lastJobTick: dw.lastJobTick,
       health: h
@@ -265,6 +266,7 @@ export function restore(save: SaveV1): SimWorld {
       bornAtTick: d.bornAtTick,
       age: d.age,
       initialNeeds: d.needs,
+      bornInColony: d.bornInColony ?? false,
     });
     sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
     spawnedEntities.push(e);
