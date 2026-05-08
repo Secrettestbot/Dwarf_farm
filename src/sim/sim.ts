@@ -4,9 +4,13 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement } from "./events/narrator";
-import { TICKS_PER_YEAR } from "./time";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival } from "./events/narrator";
+import { TICKS_PER_YEAR, TICKS_PER_DAY } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
+import { generateFounder } from "./dwarves/founders";
+import { levelFromXp } from "./dwarves/skillProgress";
+import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
+import { HOSTILE_DEFS } from "./hostiles/types";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -18,8 +22,15 @@ export const WANDER_LINGER_TICKS = 12; // after arrival, pause briefly before ne
 
 // Need decay rates: units lost per tick. Stored as 1/RATE so we can use the
 // per-need accumulator pattern without floating-point determinism worries.
-const SLEEP_DECAY_TICKS_PER_UNIT = 30; // 100 → 0 over ~3000 ticks (~50h)
+const SLEEP_DECAY_TICKS_PER_UNIT = 30;  // 100 → 0 over ~3000 ticks (~50h)
 const SOCIAL_DECAY_TICKS_PER_UNIT = 60; // 100 → 0 over ~6000 ticks (~100h)
+// Hunger and thirst are the real survival pressures: thirst decays fastest
+// (hits 0 in ~24 in-game hours), hunger second-fastest (~48h). Numbers tuned
+// so a healthy adult in a stocked colony eats / drinks roughly daily.
+const HUNGER_DECAY_TICKS_PER_UNIT = 30; // 100 → 0 over ~3000 ticks (~50h)
+const THIRST_DECAY_TICKS_PER_UNIT = 15; // 100 → 0 over ~1500 ticks (~25h)
+export const EAT_TICKS = 30;
+export const DRINK_TICKS = 18;
 
 /**
  * Single deterministic tick. Used by both the main thread game loop and the
@@ -41,11 +52,50 @@ export function tick(sim: SimWorld): void {
   yearRolloverSystem(sim);
   pairingSystem(sim);
   reproductionSystem(sim);
+  migrationSystem(sim);
+  populationMilestoneSystem(sim);
   deathSystem(sim);
   needsSystem(sim);
   jobAssignmentSystem(sim);
   movementSystem(sim);
   workSystem(sim);
+  hostileSpawnSystem(sim);
+  hostileMovementSystem(sim);
+  combatSystem(sim);
+  healingSystem(sim);
+  farmSystem(sim);
+}
+
+// ---- Farms -------------------------------------------------------------
+// Each FarmTile in the world has a small chance, every in-game hour, of
+// contributing one unit of food to the stockpile. Tuned so a single 4×3
+// farm (12 cells) yields roughly 30 food per in-game day at steady state
+// — enough to feed a 7-dwarf colony with margin. Hauling and explicit
+// plant/harvest jobs land in a later session; for now the food appears
+// abstractly on the assumption that the dwarves are tending the plot
+// during their "wander" idle time.
+
+const FARM_TICK_INTERVAL = 60; // once per in-game hour
+const FARM_YIELD_CHANCE = 0.18; // per-cell, per-hour
+
+function farmSystem(sim: SimWorld): void {
+  if (sim.tick % FARM_TICK_INTERVAL !== 0) return;
+  // Iterate completed farm blueprints so we only check farm cavities.
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "farm") continue;
+    if (b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      // Cell may have been overwritten (rare — cave-in, rebuilding) — only
+      // count actual FarmTile cells.
+      if (sim.grid.getTile(x, y) !== TileType.FarmTile) continue;
+      if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE) {
+        sim.stockpile.food += 1;
+      }
+    }
+  }
 }
 
 // GDD §6.1 lifecycle: death at ~150 years naturally; dwarf-touched extends
@@ -124,7 +174,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     }
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health]);
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -207,6 +257,91 @@ function reproductionSystem(sim: SimWorld): void {
   }
 }
 
+/**
+ * Increment a dwarf's XP in a skill. If the level advances and the new
+ * level crosses a tier boundary (Novice → Adequate, etc.), announce it
+ * in the chronicle so the player can watch their veterans become legends.
+ */
+function awardSkillXp(sim: SimWorld, e: EntityId, skill: SkillId, amount: number): void {
+  const dw = sim.dwarf.get(e);
+  if (!dw) return;
+  const oldXp = dw.skillXp[skill] ?? 0;
+  const newXp = oldXp + amount;
+  dw.skillXp[skill] = newXp;
+  const oldLevel = dw.skills[skill] ?? 1;
+  const newLevel = levelFromXp(newXp);
+  if (newLevel <= oldLevel) return;
+  dw.skills[skill] = newLevel;
+  if (skillTier(newLevel) !== skillTier(oldLevel)) {
+    const tier = skillTierLabel(newLevel);
+    const skillName = SKILLS_BY_ID[skill].name;
+    sim.events.add(
+      sim.tick,
+      "milestone",
+      `${dw.name} has become a ${tier} ${skillName}.`,
+    );
+  }
+}
+
+// ---- Migration --------------------------------------------------------
+
+const SEASON_TICKS = TICKS_PER_DAY * 6; // 4 seasons per in-game year (≈24 days)
+
+/** Per-population chance of an arrival group landing each season. The
+ * curve is intentionally generous early — a young fortress needs hands —
+ * and tapers to zero past 200 dwarves so the colony has a soft cap. */
+export function migrationChance(pop: number): number {
+  if (pop >= 200) return 0;
+  if (pop >= 100) return 0.10;
+  if (pop >= 50) return 0.30;
+  if (pop >= 20) return 0.45;
+  return 0.60;
+}
+
+/**
+ * Once per in-game season, roll for an arrival group. On a hit, 1–4 fully
+ * generated adult dwarves spawn at the colony's spawn tile (the founders'
+ * chamber, which sits just below the entrance shaft). They go straight
+ * into the autonomous loop alongside the existing dwarves — chooseTask
+ * does not differentiate by origin.
+ */
+function migrationSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % SEASON_TICKS !== 0) return;
+  const pop = sim.dwarf.size();
+  const chance = migrationChance(pop);
+  if (chance === 0) return;
+  if (sim.aiRng.nextFloat() >= chance) return;
+
+  // 1–4 arrivals per season, weighted toward small groups.
+  const r = sim.aiRng.nextFloat();
+  const count = r < 0.45 ? 1 : r < 0.80 ? 2 : r < 0.95 ? 3 : 4;
+
+  // Collect existing first names so immigrants don't collide with the locals.
+  const used = new Set<string>();
+  sim.forEachDwarf((_id, _pos, dw) => used.add(dw.name.split(" ")[0]));
+
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const f = generateFounder(sim.aiRng, used);
+    used.add(f.name.split(" ")[0]);
+    sim.spawnDwarf({
+      name: f.name,
+      x: sim.spawn.x,
+      y: sim.spawn.y,
+      traitIds: f.traits.map((t) => t.id),
+      skills: f.skills,
+      profession: f.profession,
+      age: f.age,
+    });
+    names.push(f.name);
+  }
+  sim.events.add(sim.tick, "social", narrateArrival(sim.aiRng, names));
+  // Population threshold may have just been crossed — let the milestone
+  // system fire its event the same tick, not the next year boundary.
+  checkPopulationMilestones(sim);
+}
+
 function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
   const mother = sim.dwarf.get(motherId);
   const father = sim.dwarf.get(fatherId);
@@ -230,6 +365,41 @@ function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void
   });
   void childId;
   sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));
+  // Population milestones (GDD §10.2). One-shot per threshold via Set.
+  checkPopulationMilestones(sim);
+}
+
+const POPULATION_MILESTONES: Array<{ count: number; text: string }> = [
+  { count: 25, text: "The fortress reaches twenty-five dwarves. The mountain echoes." },
+  { count: 50, text: "Fifty dwarves now live in the mountain. The corridors run hot with work." },
+  { count: 100, text: "A Hundred Beards. The fortress has grown to a hundred dwarves." },
+  { count: 200, text: "Two hundred dwarves. The colony is a small kingdom now." },
+];
+
+/** Year-boundary check for population milestones. Each threshold fires
+ * exactly once over a fortress's lifetime, captured in a Set on SimWorld
+ * that round-trips through save. */
+function populationMilestoneSystem(sim: SimWorld): void {
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  const pop = sim.dwarf.size();
+  for (const m of POPULATION_MILESTONES) {
+    if (pop >= m.count && !sim.populationMilestones.has(m.count)) {
+      sim.populationMilestones.add(m.count);
+      sim.events.add(sim.tick, "milestone", m.text);
+    }
+  }
+}
+
+function checkPopulationMilestones(sim: SimWorld): void {
+  // Also called on each birth so the chronicle records the milestone the
+  // year the threshold is crossed even between year-boundary checks.
+  const pop = sim.dwarf.size();
+  for (const m of POPULATION_MILESTONES) {
+    if (pop >= m.count && !sim.populationMilestones.has(m.count)) {
+      sim.populationMilestones.add(m.count);
+      sim.events.add(sim.tick, "milestone", m.text);
+    }
+  }
 }
 
 /**
@@ -253,12 +423,15 @@ function yearRolloverSystem(sim: SimWorld): void {
  */
 function needsSystem(sim: SimWorld): void {
   const ents = sim.dwarf.entities;
-  for (let i = 0; i < ents.length; i++) {
+  // Iterate backwards so killDwarf-from-starvation can mutate the list.
+  for (let i = ents.length - 1; i >= 0; i--) {
     const e = ents[i];
     const n = sim.needs.get(e);
     if (!n) continue;
     n.decayAccumSleep++;
     n.decayAccumSocial++;
+    n.decayAccumHunger++;
+    n.decayAccumThirst++;
     if (n.decayAccumSleep >= SLEEP_DECAY_TICKS_PER_UNIT) {
       n.sleep = Math.max(0, n.sleep - 1);
       n.decayAccumSleep -= SLEEP_DECAY_TICKS_PER_UNIT;
@@ -266,6 +439,21 @@ function needsSystem(sim: SimWorld): void {
     if (n.decayAccumSocial >= SOCIAL_DECAY_TICKS_PER_UNIT) {
       n.social = Math.max(0, n.social - 1);
       n.decayAccumSocial -= SOCIAL_DECAY_TICKS_PER_UNIT;
+    }
+    if (n.decayAccumHunger >= HUNGER_DECAY_TICKS_PER_UNIT) {
+      n.hunger = Math.max(0, n.hunger - 1);
+      n.decayAccumHunger -= HUNGER_DECAY_TICKS_PER_UNIT;
+    }
+    if (n.decayAccumThirst >= THIRST_DECAY_TICKS_PER_UNIT) {
+      n.thirst = Math.max(0, n.thirst - 1);
+      n.decayAccumThirst -= THIRST_DECAY_TICKS_PER_UNIT;
+    }
+    // Death from starvation / dehydration. Thirst kills first because it
+    // decays faster; the chronicle records the cause.
+    if (n.thirst <= 0) {
+      killDwarf(sim, e, "dehydration");
+    } else if (n.hunger <= 0) {
+      killDwarf(sim, e, "starvation");
     }
   }
 }
@@ -358,6 +546,12 @@ function workSystem(sim: SimWorld): void {
       case "wander":
         progressWander(sim, e, job);
         break;
+      case "eat":
+        progressEat(sim, e, job);
+        break;
+      case "drink":
+        progressDrink(sim, e, job);
+        break;
     }
   }
 }
@@ -385,6 +579,8 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.grid.setTile(job.targetX, job.targetY, TileType.CorridorFloor);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
     sim.releaseMineTarget(job.targetX, job.targetY);
+    // Grant mining XP and announce tier crossings ("become a Skilled Miner").
+    awardSkillXp(sim, e, "mining", 1);
 
     // Stockpile credit + first-strike narration. Real workshops in a later
     // session refine these into bars/blocks/etc.
@@ -456,6 +652,47 @@ function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void
   }
 }
 
+function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
+  const needs = sim.needs.get(e);
+  if (!needs) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // The dwarf consumes one unit of food on the first tick of the meal so
+  // a starving dwarf with food in the stockpile recovers immediately;
+  // the rest of EAT_TICKS is the visible "eating" duration.
+  if (job.progress === 0 && sim.stockpile.food > 0) {
+    sim.stockpile.food -= 1;
+    needs.hunger = Math.min(100, needs.hunger + 60);
+  }
+  job.progress++;
+  if (job.progress >= EAT_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+}
+
+function progressDrink(sim: SimWorld, e: EntityId, job: JobAssignment): void {
+  const needs = sim.needs.get(e);
+  if (!needs) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  if (job.progress === 0 && sim.stockpile.drink > 0) {
+    sim.stockpile.drink -= 1;
+    needs.thirst = Math.min(100, needs.thirst + 60);
+  }
+  job.progress++;
+  if (job.progress >= DRINK_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+}
+
 function progressWander(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   // Already at destination by virtue of getting here; linger briefly so the
   // dwarf isn't reassigned the same tick they arrived.
@@ -464,5 +701,252 @@ function progressWander(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
+  }
+}
+
+// ---- Recovery ----------------------------------------------------------
+
+const HEAL_TICK_INTERVAL = 30;
+const HEAL_RATE_BED = 3;
+const HEAL_RATE_RESTING = 2; // sleeping anywhere
+const HEAL_RATE_IDLE = 1;    // wandering / socialising
+
+/**
+ * Passive recovery. Dwarves regain HP slowly — faster while sleeping,
+ * fastest while sleeping on a bed (the same mechanical reason that bedrooms
+ * matter for sleep restoration). Combat suspends healing: a dwarf adjacent
+ * to a hostile gets no benefit until the hostile is dead or out of reach.
+ *
+ * Also fires a "recovered" event when a previously-severely-wounded dwarf
+ * (HP below 30%) reaches full health, so the chronicle records the relief.
+ */
+function healingSystem(sim: SimWorld): void {
+  if (sim.tick % HEAL_TICK_INTERVAL !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  for (let i = 0; i < dwarves.length; i++) {
+    const e = dwarves[i];
+    const hp = sim.health.get(e);
+    if (!hp || hp.hp >= hp.maxHp) continue;
+    const pos = sim.position.get(e);
+    if (!pos) continue;
+
+    // Combat lock: no healing if any hostile is adjacent.
+    let inCombat = false;
+    const hEnts = sim.hostile.entities;
+    for (let j = 0; j < hEnts.length && !inCombat; j++) {
+      const hp2 = sim.position.get(hEnts[j]);
+      if (!hp2) continue;
+      if (Math.abs(hp2.x - pos.x) <= 1 && Math.abs(hp2.y - pos.y) <= 1) inCombat = true;
+    }
+    if (inCombat) continue;
+
+    let healing = 0;
+    const job = sim.job.get(e);
+    if (job?.kind === "sleep") {
+      healing = sim.grid.getTile(pos.x, pos.y) === TileType.Bed ? HEAL_RATE_BED : HEAL_RATE_RESTING;
+    } else if (!job || job.kind === "wander" || job.kind === "socialise") {
+      healing = HEAL_RATE_IDLE;
+    }
+    // Working (mining) suspends healing — the dwarf is exerting themselves.
+    if (healing === 0) continue;
+
+    hp.hp = Math.min(hp.maxHp, hp.hp + healing);
+    // Severe-recovery announcement: combat sets `wasSevereWound` when HP
+    // dropped below 30%; we clear it (and write to the chronicle) the
+    // first time the dwarf returns to full HP.
+    if (hp.wasSevereWound && hp.hp >= hp.maxHp) {
+      hp.wasSevereWound = false;
+      const dw = sim.dwarf.get(e);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} has recovered from their wounds.`,
+        );
+      }
+    }
+  }
+}
+
+// ---- Hazards: spawning, movement, combat ------------------------------
+
+/** HP fraction below which a wound counts as "severe" — used both to set
+ * the recovery-event flag in combat and to gate the "wounded seeks rest"
+ * branch in chooseTask. */
+const SEVERE_WOUND_RATIO = 0.3;
+
+const HOSTILE_SPAWN_INTERVAL_TICKS = TICKS_PER_DAY; // try once per in-game day
+const HOSTILE_SPAWN_CHANCE = 0.4;
+const HOSTILE_MIN_DISTANCE_FROM_DWARF = 8;
+const DWARF_BASE_DAMAGE = 6;
+const DWARF_ATTACK_COOLDOWN = 60;
+
+/**
+ * Periodically a creature finds its way into the colony. We pick a
+ * reachable walkable tile that is (a) deep enough for the kind to spawn,
+ * (b) safely away from any dwarf so they get to discover it. Cap is
+ * proportional to the colony's size so a one-dwarf colony isn't swarmed.
+ */
+function hostileSpawnSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % HOSTILE_SPAWN_INTERVAL_TICKS !== 0) return;
+  // Cap: 1 hostile per 3 dwarves, min 1.
+  const dwarves = sim.dwarf.size();
+  if (dwarves === 0) return;
+  const cap = Math.max(1, Math.floor(dwarves / 3));
+  if (sim.hostile.size() >= cap) return;
+  if (sim.aiRng.nextFloat() >= HOSTILE_SPAWN_CHANCE) return;
+
+  // Pick a reachable walkable tile deep enough for cave_rat. We sample by
+  // scanning the planner's reachable mask deterministically.
+  const reachable = sim.planner.exposeReachable(sim);
+  if (!reachable) return;
+  const grid = sim.grid;
+  const w = grid.width;
+  const def = HOSTILE_DEFS["cave_rat"];
+  const minY = sim.spawn.y + def.minDepth;
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < reachable.length; i++) {
+    if (reachable[i] !== 1) continue;
+    const y = (i / w) | 0;
+    if (y < minY) continue;
+    const x = i % w;
+    // Reject any tile too close to a dwarf — the chronicle's whole point is
+    // the dwarves *discovering* the threat, not bumping into it at spawn.
+    let tooClose = false;
+    sim.forEachDwarf((_id, p) => {
+      if (tooClose) return;
+      const dx = p.x - x;
+      const dy = p.y - y;
+      if (dx * dx + dy * dy < HOSTILE_MIN_DISTANCE_FROM_DWARF * HOSTILE_MIN_DISTANCE_FROM_DWARF) {
+        tooClose = true;
+      }
+    });
+    if (!tooClose) candidates.push({ x, y });
+  }
+  if (candidates.length === 0) return;
+  const pick = candidates[sim.aiRng.nextRange(0, candidates.length)];
+  sim.spawnHostile({ kind: "cave_rat", x: pick.x, y: pick.y });
+  sim.events.add(
+    sim.tick,
+    "crisis",
+    narrateHostileSpawn(sim.aiRng, def.spawnArticle, pick.y, sim.spawn.y),
+  );
+}
+
+/**
+ * Greedy pursuit: each tick, each hostile (rate-limited per kind) takes
+ * a single step toward the nearest dwarf within pursueRange — no A*, just
+ * a sign-of-delta step, fenced by walkability. Cheap and good enough for
+ * cave-rat-scale threats; smarter creatures get proper pathing later.
+ */
+function hostileMovementSystem(sim: SimWorld): void {
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const h = sim.hostile.get(e);
+    if (!h) continue;
+    const def = HOSTILE_DEFS[h.kind];
+    if (sim.tick - h.lastMoveTick < def.moveCooldown) continue;
+    const pos = sim.position.get(e);
+    if (!pos) continue;
+    // Find nearest dwarf within pursue range.
+    let bestDist = def.pursueRange * def.pursueRange + 1;
+    let bestPos: { x: number; y: number } | null = null;
+    sim.forEachDwarf((_id, p) => {
+      const dx = p.x - pos.x;
+      const dy = p.y - pos.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestPos = { x: p.x, y: p.y };
+      }
+    });
+    if (!bestPos) continue;
+    h.lastMoveTick = sim.tick;
+    const target: { x: number; y: number } = bestPos;
+    const dx = Math.sign(target.x - pos.x);
+    const dy = Math.sign(target.y - pos.y);
+    // Try the diagonal first, then horizontal-only, then vertical-only.
+    const tries: Array<[number, number]> = [
+      [pos.x + dx, pos.y + dy],
+      [pos.x + dx, pos.y],
+      [pos.x, pos.y + dy],
+    ];
+    for (const [nx, ny] of tries) {
+      if (nx === pos.x && ny === pos.y) continue;
+      if (!sim.grid.isWalkable(nx, ny)) continue;
+      pos.x = nx;
+      pos.y = ny;
+      break;
+    }
+  }
+}
+
+/**
+ * Adjacent dwarves and hostiles exchange damage on cooldown. Either side
+ * dropping to 0 HP dies on the spot. Dwarf deaths re-use killDwarf so the
+ * memorial-tile + bereavement pipeline still works.
+ */
+function combatSystem(sim: SimWorld): void {
+  const hEnts = sim.hostile.entities.slice(); // snapshot — combat may remove
+  for (const h of hEnts) {
+    const hPos = sim.position.get(h);
+    const hHealth = sim.health.get(h);
+    const hostile = sim.hostile.get(h);
+    if (!hPos || !hHealth || !hostile) continue;
+    const def = HOSTILE_DEFS[hostile.kind];
+    // Find adjacent dwarf (within 1 tile in any direction).
+    let target: EntityId | null = null;
+    let targetPos: { x: number; y: number } | null = null;
+    sim.forEachDwarf((id, p) => {
+      if (target !== null) return;
+      if (Math.abs(p.x - hPos.x) <= 1 && Math.abs(p.y - hPos.y) <= 1) {
+        target = id;
+        targetPos = { x: p.x, y: p.y };
+      }
+    });
+    if (target === null || targetPos === null) continue;
+
+    // Hostile attacks dwarf on its cooldown.
+    if (sim.tick - hostile.lastAttackTick >= def.attackCooldown) {
+      hostile.lastAttackTick = sim.tick;
+      const dwarfHealth = sim.health.get(target);
+      if (dwarfHealth) {
+        dwarfHealth.hp -= def.damage;
+        // Latch a "was severe wound" flag once HP crosses below 30% of
+        // max; the recovery event in healingSystem fires when the flag
+        // is still set and HP returns to full.
+        if (dwarfHealth.hp <= dwarfHealth.maxHp * SEVERE_WOUND_RATIO) {
+          dwarfHealth.wasSevereWound = true;
+        }
+        if (dwarfHealth.hp <= 0) {
+          killDwarf(sim, target, `slain by ${def.spawnArticle}`);
+        }
+      }
+    }
+
+    // Surviving dwarf retaliates (shared cooldown stored on Health).
+    if (!sim.ecs.isAlive(target)) continue;
+    const dHealth = sim.health.get(target);
+    if (!dHealth) continue;
+    if (sim.tick - dHealth.lastAttackTick >= DWARF_ATTACK_COOLDOWN) {
+      dHealth.lastAttackTick = sim.tick;
+      // Damage scales modestly with the military skill (no military skill
+      // = base damage). Mining skill doesn't help in a fight.
+      const dwarf = sim.dwarf.get(target);
+      const military = dwarf?.skills.military ?? 1;
+      const damage = DWARF_BASE_DAMAGE + Math.floor((military - 1) / 2);
+      hHealth.hp -= damage;
+      if (hHealth.hp <= 0) {
+        const dwarfName = dwarf?.name ?? "A dwarf";
+        sim.events.add(
+          sim.tick,
+          "crisis",
+          narrateHostileSlain(sim.aiRng, dwarfName, def.name),
+        );
+        sim.ecs.destroy(h, [sim.position, sim.hostile, sim.health]);
+      }
+    }
   }
 }

@@ -13,6 +13,7 @@ export type BlueprintKind =
   | "stockpile"
   | "corridor"
   | "mine"
+  | "farm"
   | "stairwell";
 
 export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
@@ -21,6 +22,7 @@ export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   stockpile: "Stockpile",
   corridor: "Corridor",
   mine: "Mine",
+  farm: "Farm",
   stairwell: "Stairwell",
 };
 

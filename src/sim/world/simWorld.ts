@@ -6,6 +6,9 @@ import { ColonyPlanner } from "../planner/colonyPlanner";
 import { AStar } from "../pathing/astar";
 import { EventLog } from "../events/eventLog";
 import { TICKS_PER_YEAR } from "../time";
+import { Hostile, Health, HOSTILE_DEFS, HostileKind } from "../hostiles/types";
+
+const DWARF_BASE_MAX_HP = 100;
 
 export interface Stockpile {
   /** Generic ore tally — any TileType.Ore mined. Later sessions split into
@@ -16,7 +19,16 @@ export interface Stockpile {
   /** Loose dirt and sand pulled from the Skin layer. Mostly useless
    * structurally but tracked because the dwarves did the work. */
   dirt: number;
+  /** Food units. Each meal a dwarf eats consumes 1. Replenished by
+   * farming + hauling in a later session; for now the founders bring a
+   * sizeable starter cache. */
+  food: number;
+  /** Drink units (water, ale). Same model as food. */
+  drink: number;
 }
+
+const STARTER_FOOD = 1000;
+const STARTER_DRINK = 1000;
 
 /**
  * Aggregate of everything the deterministic tick function needs. The same
@@ -36,6 +48,8 @@ export class SimWorld {
   readonly pathing: ComponentStore<Pathing>;
   readonly job: ComponentStore<JobAssignment>;
   readonly needs: ComponentStore<Needs>;
+  readonly hostile: ComponentStore<Hostile>;
+  readonly health: ComponentStore<Health>;
 
   // Forked RNG streams.
   readonly aiRng: Rng;
@@ -55,7 +69,7 @@ export class SimWorld {
   // Resource accumulation — a real stockpile system with workshops arrives
   // in a later session, but tracking what's been pulled from the rock now
   // gives the player something concrete to watch grow.
-  readonly stockpile: Stockpile = { ore: 0, stone: 0, dirt: 0 };
+  readonly stockpile: Stockpile = { ore: 0, stone: 0, dirt: 0, food: STARTER_FOOD, drink: STARTER_DRINK };
 
   // True once the colony has hit its first ore tile. Used to fire a one-
   // time discovery event the next time a dwarf strikes ore.
@@ -63,6 +77,9 @@ export class SimWorld {
 
   /** Last in-game year for which a year-rollover event was emitted. */
   lastYearAnnounced = 0;
+
+  /** Population thresholds that have already been announced as milestones. */
+  populationMilestones: Set<number> = new Set();
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
@@ -84,6 +101,8 @@ export class SimWorld {
     this.pathing = new ComponentStore(maxEntities);
     this.job = new ComponentStore(maxEntities);
     this.needs = new ComponentStore(maxEntities);
+    this.hostile = new ComponentStore(maxEntities);
+    this.health = new ComponentStore(maxEntities);
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");
@@ -97,6 +116,7 @@ export class SimWorld {
     y: number;
     traitIds?: string[];
     skills?: import("../dwarves/skills").SkillLevels;
+    skillXp?: import("../dwarves/skillProgress").SkillXp;
     profession?: string;
     age?: number;
     /** Optional explicit bornAtTick — used by save/restore. Otherwise we
@@ -113,16 +133,22 @@ export class SimWorld {
       name: spec.name,
       traitIds: spec.traitIds ?? [],
       skills: spec.skills ?? {},
+      skillXp: spec.skillXp ?? {},
       profession: spec.profession ?? "Worker",
       bornAtTick,
       partnerId: null,
       lastJobTick: 0,
     });
+    this.health.set(e, { hp: DWARF_BASE_MAX_HP, maxHp: DWARF_BASE_MAX_HP, lastAttackTick: 0 });
     this.needs.set(e, {
       sleep: spec.initialNeeds?.sleep ?? 100,
       social: spec.initialNeeds?.social ?? 100,
+      hunger: spec.initialNeeds?.hunger ?? 100,
+      thirst: spec.initialNeeds?.thirst ?? 100,
       decayAccumSleep: spec.initialNeeds?.decayAccumSleep ?? 0,
       decayAccumSocial: spec.initialNeeds?.decayAccumSocial ?? 0,
+      decayAccumHunger: spec.initialNeeds?.decayAccumHunger ?? 0,
+      decayAccumThirst: spec.initialNeeds?.decayAccumThirst ?? 0,
     });
     return e;
   }
@@ -170,5 +196,32 @@ export class SimWorld {
 
   isMineClaimed(x: number, y: number): boolean {
     return this.mineClaims.has((y << 16) | x);
+  }
+
+  // ---- Hostile spawning --------------------------------------------------
+
+  /** Spawn a new hostile entity. Returns the new entity id. */
+  spawnHostile(spec: {
+    kind: HostileKind;
+    x: number;
+    y: number;
+    hp?: number;
+    lastAttackTick?: number;
+    lastMoveTick?: number;
+  }): EntityId {
+    const def = HOSTILE_DEFS[spec.kind];
+    const e = this.ecs.create();
+    this.position.set(e, { x: spec.x, y: spec.y });
+    this.hostile.set(e, {
+      kind: spec.kind,
+      lastAttackTick: spec.lastAttackTick ?? 0,
+      lastMoveTick: spec.lastMoveTick ?? 0,
+    });
+    this.health.set(e, {
+      hp: spec.hp ?? def.maxHp,
+      maxHp: def.maxHp,
+      lastAttackTick: 0,
+    });
+    return e;
   }
 }

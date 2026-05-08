@@ -11,6 +11,8 @@ export interface SavedDwarf {
   y: number;
   traitIds: string[];
   skills: SkillLevels;
+  /** Per-skill cumulative XP. Optional for back-compat with v2 saves. */
+  skillXp?: Record<string, number>;
   profession: string;
   /** Tick at which this dwarf was "born". Negative for founders. */
   bornAtTick: number;
@@ -20,10 +22,19 @@ export interface SavedDwarf {
   /** Partner referenced by index into the saved dwarves array, or null. */
   partnerIndex?: number | null;
   lastJobTick: number;
-  needs?: { sleep: number; social: number; decayAccumSleep: number; decayAccumSocial: number };
-  /** In-flight job (mine / sleep / socialise / wander) at save time. */
+  needs?: {
+    sleep: number;
+    social: number;
+    hunger?: number;
+    thirst?: number;
+    decayAccumSleep: number;
+    decayAccumSocial: number;
+    decayAccumHunger?: number;
+    decayAccumThirst?: number;
+  };
+  /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink";
     targetX: number;
     targetY: number;
     progress: number;
@@ -37,6 +48,19 @@ export interface SavedDwarf {
     goalX: number;
     goalY: number;
   };
+  /** Combat HP. Optional for back-compat with v2 saves. */
+  health?: { hp: number; maxHp: number; lastAttackTick: number; wasSevereWound?: boolean };
+}
+
+/** Saved hostile entity. */
+export interface SavedHostile {
+  kind: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  lastAttackTick: number;
+  lastMoveTick: number;
 }
 
 export interface SavedBlueprint {
@@ -62,6 +86,8 @@ export interface SavedStockpile {
   ore: number;
   stone: number;
   dirt: number;
+  food?: number;
+  drink?: number;
 }
 
 export interface SaveV1 {
@@ -102,6 +128,8 @@ export interface SaveV1 {
   stockpile?: SavedStockpile;
   oreEverStruck?: boolean;
   lastYearAnnounced?: number;
+  populationMilestones?: number[];
+  hostiles?: SavedHostile[];
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

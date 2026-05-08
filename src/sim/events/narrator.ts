@@ -28,6 +28,7 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   stockpile: "stockpile",
   corridor: "tunnel",
   mine: "mine",
+  farm: "farm",
   stairwell: "stairwell",
 };
 
@@ -63,6 +64,11 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
         `An ore vein has been sensed ${where}. The colony moves to dig it out.`,
         `The deep stone hums with metal ${where}; a mine is begun.`,
       ]);
+    case "farm":
+      return pick(rng, [
+        `A farm plot is laid out ${where}. The fortress will eat better.`,
+        `The dwarves mark out a new farm ${where}.`,
+      ]);
     case "stairwell":
       return `A stairwell is laid out, descending into the rock.`;
   }
@@ -96,6 +102,11 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
         `The new mine is open ${where}. The first ore has been drawn from the rock.`,
         `Ore tumbles into the dust ${where}; the mine is complete.`,
       ]);
+    case "farm":
+      return pick(rng, [
+        `The new farm is dug ${where}. Cave wheat will follow.`,
+        `The farm is finished ${where}. The dwarves begin to plant.`,
+      ]);
     case "stairwell":
       return `The stairwell is finished. The colony reaches further into the mountain.`;
   }
@@ -106,6 +117,46 @@ export function narrateOreFirstStrike(rng: Rng, dwarfName: string, depth: number
   return pick(rng, [
     `${dwarfName} strikes the first ore vein the colony has seen, ${where}.`,
     `${dwarfName} is the first to break ore, ${where}. There will be more.`,
+  ]);
+}
+
+export function narrateArrival(rng: Rng, names: string[]): string {
+  const count = names.length;
+  if (count === 1) {
+    return pick(rng, [
+      `${names[0]} has arrived at the gate, looking for work.`,
+      `A lone dwarf, ${names[0]}, has joined the fortress.`,
+      `${names[0]} walks out of the dust and asks to stay. The colony agrees.`,
+    ]);
+  }
+  if (count <= 3) {
+    const list = count === 2 ? `${names[0]} and ${names[1]}` : `${names[0]}, ${names[1]}, and ${names[2]}`;
+    return pick(rng, [
+      `${list} arrive at the gate, seeking work. They are welcomed in.`,
+      `${list} have joined the fortress.`,
+    ]);
+  }
+  return pick(rng, [
+    `${count} dwarves arrive at the gate, seeking refuge in the mountain. They are welcomed in.`,
+    `A small caravan brings ${count} new dwarves to the fortress.`,
+    `${count} new dwarves have joined the fortress: ${names.slice(0, 2).join(", ")} and ${count - 2} others.`,
+  ]);
+}
+
+export function narrateHostileSpawn(rng: Rng, kindArticle: string, depth: number, spawnY: number): string {
+  const where = depthPhrase(depth, spawnY);
+  return pick(rng, [
+    `${kindArticle.charAt(0).toUpperCase() + kindArticle.slice(1)} has appeared ${where}. The dwarves should beware.`,
+    `${kindArticle.charAt(0).toUpperCase() + kindArticle.slice(1)} has been heard ${where}.`,
+    `Something stirs ${where} — ${kindArticle}.`,
+  ]);
+}
+
+export function narrateHostileSlain(rng: Rng, dwarfName: string, kindName: string): string {
+  return pick(rng, [
+    `${dwarfName} has slain a ${kindName}.`,
+    `A ${kindName} lies dead at ${dwarfName}'s feet.`,
+    `${dwarfName} has put down a ${kindName}.`,
   ]);
 }
 

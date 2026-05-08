@@ -4,11 +4,12 @@ import { SimWorld } from "../world/simWorld";
 import { tick } from "../sim";
 import { TICKS_PER_YEAR } from "../time";
 import { TileType } from "../world/tiles";
+import { EntityId } from "../ecs/world";
 
-function buildSim(seed: number, age: number, traitIds: string[] = []): SimWorld {
+function buildSim(seed: number, age: number, traitIds: string[] = []): { sim: SimWorld; borin: EntityId } {
   const w = generateWorld({ seed, width: 200, height: 500 });
   const sim = new SimWorld(seed, w.grid, w.surfaceY, w.spawn);
-  sim.spawnDwarf({
+  const borin = sim.spawnDwarf({
     name: "Borin",
     x: w.spawn.x,
     y: w.spawn.y,
@@ -16,41 +17,43 @@ function buildSim(seed: number, age: number, traitIds: string[] = []): SimWorld 
     traitIds,
     profession: "Miner",
   });
-  return sim;
+  return { sim, borin };
 }
 
 describe("dwarf death", () => {
   it("a dwarf at the death threshold age dies at the next year boundary", () => {
     // Spawn at exactly the threshold; first year-aligned tick triggers death.
-    const sim = buildSim(1, 150);
-    expect(sim.dwarf.size()).toBe(1);
+    const { sim, borin } = buildSim(1, 150);
+    expect(sim.ecs.isAlive(borin)).toBe(true);
     // Run one in-game year; death system fires on tick = TICKS_PER_YEAR.
     for (let i = 0; i < TICKS_PER_YEAR + 5; i++) tick(sim);
-    expect(sim.dwarf.size()).toBe(0);
+    // Migration may have brought in immigrants during the year — the
+    // assertion is on the specific dwarf, not the population total.
+    expect(sim.ecs.isAlive(borin)).toBe(false);
   });
 
   it("dwarf-touched dwarves live past the default threshold", () => {
-    const sim = buildSim(2, 150, ["dwarf_touched"]);
+    const { sim, borin } = buildSim(2, 150, ["dwarf_touched"]);
     for (let i = 0; i < TICKS_PER_YEAR + 5; i++) tick(sim);
-    // Still alive — threshold for dwarf-touched is 250.
-    expect(sim.dwarf.size()).toBe(1);
+    expect(sim.ecs.isAlive(borin)).toBe(true);
   });
 
   it("logs a death event with name, profession, and age", () => {
-    const sim = buildSim(3, 150);
+    const { sim } = buildSim(3, 150);
     for (let i = 0; i < TICKS_PER_YEAR + 5; i++) tick(sim);
-    const deaths = sim.events.events.filter((e) => e.category === "social");
+    const deaths = sim.events.events.filter(
+      (e) =>
+        e.category === "social" &&
+        e.text.includes("Borin") &&
+        /died|dead|passed|did not wake/i.test(e.text),
+    );
     expect(deaths.length).toBeGreaterThanOrEqual(1);
-    const text = deaths[0].text;
-    expect(text).toContain("Borin");
-    expect(text).toMatch(/15[01]/);
+    expect(deaths[0].text).toMatch(/15[01]/);
   });
 
   it("places a Memorial tile where the dwarf fell", () => {
-    const sim = buildSim(4, 150);
+    const { sim } = buildSim(4, 150);
     for (let i = 0; i < TICKS_PER_YEAR + 5; i++) tick(sim);
-    // The dwarf may have wandered before dying — scan the whole grid for
-    // the Memorial. Cheap because the test world is only 200×500.
     let memorialFound = false;
     sim.grid.eachChunk((chunk) => {
       for (let i = 0; i < chunk.tiles.length && !memorialFound; i++) {
@@ -61,9 +64,16 @@ describe("dwarf death", () => {
   });
 
   it("does not double-fire deaths after a dwarf is removed", () => {
-    const sim = buildSim(5, 150);
+    const { sim } = buildSim(5, 150);
     for (let i = 0; i < TICKS_PER_YEAR * 3; i++) tick(sim);
-    const deaths = sim.events.events.filter((e) => e.category === "social");
-    expect(deaths.length).toBe(1);
+    // Filter to "Borin" death events specifically — the social category
+    // also covers arrivals, births, pairings, recoveries, and bereavements.
+    const borinDeaths = sim.events.events.filter(
+      (e) =>
+        e.category === "social" &&
+        e.text.includes("Borin") &&
+        /died|dead|passed|did not wake/i.test(e.text),
+    );
+    expect(borinDeaths.length).toBe(1);
   });
 });

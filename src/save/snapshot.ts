@@ -1,6 +1,6 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, GameMode } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides } from "./codec";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
@@ -59,18 +59,32 @@ export function snapshot(input: SnapshotInput): SaveV1 {
         }
       : undefined;
     const partnerIndex = dw.partnerId !== null ? entityToIndex.get(dw.partnerId) ?? null : null;
+    const h = sim.health.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
       y: pos.y,
       traitIds: dw.traitIds,
       skills: dw.skills,
+      skillXp: dw.skillXp as Record<string, number>,
       profession: dw.profession,
       bornAtTick: dw.bornAtTick,
       partnerIndex,
       lastJobTick: dw.lastJobTick,
+      health: h
+        ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick, wasSevereWound: h.wasSevereWound }
+        : undefined,
       needs: n
-        ? { sleep: n.sleep, social: n.social, decayAccumSleep: n.decayAccumSleep, decayAccumSocial: n.decayAccumSocial }
+        ? {
+            sleep: n.sleep,
+            social: n.social,
+            hunger: n.hunger,
+            thirst: n.thirst,
+            decayAccumSleep: n.decayAccumSleep,
+            decayAccumSocial: n.decayAccumSocial,
+            decayAccumHunger: n.decayAccumHunger,
+            decayAccumThirst: n.decayAccumThirst,
+          }
         : undefined,
       job: savedJob,
       pathing: savedPathing,
@@ -124,10 +138,40 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     cameraY: input.cameraY,
     zoomIndex: input.zoomIndex,
     events: sim.events.events.map((e) => ({ tick: e.tick, category: e.category, text: e.text })),
-    stockpile: { ore: sim.stockpile.ore, stone: sim.stockpile.stone, dirt: sim.stockpile.dirt },
+    stockpile: {
+      ore: sim.stockpile.ore,
+      stone: sim.stockpile.stone,
+      dirt: sim.stockpile.dirt,
+      food: sim.stockpile.food,
+      drink: sim.stockpile.drink,
+    },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
+    populationMilestones: Array.from(sim.populationMilestones),
+    hostiles: collectHostiles(sim),
   };
+}
+
+function collectHostiles(sim: SimWorld): SavedHostile[] {
+  const out: SavedHostile[] = [];
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const h = sim.hostile.get(e);
+    const p = sim.position.get(e);
+    const hp = sim.health.get(e);
+    if (!h || !p || !hp) continue;
+    out.push({
+      kind: h.kind,
+      x: p.x,
+      y: p.y,
+      hp: hp.hp,
+      maxHp: hp.maxHp,
+      lastAttackTick: h.lastAttackTick,
+      lastMoveTick: h.lastMoveTick,
+    });
+  }
+  return out;
 }
 
 export function restore(save: SaveV1): SimWorld {
@@ -166,6 +210,7 @@ export function restore(save: SaveV1): SimWorld {
       y: d.y,
       traitIds: d.traitIds ?? [],
       skills: d.skills ?? {},
+      skillXp: d.skillXp as import("../sim/dwarves/skillProgress").SkillXp | undefined,
       profession: d.profession ?? "Worker",
       // Prefer bornAtTick if present, else compute from legacy `age`.
       bornAtTick: d.bornAtTick,
@@ -248,9 +293,44 @@ export function restore(save: SaveV1): SimWorld {
     sim.stockpile.ore = save.stockpile.ore;
     sim.stockpile.stone = save.stockpile.stone;
     sim.stockpile.dirt = save.stockpile.dirt;
+    if (save.stockpile.food !== undefined) sim.stockpile.food = save.stockpile.food;
+    if (save.stockpile.drink !== undefined) sim.stockpile.drink = save.stockpile.drink;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
+  if (save.populationMilestones) {
+    for (const m of save.populationMilestones) sim.populationMilestones.add(m);
+  }
+
+  // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
+  // default 100/100 above).
+  for (let i = 0; i < save.dwarves.length; i++) {
+    const d = save.dwarves[i];
+    const e = spawnedEntities[i];
+    if (d.health) {
+      const hp = sim.health.get(e);
+      if (hp) {
+        hp.hp = d.health.hp;
+        hp.maxHp = d.health.maxHp;
+        hp.lastAttackTick = d.health.lastAttackTick;
+        hp.wasSevereWound = d.health.wasSevereWound;
+      }
+    }
+  }
+
+  // Restore hostiles.
+  if (save.hostiles) {
+    for (const h of save.hostiles) {
+      sim.spawnHostile({
+        kind: h.kind as import("../sim/hostiles/types").HostileKind,
+        x: h.x,
+        y: h.y,
+        hp: h.hp,
+        lastAttackTick: h.lastAttackTick,
+        lastMoveTick: h.lastMoveTick,
+      });
+    }
+  }
 
   return sim;
 }

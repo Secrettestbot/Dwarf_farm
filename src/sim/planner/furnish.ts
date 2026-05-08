@@ -23,11 +23,25 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "stockpile":
       furnishStockpile(grid, b);
       break;
+    case "farm":
+      furnishFarm(grid, b);
+      break;
     // Corridors, mines, and stairwells stay bare — they're passages or
     // active workspaces, not rooms. Real ore mines later get an extraction
     // marker; for now leaving them as plain CorridorFloor.
     default:
       break;
+  }
+}
+
+/** Farm: every cavity cell becomes a FarmTile. The farm production
+ * system runs over these to deliver food to the stockpile. */
+function furnishFarm(grid: TileGrid, b: Blueprint): void {
+  for (let i = 0; i < b.cavity.length; i++) {
+    const c = b.cavity[i];
+    const x = c & 0xffff;
+    const y = (c >>> 16) & 0xffff;
+    grid.setTile(x, y, TileType.FarmTile);
   }
 }
 

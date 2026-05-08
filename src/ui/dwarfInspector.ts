@@ -10,6 +10,7 @@ import { SimWorld } from "../sim/world/simWorld";
 import { EntityId } from "../sim/ecs/world";
 import { TRAITS_BY_ID } from "../sim/dwarves/traits";
 import { SKILLS_BY_ID, skillTierLabel, SkillId } from "../sim/dwarves/skills";
+import { progressInLevel } from "../sim/dwarves/skillProgress";
 
 const ACTIVITY_LABEL: Record<string, string> = {
   mine: "mining",
@@ -77,14 +78,27 @@ export class DwarfInspector {
       )
       .join("");
 
-    // Top 5 skills by level.
+    // Top 5 skills by level. Each row shows a small XP progress bar to the
+    // next level so the player can see who's about to advance.
     const skillEntries = Object.entries(dw.skills) as Array<[SkillId, number]>;
     skillEntries.sort((a, b) => b[1] - a[1]);
     const topSkills = skillEntries
       .slice(0, 5)
       .map(([id, lvl]) => {
         const s = SKILLS_BY_ID[id];
-        return `<div style="display:flex;justify-content:space-between;font-size:11px;color:#aaa;"><span>${escapeHtml(s.name)}</span><span style="color:#888;">${skillTierLabel(lvl)} (${lvl})</span></div>`;
+        const xp = dw.skillXp[id] ?? 0;
+        const p = progressInLevel(xp);
+        const pct = p.xpForNext === 0 ? 100 : Math.min(100, Math.floor((p.xpInLevel / p.xpForNext) * 100));
+        return `
+          <div style="font-size:11px;color:#aaa;margin-top:3px;">
+            <div style="display:flex;justify-content:space-between;">
+              <span>${escapeHtml(s.name)}</span>
+              <span style="color:#888;">${skillTierLabel(lvl)} (${lvl})</span>
+            </div>
+            <div style="background:#1c1c24;height:3px;border-radius:2px;overflow:hidden;margin-top:2px;">
+              <div style="height:100%;width:${pct}%;background:#7a8aa6;"></div>
+            </div>
+          </div>`;
       })
       .join("");
 
@@ -92,8 +106,14 @@ export class DwarfInspector {
       ? `${ACTIVITY_LABEL[job.kind] ?? job.kind}${path && path.pathIndex < path.path.length - 1 ? " (en route)" : ""}`
       : "idle";
 
+    const health = sim.health.get(this.targetId);
+    const hpHtml = health
+      ? `${bar("Health", (health.hp / health.maxHp) * 100, `${health.hp}/${health.maxHp}`)}`
+      : "";
     const needsHtml = needs
       ? `
+        ${bar("Hunger", needs.hunger)}
+        ${bar("Thirst", needs.thirst)}
         ${bar("Sleep", needs.sleep)}
         ${bar("Social", needs.social)}
       `
@@ -112,6 +132,7 @@ export class DwarfInspector {
       </div>
       ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
+      ${hpHtml}
       ${needsHtml}
       <div style="margin-top:8px;">${traitsHtml || '<span style="color:#666;">no traits</span>'}</div>
       <div style="margin-top:8px;border-top:1px solid #2a2a35;padding-top:6px;">${topSkills}</div>
@@ -121,12 +142,13 @@ export class DwarfInspector {
   }
 }
 
-function bar(label: string, value: number): string {
+function bar(label: string, value: number, displayValue?: string): string {
   const pct = Math.max(0, Math.min(100, value));
   const tone = pct < 30 ? "#ff7060" : pct < 60 ? "#e0c080" : "#9ad3a3";
+  const display = displayValue ?? Math.round(pct).toString();
   return `
     <div style="margin-top:5px;font-size:10px;color:#888;display:flex;justify-content:space-between;">
-      <span>${label}</span><span>${Math.round(pct)}</span>
+      <span>${label}</span><span>${display}</span>
     </div>
     <div style="background:#1c1c24;height:5px;border-radius:3px;overflow:hidden;">
       <div style="height:100%;width:${pct}%;background:${tone};"></div>
