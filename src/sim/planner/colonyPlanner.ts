@@ -56,6 +56,7 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // can fit between corridors and ore-vein neighbours where larger cavities
   // would be blocked by adjacent walkable tiles.
   mine: { w: 2, h: 2, priority: 2 },
+  farm: { w: 4, h: 3, priority: 2 },
   stairwell: { w: 2, h: 6, priority: 5 },
 };
 
@@ -155,6 +156,11 @@ export class ColonyPlanner {
     // 2. Dining hall and stockpile — emit once at population thresholds.
     if (this.needsDiningHall(ctx) && this.placeRoom(ctx, "dining_hall")) return true;
     if (this.needsStockpile(ctx) && this.placeRoom(ctx, "stockpile")) return true;
+    // 2.5 Farm — once population is large enough to need ongoing food
+    //     production (founders bring a starter cache that lasts a couple
+    //     of in-game months). We aim for at least one farm per ~7 dwarves
+    //     so a growing colony stays self-sufficient.
+    if (this.needsFarm(ctx) && this.placeRoom(ctx, "farm")) return true;
 
     // 3. Periodic corridor — every two completed rooms the colony wants
     //    another corridor segment so its reach keeps growing. This is what
@@ -182,6 +188,14 @@ export class ColonyPlanner {
   private needsStockpile(ctx: PlannerContext): boolean {
     if (ctx.population < 5) return false;
     return this.totalOfKind("stockpile") === 0;
+  }
+
+  private needsFarm(ctx: PlannerContext): boolean {
+    // First farm at pop ≥ 4; one additional farm per ~7 dwarves. Keeps
+    // the colony fed through migration-driven growth.
+    if (ctx.population < 4) return false;
+    const target = Math.max(1, Math.ceil(ctx.population / 7));
+    return this.totalOfKind("farm") < target;
   }
 
   private needsBedroom(ctx: PlannerContext): boolean {

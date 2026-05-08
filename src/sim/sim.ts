@@ -63,6 +63,39 @@ export function tick(sim: SimWorld): void {
   hostileMovementSystem(sim);
   combatSystem(sim);
   healingSystem(sim);
+  farmSystem(sim);
+}
+
+// ---- Farms -------------------------------------------------------------
+// Each FarmTile in the world has a small chance, every in-game hour, of
+// contributing one unit of food to the stockpile. Tuned so a single 4×3
+// farm (12 cells) yields roughly 30 food per in-game day at steady state
+// — enough to feed a 7-dwarf colony with margin. Hauling and explicit
+// plant/harvest jobs land in a later session; for now the food appears
+// abstractly on the assumption that the dwarves are tending the plot
+// during their "wander" idle time.
+
+const FARM_TICK_INTERVAL = 60; // once per in-game hour
+const FARM_YIELD_CHANCE = 0.18; // per-cell, per-hour
+
+function farmSystem(sim: SimWorld): void {
+  if (sim.tick % FARM_TICK_INTERVAL !== 0) return;
+  // Iterate completed farm blueprints so we only check farm cavities.
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "farm") continue;
+    if (b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      // Cell may have been overwritten (rare — cave-in, rebuilding) — only
+      // count actual FarmTile cells.
+      if (sim.grid.getTile(x, y) !== TileType.FarmTile) continue;
+      if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE) {
+        sim.stockpile.food += 1;
+      }
+    }
+  }
 }
 
 // GDD §6.1 lifecycle: death at ~150 years naturally; dwarf-touched extends

@@ -58,7 +58,31 @@ const TILE_PIXELS: Record<TileType, string[]> = {
   [TileType.Table]: tableSprite(),
   [TileType.Bin]: binSprite(),
   [TileType.Memorial]: memorialSprite(),
+  [TileType.FarmTile]: farmSprite(),
 };
+
+/** Farm: tilled soil base with green sprouts in a regular pattern. */
+function farmSprite(): string[] {
+  const base = noisyFill(5, 4); // dirt brown
+  // Green sprouts at fixed positions — looks like a planted plot.
+  const sprouts: Array<[number, number]> = [
+    [3, 4], [11, 4],
+    [7, 8],
+    [3, 12], [11, 12],
+  ];
+  for (const [x, y] of sprouts) {
+    let row = base[y];
+    row = row.substring(0, x) + "9" + row.substring(x + 1); // mid-green
+    base[y] = row;
+  }
+  // Furrow lines: subtle horizontal accent every 5 rows.
+  for (const yLine of [3, 8, 13]) {
+    let row = "";
+    for (let x = 0; x < 16; x++) row += "5";
+    base[yLine] = row;
+  }
+  return base;
+}
 
 /** Memorial: a small upright stone marker (cairn) on the corridor floor. */
 function memorialSprite(): string[] {

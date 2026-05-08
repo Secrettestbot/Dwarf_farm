@@ -23,6 +23,12 @@ export const enum TileType {
   // itself — a future survivor mining nearby will see where their elders
   // fell.
   Memorial = 14,
+  // A productive farm cell. Walkable. Each in-game hour, with some
+  // probability, contributes a unit of food to the stockpile (full
+  // farming/harvesting jobs land in a later session — for now the food
+  // arrives abstractly, the way underground subsistence farming
+  // implicitly works in the GDD).
+  FarmTile = 15,
 }
 
 export interface TileInfo {
@@ -49,6 +55,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Table]: { name: "table", walkable: true, solid: false, color: 0x8a6a3a },
   [TileType.Bin]: { name: "bin", walkable: true, solid: false, color: 0x5a4633 },
   [TileType.Memorial]: { name: "memorial", walkable: true, solid: false, color: 0xc0a070 },
+  [TileType.FarmTile]: { name: "farm", walkable: true, solid: false, color: 0x6a8a3a },
 };
 
 export function tileIsBed(t: number): boolean {

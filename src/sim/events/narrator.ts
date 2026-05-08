@@ -28,6 +28,7 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   stockpile: "stockpile",
   corridor: "tunnel",
   mine: "mine",
+  farm: "farm",
   stairwell: "stairwell",
 };
 
@@ -63,6 +64,11 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
         `An ore vein has been sensed ${where}. The colony moves to dig it out.`,
         `The deep stone hums with metal ${where}; a mine is begun.`,
       ]);
+    case "farm":
+      return pick(rng, [
+        `A farm plot is laid out ${where}. The fortress will eat better.`,
+        `The dwarves mark out a new farm ${where}.`,
+      ]);
     case "stairwell":
       return `A stairwell is laid out, descending into the rock.`;
   }
@@ -95,6 +101,11 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return pick(rng, [
         `The new mine is open ${where}. The first ore has been drawn from the rock.`,
         `Ore tumbles into the dust ${where}; the mine is complete.`,
+      ]);
+    case "farm":
+      return pick(rng, [
+        `The new farm is dug ${where}. Cave wheat will follow.`,
+        `The farm is finished ${where}. The dwarves begin to plant.`,
       ]);
     case "stairwell":
       return `The stairwell is finished. The colony reaches further into the mountain.`;
