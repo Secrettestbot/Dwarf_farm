@@ -170,6 +170,14 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       if (workshop) {
         return { kind: "haul" as JobKind, targetX: workshop.x, targetY: workshop.y, progress: 1 };
       }
+      // Tools route to an Armoury rack ahead of the generic stockpile
+      // — that's how a colony stores its weapons in the GDD.
+      if (carrying.kind === "tools") {
+        const rack = findEmptyArmouryRack(sim, pos.x, pos.y);
+        if (rack) {
+          return { kind: "haul" as JobKind, targetX: rack.x, targetY: rack.y, progress: 1 };
+        }
+      }
       const drop = findStockpileDrop(sim, pos.x, pos.y);
       if (drop) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
@@ -415,6 +423,10 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     // Without this, a hauler picks up the item it just dropped at the
     // smelter and the production chain loops forever.
     if (isItemAtWorkshopDestination(sim, p.x, p.y, it.kind)) continue;
+    // Tools sitting on an Armoury rack are "stored" — they wait there
+    // for the next draft to equip a soldier. Same loop-prevention
+    // logic as the workshop destination skip.
+    if (it.kind === "tools" && sim.grid.getTile(p.x, p.y) === TileType.ArmouryRack) continue;
     const dx = p.x - sx;
     const dy = p.y - sy;
     const d = dx * dx + dy * dy;
@@ -429,6 +441,47 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
   }
   if (bestEnt !== -1) {
     sim.item.get(bestEnt)!.claimedBy = hauler;
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest Armoury rack tile that doesn't already have a tool
+ * sitting on it. Caps each rack at one weapon — a fortress with five
+ * racks holds five tools without stacking. Returns null if no Armoury
+ * exists yet, so haulers fall through to the regular stockpile flow. */
+function findEmptyArmouryRack(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "armoury" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.ArmouryRack) continue;
+      // Skip racks that already hold a tool.
+      let stocked = false;
+      const ents = sim.item.entities;
+      for (let j = 0; j < ents.length; j++) {
+        const it = sim.item.get(ents[j]);
+        const p = sim.position.get(ents[j]);
+        if (!it || !p) continue;
+        if (p.x === x && p.y === y && it.kind === "tools") {
+          stocked = true;
+          break;
+        }
+      }
+      if (stocked) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
   }
   return best ? { x: best.x, y: best.y } : null;
 }

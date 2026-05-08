@@ -362,21 +362,40 @@ function draftSystem(sim: SimWorld): void {
         );
       }
     }
-    // Equip the soldier from the global tools counter if they aren't
-    // already armed. The Armoury room is purely visual at this scale —
-    // the smiths' output goes into sim.stockpile.tools and the draft
-    // pulls one out for each new recruit. A future commit can route a
-    // tool item through the Armoury rack tile in real time.
-    if (!sim.equipment.has(c.id) && sim.stockpile.tools > 0) {
-      sim.stockpile.tools--;
-      sim.equipment.set(c.id, { weapon: true });
-      const dw = sim.dwarf.get(c.id);
-      if (dw) {
-        sim.events.add(
-          sim.tick,
-          "social",
-          `${dw.name} draws a forged tool from the armoury — a weapon now, not a pickaxe.`,
-        );
+    // Equip the soldier. Two supply lines:
+    //   1. A tool item sitting on an Armoury rack (the GDD-aligned
+    //      flow — a hauler delivered it from a forge).
+    //   2. The global sim.stockpile.tools counter (fallback for
+    //      colonies without an Armoury yet, or whose haulers haven't
+    //      caught up).
+    if (!sim.equipment.has(c.id)) {
+      let armed = false;
+      // Look for a tool on a rack.
+      const ents = sim.item.entities;
+      for (let i = 0; i < ents.length && !armed; i++) {
+        const ie = ents[i];
+        const it = sim.item.get(ie);
+        const p = sim.position.get(ie);
+        if (!it || !p) continue;
+        if (it.kind !== "tools") continue;
+        if (sim.grid.getTile(p.x, p.y) !== TileType.ArmouryRack) continue;
+        sim.destroyItem(ie);
+        armed = true;
+      }
+      if (!armed && sim.stockpile.tools > 0) {
+        sim.stockpile.tools--;
+        armed = true;
+      }
+      if (armed) {
+        sim.equipment.set(c.id, { weapon: true });
+        const dw = sim.dwarf.get(c.id);
+        if (dw) {
+          sim.events.add(
+            sim.tick,
+            "social",
+            `${dw.name} draws a forged tool from the armoury — a weapon now, not a pickaxe.`,
+          );
+        }
       }
     }
   }
@@ -1267,11 +1286,14 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.pathing.remove(e);
     return;
   }
-  // Two delivery destinations: a workshop station that wants this
-  // resource (drop the item on the floor for the workshop's craft job
-  // to consume), or a stockpile cell (credit the global counter).
+  // Three delivery destinations:
+  //  - a workshop station that wants this resource (drop the item on
+  //    the floor for the workshop's craft job to consume);
+  //  - an Armoury rack (drop a tool item there for the draft to equip
+  //    soldiers from);
+  //  - a stockpile cell (credit the global counter).
   const tile = sim.grid.getTile(pos.x, pos.y);
-  let droppedAtWorkshop = false;
+  let droppedAsItem = false;
   for (const b of sim.planner.blueprints) {
     if (b.status !== "complete") continue;
     const recipe = recipeFor(b.kind);
@@ -1281,10 +1303,14 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
     if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
-    droppedAtWorkshop = true;
+    droppedAsItem = true;
     break;
   }
-  if (!droppedAtWorkshop) {
+  if (!droppedAsItem && carrying.kind === "tools" && tile === TileType.ArmouryRack) {
+    sim.spawnItem({ kind: "tools", x: pos.x, y: pos.y });
+    droppedAsItem = true;
+  }
+  if (!droppedAsItem) {
     if (carrying.kind === "ore") sim.stockpile.ore++;
     else if (carrying.kind === "stone") sim.stockpile.stone++;
     else if (carrying.kind === "dirt") sim.stockpile.dirt++;
