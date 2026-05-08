@@ -194,6 +194,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
       await persist(active, camera);
       flashSave();
     },
+    worldSeed: () => sim.seed,
   });
   const eventPanel = new EventLogPanel(uiHost);
   const inspector = new DwarfInspector(uiHost);
