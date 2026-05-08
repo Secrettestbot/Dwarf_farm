@@ -38,12 +38,25 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "forge":
       furnishWorkshop(grid, b, TileType.ForgeStation);
       break;
+    case "library":
+      furnishLibrary(grid, b);
+      break;
     // Corridors, mines, and stairwells stay bare — they're passages or
     // active workspaces, not rooms. Real ore mines later get an extraction
     // marker; for now leaving them as plain CorridorFloor.
     default:
       break;
   }
+}
+
+/** Library: two desks along the upper row so two scholars can study
+ * side by side without blocking each other. */
+function furnishLibrary(grid: TileGrid, b: Blueprint): void {
+  const y = b.originY;
+  const x1 = b.originX + 1;
+  const x2 = b.originX + b.width - 2;
+  if (cavityContains(b, x1, y)) grid.setTile(x1, y, TileType.LibraryDesk);
+  if (x2 !== x1 && cavityContains(b, x2, y)) grid.setTile(x2, y, TileType.LibraryDesk);
 }
 
 /** Workshops drop a single workstation tile in the centre of their cavity.

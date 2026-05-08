@@ -68,6 +68,9 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Trade depot: a wider open room near the entrance for caravans to
   // park. Placed once per colony at moderate size.
   trade_depot: { w: 5, h: 4, priority: 3 },
+  // Library: a quiet 4×3 chamber with two desks. Wider than the
+  // workshops so two scholars can fit without colliding.
+  library: { w: 4, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -181,6 +184,7 @@ export class ColonyPlanner {
     if (this.needsSmelter(ctx) && this.placeRoom(ctx, "smelter")) return true;
     if (this.needsForge(ctx) && this.placeRoom(ctx, "forge")) return true;
     if (this.needsTradeDepot(ctx) && this.placeRoom(ctx, "trade_depot")) return true;
+    if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
 
     // 3. Periodic corridor — every two completed rooms the colony wants
     //    another corridor segment so its reach keeps growing. This is what
@@ -256,6 +260,14 @@ export class ColonyPlanner {
     // visiting — and only one depot per fortress.
     if (ctx.population < 6) return false;
     return this.maintainedAndActiveOfKind("trade_depot", ctx.tick) === 0;
+  }
+
+  private needsLibrary(ctx: PlannerContext): boolean {
+    // The library lands once the colony has the bandwidth to spare a
+    // dwarf or two for scholarship — and only one per fortress until
+    // the population justifies more research throughput.
+    if (ctx.population < 8) return false;
+    return this.maintainedAndActiveOfKind("library", ctx.tick) === 0;
   }
 
   /**

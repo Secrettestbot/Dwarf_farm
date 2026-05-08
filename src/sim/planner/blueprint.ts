@@ -19,7 +19,8 @@ export type BlueprintKind =
   | "brewery"
   | "smelter"
   | "forge"
-  | "trade_depot";
+  | "trade_depot"
+  | "library";
 
 export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   bedroom: "Bedroom",
@@ -34,6 +35,7 @@ export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   smelter: "Smelter",
   forge: "Forge",
   trade_depot: "Trade Depot",
+  library: "Library",
 };
 
 export type BlueprintStatus = "digging" | "complete";
@@ -121,7 +123,8 @@ export function isMaintainable(kind: BlueprintKind): boolean {
     kind === "brewery" ||
     kind === "smelter" ||
     kind === "forge" ||
-    kind === "trade_depot"
+    kind === "trade_depot" ||
+    kind === "library"
   );
 }
 

@@ -163,6 +163,11 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     sliders: { ...sim.sliders },
     emergency: { ...sim.emergency },
     items: collectItems(sim),
+    research: {
+      current: sim.research.current,
+      progress: sim.research.progress,
+      completed: [...sim.research.completed],
+    },
   };
 }
 
@@ -357,6 +362,11 @@ export function restore(save: SaveV1): SimWorld {
     for (const it of save.items) {
       sim.spawnItem({ kind: it.kind, x: it.x, y: it.y });
     }
+  }
+  if (save.research) {
+    sim.research.current = save.research.current ?? null;
+    sim.research.progress = save.research.progress ?? 0;
+    sim.research.completed = [...(save.research.completed ?? [])];
   }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them

@@ -81,6 +81,8 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A forge is sketched in the stone ${where}.`;
     case "trade_depot":
       return `A trade depot is mapped out ${where}. The colony plans for visitors.`;
+    case "library":
+      return `A library is laid out ${where}. The scholars stir.`;
   }
 }
 
@@ -129,6 +131,8 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The forge rings to life ${where}. The first tool is hammered out.`;
     case "trade_depot":
       return `The trade depot is finished ${where}. The first caravan will be welcome.`;
+    case "library":
+      return `The library is opened ${where}. The first books are placed on the desks.`;
   }
 }
 

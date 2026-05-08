@@ -10,6 +10,7 @@ import { TICKS_PER_YEAR } from "../time";
 import { Hostile, Health, HOSTILE_DEFS, HostileKind } from "../hostiles/types";
 import { SliderState, defaultSliders } from "../sliders";
 import { EmergencyState, defaultEmergency } from "../emergency";
+import { ResearchState, defaultResearch } from "../research";
 
 const DWARF_BASE_MAX_HP = 100;
 
@@ -108,6 +109,10 @@ export class SimWorld {
   /** Active emergency mode (GDD §4.3) plus cooldown bookkeeping. Same
    * mutate-from-UI, read-from-sim contract as `sliders`. */
   emergency: EmergencyState = defaultEmergency();
+
+  /** Research progress (GDD §10). Tier 1+2 are wired now; deeper tiers
+   * arrive when their gates land. */
+  research: ResearchState = defaultResearch();
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;

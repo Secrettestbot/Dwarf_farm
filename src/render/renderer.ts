@@ -17,6 +17,7 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   smelter: { fill: "rgba(190, 90, 60, 0.14)", stroke: "rgba(220, 110, 70, 0.7)" },
   forge: { fill: "rgba(220, 140, 80, 0.14)", stroke: "rgba(240, 160, 100, 0.7)" },
   trade_depot: { fill: "rgba(180, 200, 220, 0.10)", stroke: "rgba(200, 220, 240, 0.65)" },
+  library: { fill: "rgba(120, 160, 220, 0.10)", stroke: "rgba(150, 180, 240, 0.65)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -30,6 +31,7 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   maintain: { glyph: "•", color: "#aaa" },
   shelter: { glyph: "!", color: "#e07050" },
   engage: { glyph: "⚔", color: "#e0c080" },
+  research: { glyph: "📖", color: "#8aa9ff" },
 };
 
 export function renderWorld(
@@ -174,5 +176,6 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "smelter": return "smelter";
     case "forge": return "forge";
     case "trade_depot": return "depot";
+    case "library": return "library";
   }
 }

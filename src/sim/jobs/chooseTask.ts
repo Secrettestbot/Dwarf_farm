@@ -185,6 +185,15 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 6.8 Research at a Library desk. Gated by the Research slider, and
+  //     only fires when there's an active topic to study.
+  if (age >= MIN_WORK_AGE && sim.sliders.research > 0.05 && sim.research.current) {
+    const desk = findResearchDesk(sim, pos.x, pos.y);
+    if (desk) {
+      return { kind: "research" as JobKind, targetX: desk.x, targetY: desk.y, progress: 0 };
+    }
+  }
+
   // 7. Mine inside an active blueprint. Gated by the Excavation slider —
   //    set to zero, the colony stops digging entirely.
   if (age >= MIN_WORK_AGE && sim.sliders.excavation > 0.05) {
@@ -424,6 +433,35 @@ function findStockpileDrop(sim: SimWorld, sx: number, sy: number): { x: number; 
       const x = c & 0xffff;
       const y = (c >>> 16) & 0xffff;
       if (!sim.grid.isWalkable(x, y)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest unclaimed Library desk for a research job. Skips
+ * desks already occupied by another scholar so two dwarves don't pile
+ * onto the same chair. */
+function findResearchDesk(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "research");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "library" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.LibraryDesk) continue;
+      if (claimed.has((y << 16) | x)) continue;
       const dx = x - sx;
       const dy = y - sy;
       const d = dx * dx + dy * dy;

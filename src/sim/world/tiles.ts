@@ -37,6 +37,9 @@ export const enum TileType {
   BreweryStation = 17,
   SmelterStation = 18,
   ForgeStation = 19,
+  /** A scholar's desk in the Library. Walkable; a dwarf with the
+   * "research" job stands on it while their progress accumulates. */
+  LibraryDesk = 20,
 }
 
 export interface TileInfo {
@@ -68,6 +71,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.BreweryStation]: { name: "brewery", walkable: true, solid: false, color: 0x5a8a40 },
   [TileType.SmelterStation]: { name: "smelter", walkable: true, solid: false, color: 0xa05030 },
   [TileType.ForgeStation]: { name: "forge", walkable: true, solid: false, color: 0xb07040 },
+  [TileType.LibraryDesk]: { name: "desk", walkable: true, solid: false, color: 0x6080a0 },
 };
 
 export function tileIsWorkshopStation(t: number): boolean {

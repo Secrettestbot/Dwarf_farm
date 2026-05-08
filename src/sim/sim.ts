@@ -14,6 +14,7 @@ import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 import { recipeFor } from "./planner/recipes";
 import { effectsFor } from "./dwarves/traitEffects";
+import { nextTopic, TOPICS_BY_ID } from "./research";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -54,6 +55,7 @@ export function tick(sim: SimWorld): void {
   });
   yearRolloverSystem(sim);
   emergencySystem(sim);
+  researchPickSystem(sim);
   draftSystem(sim);
   pairingSystem(sim);
   reproductionSystem(sim);
@@ -141,6 +143,25 @@ function tradeSystem(sim: SimWorld): void {
     sim.tick,
     "social",
     `A caravan from the western kingdoms arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${kind} for ${TRADE_BASE_COST} stone.`,
+  );
+}
+
+// ---- Research auto-pick -----------------------------------------------
+//
+// If no topic is currently being studied, pick the cheapest available
+// one whose prerequisites are met. Auto-pick runs every tick (cheap)
+// so a freshly-completed topic immediately yields the next one.
+
+function researchPickSystem(sim: SimWorld): void {
+  if (sim.research.current) return;
+  const next = nextTopic(sim.research);
+  if (!next) return;
+  sim.research.current = next.id;
+  sim.research.progress = 0;
+  sim.events.add(
+    sim.tick,
+    "milestone",
+    `The scholars open a new line of inquiry: ${next.name}.`,
   );
 }
 
@@ -818,7 +839,49 @@ function workSystem(sim: SimWorld): void {
       case "engage":
         progressEngage(sim, e, job, pos);
         break;
+      case "research":
+        progressResearch(sim, e, job, pos);
+        break;
     }
+  }
+}
+
+/** Tick research progress while the scholar sits at a Library desk.
+ * Scholarship skill speeds the work; on completion the topic is logged
+ * to the chronicle and the next available topic is auto-picked at the
+ * top of the next tick. */
+function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: { x: number; y: number }): void {
+  const tile = sim.grid.getTile(pos.x, pos.y);
+  if (tile !== TileType.LibraryDesk) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  if (!sim.research.current) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  const dw = sim.dwarf.get(e);
+  const skill = dw?.skills.scholarship ?? 1;
+  const traitBonus = dw ? effectsFor(dw.traitIds).scholarshipBonus : 0;
+  // 1 base + 0.04 per effective level above novice.
+  const ticksThisStep = 1 + Math.max(0, skill + traitBonus - 1) * 0.04;
+  sim.research.progress += ticksThisStep;
+  awardSkillXp(sim, e, "scholarship", 1);
+  const topic = TOPICS_BY_ID[sim.research.current];
+  if (topic && sim.research.progress >= topic.cost) {
+    sim.research.completed.push(topic.id);
+    sim.research.current = null;
+    sim.research.progress = 0;
+    sim.events.add(
+      sim.tick,
+      "milestone",
+      `Research complete: ${topic.name}. The colony's understanding deepens.`,
+    );
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
   }
 }
 

@@ -38,7 +38,7 @@ export interface SavedDwarf {
   };
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research";
     targetX: number;
     targetY: number;
     progress: number;
@@ -167,6 +167,8 @@ export interface SaveV1 {
   emergency?: EmergencyState;
   /** Loose items on the floor at save time. */
   items?: SavedItem[];
+  /** Research progress. Optional for back-compat with v2 saves. */
+  research?: { current: string | null; progress: number; completed: string[] };
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;
