@@ -41,6 +41,11 @@ export interface PlannerContext {
    * lifecycle events ("plans laid out", "tunnel complete", etc.). The log
    * is part of save state, so the chronicle is reproducible. */
   events?: EventLog;
+  /** Research progress. Gates the workshops whose recipes require
+   * research per GDD §10.2 (Smelter on Iron Smelting, Forge on Iron
+   * Toolmaking). When absent, the planner assumes nothing is researched
+   * yet — useful for unit tests of the planner in isolation. */
+  research?: { completed: string[] };
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
@@ -186,6 +191,12 @@ export class ColonyPlanner {
     if (this.needsTradeDepot(ctx) && this.placeRoom(ctx, "trade_depot")) return true;
     if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
 
+    // 2.9 Stairwell — every few completed rooms the architect drops a
+    //     vertical 2×6 shaft so the colony actually descends instead of
+    //     spreading sideways. Without this, dwarves dig wide but
+    //     shallow and the Gem Seam stays out of reach.
+    if (this.wantsStairwell() && this.placeRoom(ctx, "stairwell")) return true;
+
     // 3. Periodic corridor — every two completed rooms the colony wants
     //    another corridor segment so its reach keeps growing. This is what
     //    turns "a cluster of rooms around spawn" into "a network of tunnels".
@@ -243,14 +254,20 @@ export class ColonyPlanner {
 
   private needsSmelter(ctx: PlannerContext): boolean {
     // The smelter only matters once there's actually ore to smelt and a
-    // population large enough to spare a dedicated smith.
+    // population large enough to spare a dedicated smith. Gated on the
+    // Tier 1 Iron Smelting topic per GDD §10.2 — without research,
+    // ore stays raw.
     if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("iron_smelting")) return false;
     return this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0;
   }
 
   private needsForge(ctx: PlannerContext): boolean {
-    // The forge needs the smelter to feed it; gate one tier above.
+    // The forge needs the smelter to feed it; gate one tier above. Also
+    // gates on Iron Toolmaking research (Tier 1) so a colony has to
+    // know how before it builds a forge.
     if (ctx.population < 10) return false;
+    if (!(ctx.research?.completed ?? []).includes("iron_toolmaking")) return false;
     if (this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0) return false;
     return this.maintainedAndActiveOfKind("forge", ctx.tick) === 0;
   }
@@ -264,9 +281,10 @@ export class ColonyPlanner {
 
   private needsLibrary(ctx: PlannerContext): boolean {
     // The library lands once the colony has the bandwidth to spare a
-    // dwarf or two for scholarship — and only one per fortress until
-    // the population justifies more research throughput.
-    if (ctx.population < 8) return false;
+    // dwarf or two for scholarship. Lowered to pop ≥ 5 so research can
+    // run before the smelter / forge tier — those are now gated on
+    // research topics.
+    if (ctx.population < 5) return false;
     return this.maintainedAndActiveOfKind("library", ctx.tick) === 0;
   }
 
@@ -306,6 +324,28 @@ export class ColonyPlanner {
       (this.completedByKind["mine"] ?? 0);
     const corridorTarget = Math.floor(completedRooms / 2);
     return corridorTotal < corridorTarget;
+  }
+
+  /**
+   * The colony wants a stairwell roughly every five non-passage rooms it
+   * builds. One active stairwell at a time so the architect doesn't
+   * sink three parallel shafts in a row. Without this rhythm the
+   * colony spreads sideways and never reaches the Gem Seam.
+   */
+  private wantsStairwell(): boolean {
+    if ((this.activeByKind()["stairwell"] ?? 0) > 0) return false;
+    const stairwellTotal = this.totalOfKind("stairwell");
+    const completedRooms =
+      (this.completedByKind["bedroom"] ?? 0) +
+      (this.completedByKind["dining_hall"] ?? 0) +
+      (this.completedByKind["stockpile"] ?? 0) +
+      (this.completedByKind["mine"] ?? 0) +
+      (this.completedByKind["kitchen"] ?? 0) +
+      (this.completedByKind["brewery"] ?? 0) +
+      (this.completedByKind["smelter"] ?? 0) +
+      (this.completedByKind["forge"] ?? 0);
+    const stairwellTarget = Math.floor(completedRooms / 5);
+    return stairwellTotal < stairwellTarget;
   }
 
   // ---- Room placement (rectangles adjacent to walkable) ------------------

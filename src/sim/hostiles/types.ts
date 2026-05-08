@@ -5,7 +5,7 @@
 // to bring the combat / hp / death-from-violence loop online; deeper kinds
 // drop in as a data-only addition once the rest is solid.
 
-export type HostileKind = "cave_rat" | "cave_spider" | "goblin_scout" | "cave_troll";
+export type HostileKind = "cave_rat" | "cave_spider" | "goblin_scout" | "cave_troll" | "void_shade";
 
 export interface HostileDef {
   id: HostileKind;
@@ -79,6 +79,21 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 35,
     minDepth: 200,
     pursueRange: 16,
+  },
+  // Underworld (§9.4 The Hollow King): a void shade. Spawned only by
+  // the Hollow King once they've awakened — never by the regular
+  // surface-creature spawn loop. Faster than a troll, hits like steel,
+  // appears in any reachable tile (no depth gating once awake).
+  void_shade: {
+    id: "void_shade",
+    name: "void shade",
+    spawnArticle: "a void shade",
+    maxHp: 90,
+    damage: 12,
+    attackCooldown: 55,
+    moveCooldown: 18,
+    minDepth: 0,
+    pursueRange: 25,
   },
 };
 

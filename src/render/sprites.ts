@@ -442,11 +442,34 @@ const CAVE_TROLL_PIXELS: string[] = [
   "0000000000000000",
 ];
 
+// Void shade: tall, dark, and wrong — the King's emissary. Palette
+// 5 = dusk-purple, 1 = outline. Asymmetric outline so it reads as
+// not-quite-stable.
+const VOID_SHADE_PIXELS: string[] = [
+  "0001000000010000",
+  "0011000000110000",
+  "0151100001151000",
+  "0155100001551000",
+  "0155551115551000",
+  "0155555555551000",
+  "0155555555551000",
+  "0015555555510000",
+  "0015555555510000",
+  "0001555555100000",
+  "0001515551500000",
+  "0001150511500000",
+  "0001100110010000",
+  "0001000000010000",
+  "0010000000010000",
+  "0000000000000000",
+];
+
 const HOSTILE_PIXELS: Record<string, string[]> = {
   cave_rat: CAVE_RAT_PIXELS,
   cave_spider: CAVE_SPIDER_PIXELS,
   goblin_scout: GOBLIN_SCOUT_PIXELS,
   cave_troll: CAVE_TROLL_PIXELS,
+  void_shade: VOID_SHADE_PIXELS,
 };
 
 export function getHostileSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {

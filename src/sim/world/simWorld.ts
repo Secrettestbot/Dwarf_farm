@@ -121,8 +121,15 @@ export class SimWorld {
 
   /** True once any dwarf has stood at depth ≥ 1601 — the moment the
    * Hollow King becomes aware of the colony (GDD §9.4). Gates the
-   * nightmare-event cadence and (later) the King's siege. */
+   * nightmare-event cadence and the King's siege escalation. */
   hollowKingAware = false;
+  /** Nightmares delivered since the King awoke. Drives the siege
+   * escalation: void shades begin appearing once enough dread has
+   * accumulated. */
+  hollowKingNightmares = 0;
+  /** Tick at which the most recent void-shade siege fired. Cooldown
+   * keeps the King from sieging continuously. */
+  hollowKingLastSiegeTick = 0;
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;

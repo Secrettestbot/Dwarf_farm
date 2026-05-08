@@ -173,6 +173,11 @@ export interface SaveV1 {
   /** Whether the Hollow King has noticed the colony yet. Optional for
    * back-compat — older saves treat the King as dormant. */
   hollowKingAware?: boolean;
+  /** Number of nightmares the King has delivered since waking. Once
+   * this crosses the siege threshold, void shades start arriving. */
+  hollowKingNightmares?: number;
+  /** Tick of the last void-shade siege. Drives the siege cooldown. */
+  hollowKingLastSiegeTick?: number;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

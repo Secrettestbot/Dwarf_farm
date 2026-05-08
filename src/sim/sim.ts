@@ -52,6 +52,7 @@ export function tick(sim: SimWorld): void {
     population: sim.dwarf.size(),
     rng: sim.plannerRng,
     events: sim.events,
+    research: { completed: sim.research.completed },
   });
   yearRolloverSystem(sim);
   emergencySystem(sim);
@@ -89,6 +90,16 @@ export function tick(sim: SimWorld): void {
 
 const NIGHTMARE_INTERVAL_TICKS = TICKS_PER_DAY * 3;
 const HOLLOW_KING_DEPTH = 1601;
+/** Once this many nightmares have been recorded the King's emissaries
+ * begin to slip into the colony. Tuned to roughly two in-game weeks
+ * (~14 nightmares × 3 days each = ~42 days). */
+const HOLLOW_KING_SIEGE_THRESHOLD = 14;
+/** Real time between successive void-shade arrivals once the siege
+ * phase begins. */
+const HOLLOW_KING_SIEGE_INTERVAL_TICKS = TICKS_PER_DAY * 4;
+/** How many shades show up at once. Three is a meaningful fight for a
+ * mid-game military but not auto-fatal for a prepared one. */
+const HOLLOW_KING_SHADES_PER_SIEGE = 3;
 
 function hollowKingSystem(sim: SimWorld): void {
   if (!sim.hollowKingAware) {
@@ -107,8 +118,31 @@ function hollowKingSystem(sim: SimWorld): void {
     }
     return;
   }
+  // Phase 1: dread + nightmares.
+  if (sim.tick > 0 && sim.tick % NIGHTMARE_INTERVAL_TICKS === 0) {
+    deliverNightmare(sim);
+    sim.hollowKingNightmares++;
+    // First-siege herald: announce the shift in tone before the first
+    // shade actually arrives.
+    if (sim.hollowKingNightmares === HOLLOW_KING_SIEGE_THRESHOLD) {
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        "The dreams stop. Across the fortress, every dwarf knows something is about to be sent.",
+      );
+      sim.hollowKingLastSiegeTick = sim.tick;
+    }
+  }
+  // Phase 2: siege. Periodically spawn a clutch of void shades inside
+  // the colony's reachable space.
+  if (sim.hollowKingNightmares < HOLLOW_KING_SIEGE_THRESHOLD) return;
+  if (sim.tick - sim.hollowKingLastSiegeTick < HOLLOW_KING_SIEGE_INTERVAL_TICKS) return;
   if (sim.tick === 0) return;
-  if (sim.tick % NIGHTMARE_INTERVAL_TICKS !== 0) return;
+  spawnVoidShadeSiege(sim);
+  sim.hollowKingLastSiegeTick = sim.tick;
+}
+
+function deliverNightmare(sim: SimWorld): void {
   // Pick a dreamer — prefer Void-Sensitive, else Dream-Touched, else any.
   const ents = sim.dwarf.entities;
   let dreamer: EntityId | null = null;
@@ -139,6 +173,42 @@ function hollowKingSystem(sim: SimWorld): void {
   ];
   const text = dreams[sim.aiRng.nextRange(0, dreams.length)];
   sim.events.add(sim.tick, "crisis", text);
+}
+
+function spawnVoidShadeSiege(sim: SimWorld): void {
+  const reachable = sim.planner.exposeReachable(sim);
+  if (!reachable) return;
+  const grid = sim.grid;
+  const w = grid.width;
+  // Collect deep reachable tiles as candidate spawn points. The King's
+  // shades emerge from the depths, not the surface.
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < reachable.length; i++) {
+    if (reachable[i] !== 1) continue;
+    const y = (i / w) | 0;
+    if (y - sim.spawn.y < 60) continue;
+    const x = i % w;
+    let tooClose = false;
+    sim.forEachDwarf((_id, p) => {
+      if (tooClose) return;
+      const dx = p.x - x;
+      const dy = p.y - y;
+      if (dx * dx + dy * dy < 36) tooClose = true;
+    });
+    if (!tooClose) candidates.push({ x, y });
+  }
+  if (candidates.length === 0) return;
+  const spawned: Array<{ x: number; y: number }> = [];
+  for (let n = 0; n < HOLLOW_KING_SHADES_PER_SIEGE; n++) {
+    const pick = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    sim.spawnHostile({ kind: "void_shade", x: pick.x, y: pick.y });
+    spawned.push(pick);
+  }
+  sim.events.add(
+    sim.tick,
+    "crisis",
+    `${spawned.length} void shades have stepped out of the dark within the fortress. The Hollow King is testing the gates.`,
+  );
 }
 
 /** Friendly depth phrasing — used by gem-strike narration. Mirrors the
