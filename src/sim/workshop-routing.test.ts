@@ -157,8 +157,9 @@ describe("workshop item routing", () => {
   });
 
   it("workshops without a routed item still draw from the global stockpile", () => {
-    // Brewery's input is "food", which has no ItemKind — it must keep
-    // working from the global counter exactly like before.
+    // Brewery accepts food via the counter when no food items are
+    // routed to its station — the GDD-aligned flow where the colony's
+    // raw harvest sits in a stockpile until a brewer draws from it.
     const w = generateWorld({ seed: 405, width: 200, height: 500 });
     const sim = new SimWorld(405, w.grid, w.surfaceY, w.spawn);
     for (let xx = w.spawn.x; xx <= w.spawn.x + 5; xx++) {
@@ -167,6 +168,7 @@ describe("workshop item routing", () => {
     plantWorkshop(sim, "brewery", TileType.BreweryStation, w.spawn.x + 3, w.spawn.y - 1);
     sim.spawnDwarf({ name: "Brewer", x: w.spawn.x, y: w.spawn.y, age: 30 });
     sim.stockpile.food = 50;
+    const foodBefore = sim.stockpile.food;
     const drinkBefore = sim.stockpile.drink;
     const e = sim.dwarf.entities[0];
     for (let i = 0; i < 400; i++) {
@@ -174,6 +176,18 @@ describe("workshop item routing", () => {
       n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
       tick(sim);
     }
-    expect(sim.stockpile.drink).toBeGreaterThan(drinkBefore);
+    // Brewery consumed food from the counter (the stockpile fallback).
+    expect(sim.stockpile.food).toBeLessThan(foodBefore);
+    // Drink output drops as items at the station; count items + counter
+    // + carry as the brewery's effective output.
+    let drinkItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "drink") drinkItems++;
+    }
+    let carriedDrink = 0;
+    for (const id of sim.dwarf.entities) {
+      if (sim.carrying.get(id)?.kind === "drink") carriedDrink++;
+    }
+    expect(sim.stockpile.drink + drinkItems + carriedDrink).toBeGreaterThan(drinkBefore);
   });
 });

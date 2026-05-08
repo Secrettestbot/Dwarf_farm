@@ -64,7 +64,18 @@ describe("workshops", () => {
       tick(sim);
     }
     expect(sim.stockpile.food).toBeLessThan(foodBefore);
-    expect(sim.stockpile.drink).toBeGreaterThan(drinkBefore);
+    // Drink output drops as items at the station now; without a
+    // stockpile to deliver to, count items + counter + carry as the
+    // brewery's effective output.
+    let drinkItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "drink") drinkItems++;
+    }
+    let carriedDrink = 0;
+    for (const id of sim.dwarf.entities) {
+      if (sim.carrying.get(id)?.kind === "drink") carriedDrink++;
+    }
+    expect(sim.stockpile.drink + drinkItems + carriedDrink).toBeGreaterThan(drinkBefore);
   });
 
   it("crafting=0 disables the workshop loop", () => {

@@ -96,7 +96,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 2. Hunger — second-fastest. Same global stockpile lookup so deep
   //    miners actually go up for a meal.
-  if (needs && needs.hunger <= HUNGER_CRITICAL && sim.stockpile.food > 0) {
+  if (needs && needs.hunger <= HUNGER_CRITICAL && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)) {
     const target = findFoodTarget(sim, pos.x, pos.y);
     if (target) {
       return { kind: "eat" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };

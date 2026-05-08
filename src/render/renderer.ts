@@ -123,6 +123,9 @@ export function renderWorld(
       it.kind === "gem" ? "#a8d8e0" :
       it.kind === "bars" ? "#d0a060" :
       it.kind === "tools" ? "#c0c8d0" :
+      it.kind === "food" ? "#9ad3a3" :
+      it.kind === "drink" ? "#8aa9ff" :
+      it.kind === "meal" ? "#e0c080" :
       "#8a6a4a";
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);

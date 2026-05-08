@@ -39,6 +39,10 @@ export interface Stockpile {
    * yet — Tier 3 Gem Cutting research turns rough gems into cut gems,
    * Tier 3 Gem Inlay turns those into trade goods. */
   gems: number;
+  /** Cooked meals — kitchen output. Restore more hunger than raw food
+   * (90 vs 60 per unit). progressEat prefers meals when both are
+   * available. */
+  meals: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -96,6 +100,7 @@ export class SimWorld {
     bars: 0,
     tools: 0,
     gems: 0,
+    meals: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-

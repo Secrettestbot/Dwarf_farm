@@ -451,6 +451,20 @@ const FARM_YIELD_CHANCE = 0.18; // per-cell, per-hour, for a tended cell
  * agree. */
 const FARM_TEND_VALIDITY_TICKS = 12 * 60;
 
+/** How many item entities of `kind` are sitting on (x, y). Used to cap
+ * stacking so an unattended farm cell doesn't spawn a tower of food. */
+function countItemsAt(sim: SimWorld, x: number, y: number, kind: import("./ecs/components").ItemKind): number {
+  let n = 0;
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const it = sim.item.get(ents[i]);
+    const p = sim.position.get(ents[i]);
+    if (!it || !p) continue;
+    if (p.x === x && p.y === y && it.kind === kind) n++;
+  }
+  return n;
+}
+
 function farmSystem(sim: SimWorld): void {
   if (sim.tick % FARM_TICK_INTERVAL !== 0) return;
   for (const b of sim.planner.blueprints) {
@@ -467,7 +481,13 @@ function farmSystem(sim: SimWorld): void {
       const tendedAt = b.cellTendedAt[i];
       if (tendedAt < 0 || sim.tick - tendedAt > FARM_TEND_VALIDITY_TICKS) continue;
       if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE) {
-        sim.stockpile.food += 1;
+        // Drop a raw food item on the cell. A hauler routes it to a
+        // kitchen (cooked meals), brewery (ale), or stockpile in
+        // priority order. Cap stacking on a single cell so an
+        // un-hauled farm doesn't grow a tower of food entities.
+        if (countItemsAt(sim, x, y, "food") < 4) {
+          sim.spawnItem({ kind: "food", x, y });
+        }
       }
     }
   }
@@ -887,7 +907,7 @@ function jobAssignmentSystem(sim: SimWorld): void {
         needs &&
         !survivalKind &&
         ((needs.thirst <= INTERRUPT_THIRST && sim.stockpile.drink > 0) ||
-          (needs.hunger <= INTERRUPT_HUNGER && sim.stockpile.food > 0))
+          (needs.hunger <= INTERRUPT_HUNGER && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)))
       ) {
         if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
         sim.job.remove(e);
@@ -1206,6 +1226,8 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
 function outputAsItemKind(resource: string): import("./ecs/components").ItemKind | null {
   if (resource === "bars") return "bars";
   if (resource === "tools") return "tools";
+  if (resource === "drink") return "drink";
+  if (resource === "meals") return "meal";
   return null;
 }
 
@@ -1269,6 +1291,9 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     else if (carrying.kind === "gem") sim.stockpile.gems++;
     else if (carrying.kind === "bars") sim.stockpile.bars++;
     else if (carrying.kind === "tools") sim.stockpile.tools++;
+    else if (carrying.kind === "food") sim.stockpile.food++;
+    else if (carrying.kind === "drink") sim.stockpile.drink++;
+    else if (carrying.kind === "meal") sim.stockpile.meals++;
   }
   sim.carrying.remove(e);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
@@ -1442,10 +1467,17 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   }
   // The dwarf consumes one unit of food on the first tick of the meal so
   // a starving dwarf with food in the stockpile recovers immediately;
-  // the rest of EAT_TICKS is the visible "eating" duration.
-  if (job.progress === 0 && sim.stockpile.food > 0) {
-    sim.stockpile.food -= 1;
-    needs.hunger = Math.min(100, needs.hunger + 60);
+  // the rest of EAT_TICKS is the visible "eating" duration. A cooked
+  // meal restores 90 hunger (vs. 60 for raw food) — the kitchen earns
+  // its keep.
+  if (job.progress === 0) {
+    if (sim.stockpile.meals > 0) {
+      sim.stockpile.meals -= 1;
+      needs.hunger = Math.min(100, needs.hunger + 90);
+    } else if (sim.stockpile.food > 0) {
+      sim.stockpile.food -= 1;
+      needs.hunger = Math.min(100, needs.hunger + 60);
+    }
   }
   job.progress++;
   if (job.progress >= EAT_TICKS) {

@@ -15,9 +15,9 @@ import { SkillId } from "../dwarves/skills";
 
 /** Stockpile counters that recipes can read from / write to. Workshops
  * trade between the same fields the dwarves already eat / drink from
- * (food / drink) plus two new accumulators (bars, tools) that future
+ * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -40,7 +40,7 @@ export const RECIPES: Partial<Record<BlueprintKind, Recipe>> = {
     verb: "cooks meals",
     inputKind: "food",
     inputQty: 1,
-    outputKind: "food",
+    outputKind: "meals",
     outputQty: 2, // raw ingredients become twice as many cooked meals
     ticks: 60,
     skill: "cooking",

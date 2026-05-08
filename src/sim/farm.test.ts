@@ -102,6 +102,13 @@ describe("farms", () => {
       farm.cellTendedAt.fill(sim.tick);
       tick(sim);
     }
-    expect(sim.stockpile.food).toBeGreaterThan(0);
+    // Yield is now an item entity dropped on the cell, not a counter
+    // bump — count both. Whichever path the food took, "the farm
+    // produced something" should hold.
+    let foodItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "food") foodItems++;
+    }
+    expect(sim.stockpile.food + foodItems).toBeGreaterThan(0);
   });
 });
