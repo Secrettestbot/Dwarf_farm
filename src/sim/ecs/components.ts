@@ -57,11 +57,19 @@ export interface Needs {
   /** Thirst — drops fastest; restored by drinking. At 0, the dwarf dies of
    * dehydration. */
   thirst: number;
+  /** Morale — derived state in 0..100. Drifts toward the dwarf's
+   * trait-adjusted baseline plus a bonus / penalty from how well the
+   * other four needs are met. Distressed (below 20) and broken (below
+   * 5) thresholds gate trait behaviours and the future tantrum system.
+   * Displayed in the dwarf inspector so the player can read the colony's
+   * mood at a glance. */
+  morale: number;
   /** Internal accumulators for sub-tick decay. */
   decayAccumSleep: number;
   decayAccumSocial: number;
   decayAccumHunger: number;
   decayAccumThirst: number;
+  decayAccumMorale: number;
 }
 
 /** What's loose on the floor — output of mining and (later) workshops, input

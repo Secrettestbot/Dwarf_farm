@@ -81,10 +81,12 @@ export function snapshot(input: SnapshotInput): SaveV1 {
             social: n.social,
             hunger: n.hunger,
             thirst: n.thirst,
+            morale: n.morale,
             decayAccumSleep: n.decayAccumSleep,
             decayAccumSocial: n.decayAccumSocial,
             decayAccumHunger: n.decayAccumHunger,
             decayAccumThirst: n.decayAccumThirst,
+            decayAccumMorale: n.decayAccumMorale,
           }
         : undefined,
       job: savedJob,

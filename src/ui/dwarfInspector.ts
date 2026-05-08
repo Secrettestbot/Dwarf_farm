@@ -116,6 +116,7 @@ export class DwarfInspector {
         ${bar("Thirst", needs.thirst)}
         ${bar("Sleep", needs.sleep)}
         ${bar("Social", needs.social)}
+        ${bar("Morale", needs.morale, moraleLabel(needs.morale))}
       `
       : "";
 
@@ -140,6 +141,14 @@ export class DwarfInspector {
     const closeBtn = this.root.querySelector("#inspector-close") as HTMLButtonElement | null;
     if (closeBtn) closeBtn.onclick = () => this.close();
   }
+}
+
+function moraleLabel(v: number): string {
+  if (v >= 80) return "elated";
+  if (v >= 60) return "content";
+  if (v >= 40) return "okay";
+  if (v >= 20) return "low";
+  return "distressed";
 }
 
 function bar(label: string, value: number, displayValue?: string): string {

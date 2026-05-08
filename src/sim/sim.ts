@@ -13,6 +13,7 @@ import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skil
 import { HOSTILE_DEFS } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 import { recipeFor } from "./planner/recipes";
+import { effectsFor } from "./dwarves/traitEffects";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -492,10 +493,16 @@ function needsSystem(sim: SimWorld): void {
     const e = ents[i];
     const n = sim.needs.get(e);
     if (!n) continue;
-    n.decayAccumSleep++;
-    n.decayAccumSocial++;
-    n.decayAccumHunger++;
-    n.decayAccumThirst++;
+    const dw = sim.dwarf.get(e);
+    const effects = dw ? effectsFor(dw.traitIds) : null;
+    // Iron Constitution / Sickly scale how often the accumulator advances.
+    // > 1 means slower decay (stronger constitution).
+    const decayScale = effects?.needDecay ?? 1;
+    n.decayAccumSleep += 1 / decayScale;
+    n.decayAccumSocial += 1 / decayScale;
+    n.decayAccumHunger += 1 / decayScale;
+    n.decayAccumThirst += 1 / decayScale;
+    n.decayAccumMorale++;
     if (n.decayAccumSleep >= SLEEP_DECAY_TICKS_PER_UNIT) {
       n.sleep = Math.max(0, n.sleep - 1);
       n.decayAccumSleep -= SLEEP_DECAY_TICKS_PER_UNIT;
@@ -512,6 +519,18 @@ function needsSystem(sim: SimWorld): void {
       n.thirst = Math.max(0, n.thirst - 1);
       n.decayAccumThirst -= THIRST_DECAY_TICKS_PER_UNIT;
     }
+    // Morale drifts at most 1 unit per in-game hour toward a target derived
+    // from the trait baseline plus the average-of-other-needs-minus-50
+    // bonus. Well-fed, well-rested dwarves drift up; chronically deprived
+    // ones drift down.
+    if (n.decayAccumMorale >= MORALE_TICK_INTERVAL) {
+      n.decayAccumMorale -= MORALE_TICK_INTERVAL;
+      const baseline = effects?.moraleBaseline ?? 50;
+      const avgNeeds = (n.sleep + n.social + n.hunger + n.thirst) / 4;
+      const target = Math.max(0, Math.min(100, baseline + (avgNeeds - 50) * 0.4));
+      if (n.morale < target) n.morale = Math.min(100, n.morale + 1);
+      else if (n.morale > target) n.morale = Math.max(0, n.morale - 1);
+    }
     // Death from starvation / dehydration. Thirst kills first because it
     // decays faster; the chronicle records the cause.
     if (n.thirst <= 0) {
@@ -521,6 +540,8 @@ function needsSystem(sim: SimWorld): void {
     }
   }
 }
+
+const MORALE_TICK_INTERVAL = 60; // one morale step per in-game hour
 
 /** Survival-need thresholds at which an in-flight non-survival job is
  * interrupted so the dwarf re-evaluates. Without this a deep miner can
@@ -701,9 +722,10 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     }
     sim.stockpile[recipe.inputKind] -= recipe.inputQty;
   }
-  job.progress++;
-  // Skill scales work speed: each level above Novice shaves 4% off ticks.
   const dw = sim.dwarf.get(e);
+  const traitSpeed = dw ? effectsFor(dw.traitIds).workSpeed : 1;
+  job.progress += traitSpeed;
+  // Skill scales work speed: each level above Novice shaves 4% off ticks.
   const skillLevel = dw?.skills[recipe.skill] ?? 1;
   const scaledTicks = Math.max(8, Math.round(recipe.ticks * Math.max(0.4, 1 - (skillLevel - 1) * 0.04)));
   if (job.progress >= scaledTicks) {
@@ -789,7 +811,11 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.pathing.remove(e);
     return;
   }
-  job.progress++;
+  // Trait-driven work pace — Diligent / Lazy / Efficient / Perfectionist
+  // scale how fast progress accrues per tick.
+  const dwM = sim.dwarf.get(e);
+  const mineSpeed = dwM ? effectsFor(dwM.traitIds).workSpeed : 1;
+  job.progress += mineSpeed;
   if (job.progress >= MINE_TICKS) {
     // What was the rock made of? Determines stockpile credit.
     const tileType = sim.grid.getTile(job.targetX, job.targetY);
@@ -862,11 +888,21 @@ function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void
     return;
   }
   job.progress++;
-  // Both dwarves gain social each tick of conversation.
-  myNeeds.social = Math.min(100, myNeeds.social + 2);
+  // Both dwarves gain social each tick of conversation. Trait-driven
+  // appetite — Gregarious gains 2× from chat, Solitary gains nothing.
+  const myDw = sim.dwarf.get(e);
+  const myEffects = myDw ? effectsFor(myDw.traitIds) : null;
+  myNeeds.social = Math.min(100, myNeeds.social + 2 * (myEffects?.socialMoraleScale ?? 1));
+  // A pleasant chat also nudges morale upward.
+  myNeeds.morale = Math.min(100, myNeeds.morale + 1 * (myEffects?.socialMoraleScale ?? 1));
   if (job.partnerId !== undefined) {
     const partnerNeeds = sim.needs.get(job.partnerId);
-    if (partnerNeeds) partnerNeeds.social = Math.min(100, partnerNeeds.social + 2);
+    const partnerDw = sim.dwarf.get(job.partnerId);
+    const partnerEffects = partnerDw ? effectsFor(partnerDw.traitIds) : null;
+    if (partnerNeeds) {
+      partnerNeeds.social = Math.min(100, partnerNeeds.social + 2 * (partnerEffects?.socialMoraleScale ?? 1));
+      partnerNeeds.morale = Math.min(100, partnerNeeds.morale + 1 * (partnerEffects?.socialMoraleScale ?? 1));
+    }
   }
   if (job.progress >= SOCIALISE_TICKS) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;

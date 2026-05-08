@@ -29,10 +29,12 @@ export interface SavedDwarf {
     social: number;
     hunger?: number;
     thirst?: number;
+    morale?: number;
     decayAccumSleep: number;
     decayAccumSocial: number;
     decayAccumHunger?: number;
     decayAccumThirst?: number;
+    decayAccumMorale?: number;
   };
   /** In-flight job at save time. */
   job?: {

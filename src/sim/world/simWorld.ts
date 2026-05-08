@@ -1,5 +1,6 @@
 import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
 import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying } from "../ecs/components";
+import { effectsFor } from "../dwarves/traitEffects";
 import { Rng } from "../rng";
 import { TileGrid } from "./grid";
 import { ColonyPlanner } from "../planner/colonyPlanner";
@@ -167,16 +168,20 @@ export class SimWorld {
       partnerId: null,
       lastJobTick: 0,
     });
-    this.health.set(e, { hp: DWARF_BASE_MAX_HP, maxHp: DWARF_BASE_MAX_HP, lastAttackTick: 0 });
+    const effects = effectsFor(spec.traitIds ?? []);
+    const maxHp = Math.max(20, Math.round(DWARF_BASE_MAX_HP * effects.hpScale));
+    this.health.set(e, { hp: maxHp, maxHp, lastAttackTick: 0 });
     this.needs.set(e, {
       sleep: spec.initialNeeds?.sleep ?? 100,
       social: spec.initialNeeds?.social ?? 100,
       hunger: spec.initialNeeds?.hunger ?? 100,
       thirst: spec.initialNeeds?.thirst ?? 100,
+      morale: spec.initialNeeds?.morale ?? effects.moraleBaseline,
       decayAccumSleep: spec.initialNeeds?.decayAccumSleep ?? 0,
       decayAccumSocial: spec.initialNeeds?.decayAccumSocial ?? 0,
       decayAccumHunger: spec.initialNeeds?.decayAccumHunger ?? 0,
       decayAccumThirst: spec.initialNeeds?.decayAccumThirst ?? 0,
+      decayAccumMorale: spec.initialNeeds?.decayAccumMorale ?? 0,
     });
     return e;
   }
