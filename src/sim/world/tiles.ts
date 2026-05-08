@@ -40,6 +40,19 @@ export const enum TileType {
   /** A scholar's desk in the Library. Walkable; a dwarf with the
    * "research" job stands on it while their progress accumulates. */
   LibraryDesk = 20,
+  // Gem Seam content (§5.2 Layer 4): rough gemstones embedded in the
+  // rock. Solid like ore, mined to the same dropped-item flow once the
+  // Tier 3 Gem Cutting research lands.
+  RawDiamond = 21,
+  RawRuby = 22,
+  RawEmerald = 23,
+  /** Magma vent — Layer 4 hazard / future fuel source for magma forges
+   * (Tier 4 research). Walkable but lethal. For now decorative. */
+  MagmaVent = 24,
+  /** Pre-built dwarven ruin (§5.2 Layer 4): walkable floor with a
+   * distinct visual marker, signalling places where future Tier 5
+   * ancient-text research can be performed. */
+  AncientRuin = 25,
 }
 
 export interface TileInfo {
@@ -72,7 +85,16 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.SmelterStation]: { name: "smelter", walkable: true, solid: false, color: 0xa05030 },
   [TileType.ForgeStation]: { name: "forge", walkable: true, solid: false, color: 0xb07040 },
   [TileType.LibraryDesk]: { name: "desk", walkable: true, solid: false, color: 0x6080a0 },
+  [TileType.RawDiamond]: { name: "raw diamond", walkable: false, solid: true, color: 0xc8e0e8 },
+  [TileType.RawRuby]: { name: "raw ruby", walkable: false, solid: true, color: 0xa83040 },
+  [TileType.RawEmerald]: { name: "raw emerald", walkable: false, solid: true, color: 0x40a058 },
+  [TileType.MagmaVent]: { name: "magma vent", walkable: true, solid: false, color: 0xd84020 },
+  [TileType.AncientRuin]: { name: "ancient ruin", walkable: true, solid: false, color: 0x9080a0 },
 };
+
+export function tileIsGem(t: number): boolean {
+  return t === TileType.RawDiamond || t === TileType.RawRuby || t === TileType.RawEmerald;
+}
 
 export function tileIsWorkshopStation(t: number): boolean {
   return (

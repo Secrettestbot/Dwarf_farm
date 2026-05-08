@@ -35,6 +35,10 @@ export interface Stockpile {
   /** Forged metal tools — pickaxes, axes, etc. No direct consumer yet;
    * future sessions wire them into mining / woodcutting speed bonuses. */
   tools: number;
+  /** Cut and rough gems pulled from the Gem Seam. No direct consumer
+   * yet — Tier 3 Gem Cutting research turns rough gems into cut gems,
+   * Tier 3 Gem Inlay turns those into trade goods. */
+  gems: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -90,6 +94,7 @@ export class SimWorld {
     drink: STARTER_DRINK,
     bars: 0,
     tools: 0,
+    gems: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-

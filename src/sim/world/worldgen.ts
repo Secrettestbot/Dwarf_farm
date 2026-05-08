@@ -69,12 +69,33 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
           // Shallow earth: stone with occasional ore.
           t = TileType.Stone;
           if (noise2(oreSeed, x * 0.18, y * 0.18) > 0.62) t = TileType.Ore;
-        } else {
+        } else if (y < 700) {
           // Deep rock: granite with rare ore.
           t = TileType.Granite;
           if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.72) t = TileType.Ore;
           // Occasional stone vein for variety.
           if (noise2(oreSeed + 53, x * 0.05, y * 0.05) > 0.55) t = TileType.Stone;
+        } else if (y < 1200) {
+          // Gem Seam: dense igneous rock with gem clusters and rare
+          // magma vents. Diamonds are the rarest cluster, emeralds the
+          // most common.
+          t = TileType.Granite;
+          const gemN = noise2(oreSeed + 73, x * 0.30, y * 0.30);
+          const variantN = noise2(oreSeed + 97, x * 0.55, y * 0.55);
+          if (gemN > 0.78) {
+            t = variantN > 0.4 ? TileType.RawEmerald : variantN > 0.0 ? TileType.RawRuby : TileType.RawDiamond;
+          } else if (noise2(oreSeed + 113, x * 0.18, y * 0.18) > 0.85) {
+            t = TileType.MagmaVent;
+          } else if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.78) {
+            t = TileType.Ore;
+          }
+        } else {
+          // Ancient Dark + below: solid granite, near-silent. Sparse
+          // ancient ruins poke through. The Hollow King content arrives
+          // alongside Layer 6 in a later session.
+          t = TileType.Granite;
+          if (noise2(oreSeed + 137, x * 0.06, y * 0.06) > 0.86) t = TileType.AncientRuin;
+          else if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.80) t = TileType.Ore;
         }
 
         // 3. Carve natural caverns. fbm gives big blob shapes; threshold cuts holes.

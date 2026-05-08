@@ -75,6 +75,17 @@ export function tick(sim: SimWorld): void {
   visibilitySystem(sim);
 }
 
+/** Friendly depth phrasing — used by gem-strike narration. Mirrors the
+ * helper in events/narrator.ts, kept local to avoid a circular import. */
+function depthPhraseFor(y: number, surfaceY: number): string {
+  const depth = y - surfaceY;
+  if (depth < 80) return "in the upper rock";
+  if (depth < 300) return "in the shallow earth";
+  if (depth < 700) return "deep in the granite";
+  if (depth < 1200) return "in the gem seam";
+  return "in the ancient dark";
+}
+
 // ---- Trade caravans (GDD §8.3) ---------------------------------------
 //
 // Once per in-game season a caravan arrives at the colony's Trade Depot
@@ -1039,6 +1050,7 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (carrying.kind === "ore") sim.stockpile.ore++;
   else if (carrying.kind === "stone") sim.stockpile.stone++;
   else if (carrying.kind === "dirt") sim.stockpile.dirt++;
+  else if (carrying.kind === "gem") sim.stockpile.gems++;
   sim.carrying.remove(e);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
@@ -1103,6 +1115,21 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
           narrateOreFirstStrike(sim.plannerRng, dw.name, job.targetY, sim.spawn.y),
         );
       }
+    } else if (
+      tileType === TileType.RawDiamond ||
+      tileType === TileType.RawRuby ||
+      tileType === TileType.RawEmerald
+    ) {
+      itemKind = "gem";
+      const dw = sim.dwarf.get(e)!;
+      const gemName =
+        tileType === TileType.RawDiamond ? "diamond" :
+        tileType === TileType.RawRuby ? "ruby" : "emerald";
+      sim.events.add(
+        sim.tick,
+        "discovery",
+        `${dw.name} strikes a ${gemName} cluster, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
+      );
     } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
       itemKind = "stone";
     } else if (tileType === TileType.Dirt || tileType === TileType.Sand) {

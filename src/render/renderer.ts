@@ -116,7 +116,11 @@ export function renderWorld(
     if (!grid.isSeen(p.x, p.y)) continue;
     const sx = (p.x - camera.x) * pt + viewW / 2;
     const sy = (p.y - camera.y) * pt + viewH / 2;
-    ctx.fillStyle = it.kind === "ore" ? "#e0c070" : it.kind === "stone" ? "#9a9aa3" : "#8a6a4a";
+    ctx.fillStyle =
+      it.kind === "ore" ? "#e0c070" :
+      it.kind === "stone" ? "#9a9aa3" :
+      it.kind === "gem" ? "#a8d8e0" :
+      "#8a6a4a";
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);
     ctx.strokeStyle = "rgba(0,0,0,0.6)";

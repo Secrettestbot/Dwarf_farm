@@ -20,8 +20,10 @@ import { WorkerToMain } from "./shared/protocol";
 import { Founder } from "./sim/dwarves/founders";
 import { narrateFounding } from "./sim/events/narrator";
 
-const WORLD_WIDTH = 200;
-const WORLD_HEIGHT = 500;
+// GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
+// 200×500 world for speed; live play uses the full size.
+const WORLD_WIDTH = 400;
+const WORLD_HEIGHT = 2000;
 // 1 in-game month at the GDD's 1× rate is the catch-up cap.
 const MAX_CATCHUP_TICKS = TICKS_PER_DAY * 30;
 
