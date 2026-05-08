@@ -1,6 +1,7 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { Camera } from "./camera";
 import { TileType, tileColor } from "../sim/world/tiles";
+import { LAYER_TINTS, layerOf } from "./sprites";
 
 // Persistent thumbnail of the full world. Rendered into an offscreen canvas
 // once per second; the visible viewport is overlaid each frame.
@@ -42,16 +43,21 @@ export class Minimap {
     this.lastRefresh = nowMs;
     const img = this.bctx.createImageData(this.width, this.height);
     const data = img.data;
+    const surfaceRefY = sim.spawn.y - 3;
     for (let py = 0; py < this.height; py++) {
       const wy = Math.floor((py / this.height) * sim.grid.height);
+      const tint = LAYER_TINTS[layerOf(wy, surfaceRefY)] ?? LAYER_TINTS[0];
       for (let px = 0; px < this.width; px++) {
         const wx = Math.floor((px / this.width) * sim.grid.width);
         const t = sim.grid.getTile(wx, wy);
         const col = t === TileType.Air ? 0x000000 : tileColor(t);
         const off = (py * this.width + px) * 4;
-        data[off] = (col >> 16) & 0xff;
-        data[off + 1] = (col >> 8) & 0xff;
-        data[off + 2] = col & 0xff;
+        const r = ((col >> 16) & 0xff) * tint[0];
+        const g = ((col >> 8) & 0xff) * tint[1];
+        const b = (col & 0xff) * tint[2];
+        data[off] = Math.max(0, Math.min(255, Math.round(r)));
+        data[off + 1] = Math.max(0, Math.min(255, Math.round(g)));
+        data[off + 2] = Math.max(0, Math.min(255, Math.round(b)));
         data[off + 3] = 255;
       }
     }

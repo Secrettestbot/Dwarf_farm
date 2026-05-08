@@ -220,6 +220,76 @@ export function getTileSprite(t: TileType): HTMLCanvasElement | OffscreenCanvas 
   return s;
 }
 
+// ---- Layer-aware tinting -----------------------------------------------
+// Per GDD §11.3 the palette shifts cooler as the colony descends, with each
+// geological band feeling visually distinct. We pre-tint the base tile
+// sprites per layer once and cache them; the renderer picks the right
+// variant based on the tile's depth relative to the surface.
+
+/** Per-layer multiplicative RGB tint. Layer 0 (Skin) is the native palette. */
+export const LAYER_TINTS: Array<[number, number, number]> = [
+  [1.00, 1.00, 1.00], // 0 Skin — surface browns, no tint
+  [0.86, 0.92, 1.00], // 1 Shallow Earth — slightly cool grey
+  [0.72, 0.80, 0.98], // 2 Deep Rock — cool grey-blue
+  [1.00, 0.84, 0.62], // 3 Gem Seam — amber/magma cast
+  [0.42, 0.48, 0.66], // 4 Ancient Dark — deep blue-black
+  [1.00, 0.58, 0.52], // 5 Underworld — red-shifted
+];
+
+/** Layer index (0..5) for a given y, given a reference surface y. */
+export function layerOf(y: number, surfaceY: number): number {
+  const depth = y - surfaceY;
+  if (depth < 80) return 0;
+  if (depth < 300) return 1;
+  if (depth < 700) return 2;
+  if (depth < 1200) return 3;
+  if (depth < 1600) return 4;
+  return 5;
+}
+
+function tintSprite(
+  base: HTMLCanvasElement | OffscreenCanvas,
+  tint: [number, number, number],
+): HTMLCanvasElement | OffscreenCanvas {
+  const surf = makeSurface();
+  const ctx = (surf as HTMLCanvasElement).getContext("2d") as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D;
+  ctx.clearRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
+  // 1) Paint the base sprite.
+  ctx.drawImage(base as CanvasImageSource, 0, 0);
+  // 2) Multiply by the tint colour. This darkens / shifts opaque pixels;
+  //    transparent areas would also pick up the tint, so we mask in (3).
+  ctx.globalCompositeOperation = "multiply";
+  const r = Math.round(tint[0] * 255);
+  const g = Math.round(tint[1] * 255);
+  const b = Math.round(tint[2] * 255);
+  ctx.fillStyle = `rgb(${r},${g},${b})`;
+  ctx.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
+  // 3) Re-mask alpha against the original sprite so transparent pixels
+  //    stay transparent rather than showing the multiply fill colour.
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(base as CanvasImageSource, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  return surf;
+}
+
+/** Tile sprite tinted for the given layer. Layer 0 returns the base sprite. */
+export function getTileSpriteAtLayer(
+  t: TileType,
+  layer: number,
+): HTMLCanvasElement | OffscreenCanvas {
+  if (layer === 0) return getTileSprite(t);
+  const key = `t:${t}:L${layer}`;
+  let s = cache.get(key);
+  if (!s) {
+    const base = getTileSprite(t);
+    s = tintSprite(base, LAYER_TINTS[layer] ?? LAYER_TINTS[0]);
+    cache.set(key, s);
+  }
+  return s;
+}
+
 // Dwarf sprite — all dwarves share one base sprite for session 1 (variation
 // added in session 2 once they have personalities). 8×16, centred in 16×16.
 const DWARF_PIXELS: string[] = [

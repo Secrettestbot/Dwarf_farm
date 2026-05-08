@@ -1,7 +1,7 @@
 import { Camera } from "./camera";
 import { SimWorld } from "../sim/world/simWorld";
 import { TileType } from "../sim/world/tiles";
-import { getDwarfSprite, getHostileSprite, getTileSprite, SPRITE_TILE_SIZE } from "./sprites";
+import { getDwarfSprite, getHostileSprite, getTileSpriteAtLayer, layerOf, SPRITE_TILE_SIZE } from "./sprites";
 import { BlueprintKind } from "../sim/planner/blueprint";
 
 const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> = {
@@ -34,12 +34,18 @@ export function renderWorld(
   const pt = camera.pxPerTile;
   const grid = sim.grid;
 
-  // Tiles.
+  // Tiles. Each row picks a layer index from its depth so the palette
+  // shifts cooler as the colony descends — Skin warm browns, Shallow
+  // Earth cool grey, Deep Rock blue-grey, etc. (GDD §11.3). Sprites are
+  // pre-tinted per layer and cached, so render-time cost is just a
+  // lookup.
+  const surfaceRefY = sim.spawn.y - 3; // spawn cavern sits a few tiles below true surface
   for (let y = Math.max(0, y0); y < Math.min(grid.height, y1); y++) {
+    const layer = layerOf(y, surfaceRefY);
     for (let x = Math.max(0, x0); x < Math.min(grid.width, x1); x++) {
       const t = grid.getTile(x, y);
       if (t === TileType.Air) continue;
-      const sprite = getTileSprite(t as TileType);
+      const sprite = getTileSpriteAtLayer(t as TileType, layer);
       const sx = (x - camera.x) * pt + viewW / 2;
       const sy = (y - camera.y) * pt + viewH / 2;
       ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
