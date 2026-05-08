@@ -34,7 +34,7 @@ export interface SavedDwarf {
   };
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain";
     targetX: number;
     targetY: number;
     progress: number;
@@ -74,6 +74,14 @@ export interface SavedBlueprint {
   status: "digging" | "complete";
   priority: number;
   createdTick: number;
+  /** Per-cell last-tended ticks for farm blueprints. Parallel to cells/2
+   * (one entry per cavity tile). Optional for back-compat with v2 saves. */
+  cellTendedAt?: number[];
+  /** Tick at which this room was last maintained. Used to gate the
+   * architect's room counts: neglected rooms don't count toward targets, so
+   * a small colony can't sprawl beyond what its dwarves can keep up.
+   * Optional for back-compat with v2 saves. */
+  lastMaintainedTick?: number;
 }
 
 export interface SavedLogEvent {

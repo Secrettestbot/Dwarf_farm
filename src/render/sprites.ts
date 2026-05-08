@@ -61,24 +61,35 @@ const TILE_PIXELS: Record<TileType, string[]> = {
   [TileType.FarmTile]: farmSprite(),
 };
 
-/** Farm: tilled soil base with green sprouts in a regular pattern. */
+/** Farm: dark tilled-soil base with bright green crop tufts and dark
+ * furrow lines, deliberately distinct from plain dirt at the surface. */
 function farmSprite(): string[] {
-  const base = noisyFill(5, 4); // dirt brown
-  // Green sprouts at fixed positions — looks like a planted plot.
-  const sprouts: Array<[number, number]> = [
-    [3, 4], [11, 4],
-    [7, 8],
-    [3, 12], [11, 12],
+  // Use a darker tilled-soil base than dirt's noisy brown so the contrast
+  // with the surface Skin layer reads from the minimap and the renderer.
+  const base = noisyFill(2, 3); // dark earth + earth shadow
+  // Bright green crop tufts (palette index C = sprout green) in a 3×3
+  // regular grid with the centre tufts reaching one row taller so they
+  // read as actual plants instead of dots.
+  const tufts: Array<[number, number]> = [
+    [3, 4],  [8, 4],  [13, 4],
+    [3, 9],  [8, 9],  [13, 9],
+    [3, 14], [8, 14], [13, 14],
   ];
-  for (const [x, y] of sprouts) {
+  for (const [x, y] of tufts) {
     let row = base[y];
-    row = row.substring(0, x) + "9" + row.substring(x + 1); // mid-green
+    row = row.substring(0, x) + "C" + row.substring(x + 1);
     base[y] = row;
+    // Stem one row above each tuft.
+    if (y - 1 >= 0) {
+      let above = base[y - 1];
+      above = above.substring(0, x) + "C" + above.substring(x + 1);
+      base[y - 1] = above;
+    }
   }
-  // Furrow lines: subtle horizontal accent every 5 rows.
-  for (const yLine of [3, 8, 13]) {
+  // Dark furrow lines between rows so the soil reads as tilled.
+  for (const yLine of [6, 11]) {
     let row = "";
-    for (let x = 0; x < 16; x++) row += "5";
+    for (let x = 0; x < 16; x++) row += "1"; // near-black
     base[yLine] = row;
   }
   return base;
@@ -103,8 +114,10 @@ function memorialSprite(): string[] {
   let cap = base[3];
   for (let x = 5; x <= 10; x++) cap = cap.substring(0, x) + "B" + cap.substring(x + 1);
   base[3] = cap;
-  // Single torch glow pixel at row 6.
-  base[6] = base[6].substring(0, 7) + "C" + base[6].substring(8);
+  // Single warm-glow pixel at row 6 — uses blonde-gold so it reads as
+  // candlelight on the cairn even after palette index 12 was repurposed
+  // for sprout green (used by farms).
+  base[6] = base[6].substring(0, 7) + "D" + base[6].substring(8);
   return base;
 }
 
@@ -221,13 +234,14 @@ function noisyFillWithSpecks(primary: number, accent: number, speck: number): st
 }
 
 function digOverlay(): string[] {
-  // A subtle yellow X overlay; rendered atop the tile beneath it in the renderer.
+  // A subtle blonde-gold X overlay; rendered atop the tile beneath it in
+  // the renderer. (Was index 12 before that slot became sprout green.)
   const rows: string[] = [];
   for (let y = 0; y < 16; y++) {
     let row = "";
     for (let x = 0; x < 16; x++) {
       const onDiag = x === y || x === 15 - y;
-      row += onDiag ? "C" : "0";
+      row += onDiag ? "D" : "0";
     }
     rows.push(row);
   }

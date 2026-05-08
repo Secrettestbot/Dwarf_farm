@@ -7,6 +7,8 @@ import { JobAssignment, JobKind } from "../ecs/components";
 import { EntityId } from "../ecs/world";
 import { findMineTarget } from "./chooseJob";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
+import { TileType } from "../world/tiles";
+import { BlueprintKind, isRoomNeglected } from "../planner/blueprint";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
@@ -21,6 +23,10 @@ const MIN_WORK_AGE = 18;
  * faster while sleeping (especially on a bed) so this is the sensible
  * autonomous response. */
 const WOUNDED_HP_RATIO = 0.5;
+/** A farm cell counts as "tended" for this many ticks after a dwarf works
+ * it. 12 in-game hours = 720 ticks: every cell needs tending roughly
+ * twice per in-game day. */
+export const TEND_VALIDITY_TICKS = 12 * 60;
 /** During these in-game hours dwarves prefer sleep over work — circadian
  * rhythm. Range is [22:00, 06:00). Night-shift dwarves (later session,
  * night-owl trait) will invert this. */
@@ -43,52 +49,74 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // through if no target is found, so a dwarf never gets stuck idle when a
   // lower-priority alternative is reachable.
 
-  // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours.
+  // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours. The
+  //    dwarf walks to the nearest stockpile (or dining hall) — they don't
+  //    just drink wherever they happen to be standing.
   if (needs && needs.thirst <= THIRST_CRITICAL && sim.stockpile.drink > 0) {
-    const target = findRestSpot(sim, pos.x, pos.y);
+    const target = findFoodTarget(sim, pos.x, pos.y);
     if (target) {
       return { kind: "drink" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };
     }
   }
 
-  // 2. Hunger — second-fastest. Same model: walk somewhere walkable to eat.
-  //    Real food sources (bins in stockpile rooms) replace this in a later
-  //    session once hauling is implemented.
+  // 2. Hunger — second-fastest. Same global stockpile lookup so deep
+  //    miners actually go up for a meal.
   if (needs && needs.hunger <= HUNGER_CRITICAL && sim.stockpile.food > 0) {
-    const target = findRestSpot(sim, pos.x, pos.y);
+    const target = findFoodTarget(sim, pos.x, pos.y);
     if (target) {
       return { kind: "eat" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };
     }
   }
 
-  // 3. Critical sleep, or a serious wound — either drops everything to
-  //    find a bed. Healing is much faster while sleeping (especially on a
-  //    bed), so this is the right autonomous response to a near-fatal hit.
+  // 3. Critical sleep, or a serious wound — bedroom anywhere in the colony
+  //    is preferred over the nearest walkable square. The dwarf will
+  //    walk back up to the bedrooms, sleep on a Bed if available, and
+  //    get the bed's healing bonus instead of curling up in a tunnel.
   const health = sim.health.get(e);
   const wounded = health !== undefined && health.hp < health.maxHp * WOUNDED_HP_RATIO;
   if ((needs && needs.sleep <= SLEEP_CRITICAL) || wounded) {
-    const sleepSpot = findRestSpot(sim, pos.x, pos.y);
+    const sleepSpot = findSleepTarget(sim, pos.x, pos.y);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
     }
   }
 
   // 4. Circadian rest — at night, a dwarf with at-least-mildly-low sleep
-  //    heads to bed instead of starting a new mining job. Survival needs
-  //    above (1-3) still come first; this is the soft preference that
-  //    gives the colony a visible day / night rhythm.
+  //    heads to bed instead of starting a new mining job.
   const hour = (sim.tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
   const isNight = hour < NIGHT_END_HOUR || hour >= NIGHT_START_HOUR;
   if (isNight && needs && needs.sleep <= NIGHT_REST_THRESHOLD) {
-    const sleepSpot = findRestSpot(sim, pos.x, pos.y);
+    const sleepSpot = findSleepTarget(sim, pos.x, pos.y);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
     }
   }
 
-  // 5. Work: mine inside an active blueprint. Children are skipped — they
-  //    play / sleep / socialise instead, falling through to wander below.
   const age = sim.ageOf(e);
+
+  // 5. Tend a farm cell that's getting close to fallow. Higher priority
+  //    than mining because a colony with no food loses fast — but lower
+  //    than survival needs above. Children skip it.
+  if (age >= MIN_WORK_AGE) {
+    const tendTarget = findTendTarget(sim, pos.x, pos.y);
+    if (tendTarget) {
+      return { kind: "tend" as JobKind, targetX: tendTarget.x, targetY: tendTarget.y, progress: 0 };
+    }
+  }
+
+  // 6. Maintain a neglected room. Sits between food work and digging:
+  //    if a bedroom or dining hall has been left to rot, fix it before
+  //    starting new excavation. The architect won't emit a fresh room
+  //    until the existing ones are kept up, so a colony of 7 can't
+  //    sprawl into a kingdom-sized footprint.
+  if (age >= MIN_WORK_AGE) {
+    const maintainTarget = findMaintainTarget(sim, pos.x, pos.y);
+    if (maintainTarget) {
+      return { kind: "maintain" as JobKind, targetX: maintainTarget.x, targetY: maintainTarget.y, progress: 0 };
+    }
+  }
+
+  // 7. Mine inside an active blueprint.
   if (age >= MIN_WORK_AGE) {
     const mineTarget = findMineTarget(sim, pos.x, pos.y);
     if (mineTarget) {
@@ -96,7 +124,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 6. Social: find an idle nearby dwarf to talk to.
+  // 8. Social: find an idle nearby dwarf to talk to.
   if (needs && needs.social <= SOCIAL_THRESHOLD) {
     const partner = findSocialPartner(sim, e, pos.x, pos.y);
     if (partner !== -1) {
@@ -111,13 +139,150 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 7. Wander: pick a random reachable walkable tile.
+  // 9. Wander: pick a random reachable walkable tile.
   const wanderTarget = pickWanderTarget(sim, pos.x, pos.y);
   if (wanderTarget) {
     return { kind: "wander" as JobKind, targetX: wanderTarget.x, targetY: wanderTarget.y, progress: 0 };
   }
 
   return null;
+}
+
+/**
+ * Find the nearest walkable cavity tile inside a *neglected* completed room
+ * (any maintainable kind: bedroom, dining hall, stockpile, farm). The dwarf
+ * walks onto the tile and the work system stamps the blueprint's
+ * `lastMaintainedTick`, resetting the architect's neglect clock for that
+ * room. Returns null if every standing room has been kept up — the colony
+ * is then free to dig new ones.
+ */
+function findMaintainTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (!isRoomNeglected(b, sim.tick)) continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (!sim.grid.isWalkable(x, y)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/**
+ * Find the nearest walkable cell inside a *completed* blueprint of the
+ * given kind, anywhere in the world. Used to send hungry / thirsty / tired
+ * dwarves up to their stockpile / bedroom even when they're deep in a
+ * mine. Within a single room, Bed tiles are preferred (so sleepers actually
+ * end up on a bed and get the healing bonus).
+ *
+ * Returns null if no completed room of the kind exists yet — callers fall
+ * back to the local findRestSpot in that case.
+ */
+function findRoomTarget(
+  sim: SimWorld,
+  kind: BlueprintKind,
+  sx: number,
+  sy: number,
+): { x: number; y: number } | null {
+  let bestPriority: { x: number; y: number; d: number } | null = null;
+  let bestSecondary: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== kind || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (!sim.grid.isWalkable(x, y)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      const tile = sim.grid.getTile(x, y);
+      if (tile === TileType.Bed) {
+        if (
+          !bestPriority ||
+          d < bestPriority.d ||
+          (d === bestPriority.d && (y < bestPriority.y || (y === bestPriority.y && x < bestPriority.x)))
+        ) {
+          bestPriority = { x, y, d };
+        }
+      } else {
+        if (
+          !bestSecondary ||
+          d < bestSecondary.d ||
+          (d === bestSecondary.d && (y < bestSecondary.y || (y === bestSecondary.y && x < bestSecondary.x)))
+        ) {
+          bestSecondary = { x, y, d };
+        }
+      }
+    }
+  }
+  const best = bestPriority ?? bestSecondary;
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Best tile to sleep at: a bedroom anywhere first, then nearby walkable. */
+function findSleepTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  return findRoomTarget(sim, "bedroom", sx, sy) ?? findRestSpot(sim, sx, sy);
+}
+
+/** Best tile to eat / drink at: a stockpile, then a dining hall, then any
+ * walkable nearby tile (so a colony with no infrastructure yet can still
+ * feed itself from the starter cache). */
+function findFoodTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  return (
+    findRoomTarget(sim, "stockpile", sx, sy) ??
+    findRoomTarget(sim, "dining_hall", sx, sy) ??
+    findRestSpot(sim, sx, sy)
+  );
+}
+
+/**
+ * Find the nearest farm cell that is overdue for tending — meaning either
+ * it has never been tended, or the last tending was more than
+ * TEND_VALIDITY_TICKS ago. The returned tile is the farm cell itself; the
+ * dwarf walks onto it and the work system advances `cellTendedAt` while
+ * they stand there. Returns null if every cell on every farm is fresh.
+ */
+function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "farm" || b.status !== "complete") continue;
+    if (!b.cellTendedAt) continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      // Cell may have been overwritten by another blueprint or a cave-in;
+      // only count cells that are still actually farm tiles.
+      if (sim.grid.getTile(x, y) !== TileType.FarmTile) continue;
+      const tendedAt = b.cellTendedAt[i];
+      const overdue = tendedAt < 0 || sim.tick - tendedAt > TEND_VALIDITY_TICKS;
+      if (!overdue) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
 }
 
 /**

@@ -76,21 +76,27 @@ export function tick(sim: SimWorld): void {
 // during their "wander" idle time.
 
 const FARM_TICK_INTERVAL = 60; // once per in-game hour
-const FARM_YIELD_CHANCE = 0.18; // per-cell, per-hour
+const FARM_YIELD_CHANCE = 0.18; // per-cell, per-hour, for a tended cell
+/** Cell counts as "tended" for this many ticks after a dwarf works it.
+ * Synced with the chooseTask threshold so the targeting and the yield
+ * agree. */
+const FARM_TEND_VALIDITY_TICKS = 12 * 60;
 
 function farmSystem(sim: SimWorld): void {
   if (sim.tick % FARM_TICK_INTERVAL !== 0) return;
-  // Iterate completed farm blueprints so we only check farm cavities.
   for (const b of sim.planner.blueprints) {
     if (b.kind !== "farm") continue;
     if (b.status !== "complete") continue;
+    if (!b.cellTendedAt) continue;
     for (let i = 0; i < b.cavity.length; i++) {
       const c = b.cavity[i];
       const x = c & 0xffff;
       const y = (c >>> 16) & 0xffff;
-      // Cell may have been overwritten (rare — cave-in, rebuilding) — only
-      // count actual FarmTile cells.
       if (sim.grid.getTile(x, y) !== TileType.FarmTile) continue;
+      // Only tended cells produce. Untended cells go fallow until a
+      // dwarf returns to work them.
+      const tendedAt = b.cellTendedAt[i];
+      if (tendedAt < 0 || sim.tick - tendedAt > FARM_TEND_VALIDITY_TICKS) continue;
       if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE) {
         sim.stockpile.food += 1;
       }
@@ -552,6 +558,12 @@ function workSystem(sim: SimWorld): void {
       case "drink":
         progressDrink(sim, e, job);
         break;
+      case "tend":
+        progressTend(sim, e, job, pos);
+        break;
+      case "maintain":
+        progressMaintain(sim, e, job, pos);
+        break;
     }
   }
 }
@@ -668,6 +680,80 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   }
   job.progress++;
   if (job.progress >= EAT_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+}
+
+/**
+ * Tend a farm cell: stamp `cellTendedAt` for the matching blueprint cell
+ * to the current tick. The job runs over a short fixed duration (visible
+ * "tending" beat), then completes. The cell stays productive for
+ * TEND_VALIDITY_TICKS afterwards before going fallow again.
+ */
+const TEND_TICKS = 18;
+function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  // Stamp on the first tick so even an interrupted tend (a rat shows up,
+  // the dwarf flees) records the work that did happen.
+  if (job.progress === 0) {
+    // Find the farm blueprint that owns this tile, mark the cell tended.
+    for (const b of sim.planner.blueprints) {
+      if (b.kind !== "farm" || b.status !== "complete" || !b.cellTendedAt) continue;
+      // Only check if the tile is inside the bounding rect (cheap reject).
+      if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+      if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        const x = c & 0xffff;
+        const y = (c >>> 16) & 0xffff;
+        if (x === pos.x && y === pos.y) {
+          b.cellTendedAt[i] = sim.tick;
+          break;
+        }
+      }
+    }
+  }
+  job.progress++;
+  if (job.progress >= TEND_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+}
+
+/**
+ * Maintain a completed room: stamp `lastMaintainedTick` on the blueprint
+ * whose cavity contains the dwarf's tile. Runs over a short fixed duration
+ * (visible "tidying" beat). The room counts as fresh for
+ * MAINTAIN_VALIDITY_TICKS afterwards before going neglected again — at
+ * which point either the same dwarf or another picks it up.
+ */
+const MAINTAIN_TICKS = 30;
+function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  // Stamp on the first tick so even an interrupted maintenance pass records
+  // the work that did happen.
+  if (job.progress === 0) {
+    for (const b of sim.planner.blueprints) {
+      if (b.status !== "complete") continue;
+      if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+      if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+      // Confirm the tile is part of the cavity (not just inside the bbox).
+      let inside = false;
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        if ((c & 0xffff) === pos.x && ((c >>> 16) & 0xffff) === pos.y) {
+          inside = true;
+          break;
+        }
+      }
+      if (!inside) continue;
+      b.lastMaintainedTick = sim.tick;
+      break;
+    }
+  }
+  job.progress++;
+  if (job.progress >= MAINTAIN_TICKS) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
