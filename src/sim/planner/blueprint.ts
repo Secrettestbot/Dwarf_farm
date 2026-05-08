@@ -51,6 +51,12 @@ export interface Blueprint {
    * only yields food on cells tended within TEND_VALIDITY ticks; untended
    * cells go fallow and produce nothing. Undefined for non-farm kinds. */
   cellTendedAt?: Int32Array;
+  /** Tick at which a dwarf last performed general upkeep on this room.
+   * Set to `createdTick` when the dig finishes, advanced each time a
+   * 'maintain' job completes. Rooms neglected longer than
+   * MAINTAIN_VALIDITY_TICKS stop counting toward the architect's targets,
+   * so the colony can't sprawl beyond what its dwarves can keep up. */
+  lastMaintainedTick?: number;
 }
 
 export function packCell(x: number, y: number): number {
@@ -74,6 +80,29 @@ export function isComplete(b: Blueprint, grid: TileGrid): boolean {
     if (grid.isSolid(x, y)) return false;
   }
   return true;
+}
+
+/** A completed room counts as neglected if no dwarf has performed
+ * maintenance on it within this many ticks. Tied to the chooseTask
+ * scheduling cadence so the targeting and the planner gating agree. */
+export const MAINTAIN_VALIDITY_TICKS = 24 * 60; // one in-game day
+
+/** True if a completed blueprint's maintenance clock has run out. Rooms
+ * that are still being dug (status = digging) are never "neglected" —
+ * the dig itself is the work. Bare structures (corridors, tunnels,
+ * stairwells) don't need maintenance and are never considered neglected
+ * either; only enclosed habitable rooms decay. */
+export function isRoomNeglected(b: Blueprint, currentTick: number): boolean {
+  if (b.status !== "complete") return false;
+  if (!isMaintainable(b.kind)) return false;
+  const since = currentTick - (b.lastMaintainedTick ?? b.createdTick);
+  return since > MAINTAIN_VALIDITY_TICKS;
+}
+
+/** Whether a room of this kind takes general upkeep. Corridors, tunnels,
+ * stairwells, and mines are bare passages that don't require it. */
+export function isMaintainable(kind: BlueprintKind): boolean {
+  return kind === "bedroom" || kind === "dining_hall" || kind === "stockpile" || kind === "farm";
 }
 
 /** Build a rectangular cavity from corner + dims. */

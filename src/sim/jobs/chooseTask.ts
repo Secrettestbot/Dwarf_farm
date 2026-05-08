@@ -8,7 +8,7 @@ import { EntityId } from "../ecs/world";
 import { findMineTarget } from "./chooseJob";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
-import { BlueprintKind } from "../planner/blueprint";
+import { BlueprintKind, isRoomNeglected } from "../planner/blueprint";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
@@ -104,7 +104,19 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 6. Work: mine inside an active blueprint.
+  // 6. Maintain a neglected room. Sits between food work and digging:
+  //    if a bedroom or dining hall has been left to rot, fix it before
+  //    starting new excavation. The architect won't emit a fresh room
+  //    until the existing ones are kept up, so a colony of 7 can't
+  //    sprawl into a kingdom-sized footprint.
+  if (age >= MIN_WORK_AGE) {
+    const maintainTarget = findMaintainTarget(sim, pos.x, pos.y);
+    if (maintainTarget) {
+      return { kind: "maintain" as JobKind, targetX: maintainTarget.x, targetY: maintainTarget.y, progress: 0 };
+    }
+  }
+
+  // 7. Mine inside an active blueprint.
   if (age >= MIN_WORK_AGE) {
     const mineTarget = findMineTarget(sim, pos.x, pos.y);
     if (mineTarget) {
@@ -112,7 +124,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 6. Social: find an idle nearby dwarf to talk to.
+  // 8. Social: find an idle nearby dwarf to talk to.
   if (needs && needs.social <= SOCIAL_THRESHOLD) {
     const partner = findSocialPartner(sim, e, pos.x, pos.y);
     if (partner !== -1) {
@@ -127,13 +139,45 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 7. Wander: pick a random reachable walkable tile.
+  // 9. Wander: pick a random reachable walkable tile.
   const wanderTarget = pickWanderTarget(sim, pos.x, pos.y);
   if (wanderTarget) {
     return { kind: "wander" as JobKind, targetX: wanderTarget.x, targetY: wanderTarget.y, progress: 0 };
   }
 
   return null;
+}
+
+/**
+ * Find the nearest walkable cavity tile inside a *neglected* completed room
+ * (any maintainable kind: bedroom, dining hall, stockpile, farm). The dwarf
+ * walks onto the tile and the work system stamps the blueprint's
+ * `lastMaintainedTick`, resetting the architect's neglect clock for that
+ * room. Returns null if every standing room has been kept up — the colony
+ * is then free to dig new ones.
+ */
+function findMaintainTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (!isRoomNeglected(b, sim.tick)) continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (!sim.grid.isWalkable(x, y)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
 }
 
 /**

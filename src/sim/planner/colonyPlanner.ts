@@ -25,7 +25,7 @@ import { TileType } from "../world/tiles";
 import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
-import { Blueprint, BlueprintKind, isComplete, rectCavity } from "./blueprint";
+import { Blueprint, BlueprintKind, isComplete, isRoomNeglected, rectCavity } from "./blueprint";
 import { furnishRoom } from "./furnish";
 
 export interface PlannerContext {
@@ -182,12 +182,12 @@ export class ColonyPlanner {
 
   private needsDiningHall(ctx: PlannerContext): boolean {
     if (ctx.population < 4) return false;
-    return this.totalOfKind("dining_hall") === 0;
+    return this.maintainedAndActiveOfKind("dining_hall", ctx.tick) === 0;
   }
 
   private needsStockpile(ctx: PlannerContext): boolean {
     if (ctx.population < 5) return false;
-    return this.totalOfKind("stockpile") === 0;
+    return this.maintainedAndActiveOfKind("stockpile", ctx.tick) === 0;
   }
 
   private needsFarm(ctx: PlannerContext): boolean {
@@ -195,12 +195,36 @@ export class ColonyPlanner {
     // the colony fed through migration-driven growth.
     if (ctx.population < 4) return false;
     const target = Math.max(1, Math.ceil(ctx.population / 7));
-    return this.totalOfKind("farm") < target;
+    return this.maintainedAndActiveOfKind("farm", ctx.tick) < target;
   }
 
   private needsBedroom(ctx: PlannerContext): boolean {
     const target = Math.max(2, Math.ceil(Math.max(1, ctx.population) * 1.5));
-    return this.totalOfKind("bedroom") < target;
+    // Only well-maintained bedrooms count toward the target. A neglected
+    // bedroom has to be brought back into shape before the architect
+    // emits another one — capping the colony's footprint at what its
+    // dwarves can actually keep up with.
+    return this.maintainedAndActiveOfKind("bedroom", ctx.tick) < target;
+  }
+
+  /**
+   * Count of completed rooms of `kind` that are not currently neglected,
+   * plus any blueprint of that kind still being dug. Used by the
+   * needs-X predicates so the architect doesn't expand past the colony's
+   * maintenance capacity.
+   */
+  private maintainedAndActiveOfKind(kind: BlueprintKind, currentTick: number): number {
+    let n = 0;
+    for (const b of this.blueprints) {
+      if (b.kind !== kind) continue;
+      if (b.status === "digging") {
+        n++;
+        continue;
+      }
+      if (b.status !== "complete") continue;
+      if (!isRoomNeglected(b, currentTick)) n++;
+    }
+    return n;
   }
 
   /**
@@ -735,6 +759,9 @@ export class ColonyPlanner {
         b.status = "complete";
         this.completed++;
         this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
+        // A freshly-dug room counts as fully maintained — the dig itself
+        // exercised every cell. The maintenance clock starts now.
+        b.lastMaintainedTick = ctx.tick;
         for (let i = 0; i < b.cavity.length; i++) {
           const c = b.cavity[i];
           const x = c & 0xffff;

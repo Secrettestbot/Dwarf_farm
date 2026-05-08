@@ -561,6 +561,9 @@ function workSystem(sim: SimWorld): void {
       case "tend":
         progressTend(sim, e, job, pos);
         break;
+      case "maintain":
+        progressMaintain(sim, e, job, pos);
+        break;
     }
   }
 }
@@ -713,6 +716,44 @@ function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   job.progress++;
   if (job.progress >= TEND_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+  }
+}
+
+/**
+ * Maintain a completed room: stamp `lastMaintainedTick` on the blueprint
+ * whose cavity contains the dwarf's tile. Runs over a short fixed duration
+ * (visible "tidying" beat). The room counts as fresh for
+ * MAINTAIN_VALIDITY_TICKS afterwards before going neglected again — at
+ * which point either the same dwarf or another picks it up.
+ */
+const MAINTAIN_TICKS = 30;
+function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  // Stamp on the first tick so even an interrupted maintenance pass records
+  // the work that did happen.
+  if (job.progress === 0) {
+    for (const b of sim.planner.blueprints) {
+      if (b.status !== "complete") continue;
+      if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+      if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+      // Confirm the tile is part of the cavity (not just inside the bbox).
+      let inside = false;
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        if ((c & 0xffff) === pos.x && ((c >>> 16) & 0xffff) === pos.y) {
+          inside = true;
+          break;
+        }
+      }
+      if (!inside) continue;
+      b.lastMaintainedTick = sim.tick;
+      break;
+    }
+  }
+  job.progress++;
+  if (job.progress >= MAINTAIN_TICKS) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);

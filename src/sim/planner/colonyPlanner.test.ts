@@ -144,9 +144,16 @@ describe("ColonyPlanner", () => {
     const planner = new ColonyPlanner();
     // Population 1: target = max(2, ceil(1*1.5)) = 2 bedrooms. The colony
     // never emits a 3rd bedroom but does keep digging exploration corridors.
+    // Pin every completed bedroom as freshly maintained each tick so the
+    // maintenance-gated emission rule (neglected rooms don't count toward
+    // the target) doesn't kick in here — that behaviour has its own test.
     for (let t = 1; t <= 4000; t++) {
       planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 1, rng: testRng });
       for (const bp of planner.blueprints) {
+        if (bp.status === "complete") {
+          bp.lastMaintainedTick = t;
+          continue;
+        }
         if (bp.status !== "digging") continue;
         for (let i = 0; i < bp.cavity.length; i++) {
           const c = bp.cavity[i];

@@ -64,7 +64,7 @@ export interface Needs {
   decayAccumThirst: number;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend";
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain";
 
 export interface JobAssignment {
   kind: JobKind;
