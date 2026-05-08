@@ -60,6 +60,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       : undefined;
     const partnerIndex = dw.partnerId !== null ? entityToIndex.get(dw.partnerId) ?? null : null;
     const h = sim.health.get(id);
+    const carrying = sim.carrying.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -88,6 +89,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
         : undefined,
       job: savedJob,
       pathing: savedPathing,
+      carrying: carrying ? { kind: carrying.kind } : undefined,
     });
   });
 
@@ -154,7 +156,21 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     hostiles: collectHostiles(sim),
     sliders: { ...sim.sliders },
     emergency: { ...sim.emergency },
+    items: collectItems(sim),
   };
+}
+
+function collectItems(sim: SimWorld): import("./schema").SavedItem[] {
+  const out: import("./schema").SavedItem[] = [];
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const it = sim.item.get(e);
+    const p = sim.position.get(e);
+    if (!it || !p) continue;
+    out.push({ kind: it.kind, x: p.x, y: p.y });
+  }
+  return out;
 }
 
 function collectHostiles(sim: SimWorld): SavedHostile[] {
@@ -264,6 +280,9 @@ export function restore(save: SaveV1): SimWorld {
         goalY: d.pathing.goalY,
       });
     }
+    if (d.carrying) {
+      sim.carrying.set(e, { kind: d.carrying.kind });
+    }
   }
 
   // Restore Colony Planner.
@@ -322,6 +341,11 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.emergency) {
     sim.emergency = { ...sim.emergency, ...save.emergency };
+  }
+  if (save.items) {
+    for (const it of save.items) {
+      sim.spawnItem({ kind: it.kind, x: it.x, y: it.y });
+    }
   }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them

@@ -92,6 +92,25 @@ export function renderWorld(
     ctx.restore();
   }
 
+  // Loose items on the floor — output of mining, input to haul jobs.
+  // Drawn as small palette-coloured chips so a hauler can spot a pile.
+  const itemEnts = sim.item.entities;
+  for (let i = 0; i < itemEnts.length; i++) {
+    const ie = itemEnts[i];
+    const p = sim.position.get(ie);
+    const it = sim.item.get(ie);
+    if (!p || !it) continue;
+    if (!grid.isSeen(p.x, p.y)) continue;
+    const sx = (p.x - camera.x) * pt + viewW / 2;
+    const sy = (p.y - camera.y) * pt + viewH / 2;
+    ctx.fillStyle = it.kind === "ore" ? "#e0c070" : it.kind === "stone" ? "#9a9aa3" : "#8a6a4a";
+    const m = pt * 0.25;
+    ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx + m + 0.5, sy + pt - m * 1.5 + 0.5, pt - m * 2 - 1, m - 1);
+  }
+
   // Hostiles below dwarves so dwarves draw over them in melee.
   const hostileEnts = sim.hostile.entities;
   for (let i = 0; i < hostileEnts.length; i++) {

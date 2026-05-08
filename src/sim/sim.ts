@@ -226,8 +226,15 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
       partner.partnerId = null;
     }
   }
+  // If the dwarf was carrying something, drop it on the death tile so a
+  // teammate can finish the haul. Releases any item claim implicitly via
+  // the alive-check in findHaulTarget.
+  const carrying = sim.carrying.get(e);
+  if (carrying) {
+    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
+  }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying]);
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -514,11 +521,37 @@ function needsSystem(sim: SimWorld): void {
   }
 }
 
-/** For each idle dwarf, run chooseTask and assign the resulting job + path. */
+/** Survival-need thresholds at which an in-flight non-survival job is
+ * interrupted so the dwarf re-evaluates. Without this a deep miner can
+ * walk far enough on a tend or haul leg that they die en route to a
+ * remote farm or stockpile while their thirst plummets. */
+const INTERRUPT_THIRST = 30;
+const INTERRUPT_HUNGER = 25;
+
+/** For each idle dwarf, run chooseTask and assign the resulting job + path.
+ * Also interrupts in-flight non-survival jobs when a critical need crosses
+ * the interrupt threshold so the dwarf can divert to food / drink. */
 function jobAssignmentSystem(sim: SimWorld): void {
   const dwarves = sim.dwarf.entities;
   for (let i = 0; i < dwarves.length; i++) {
     const e = dwarves[i];
+    // Interrupt: critical need overrides a non-survival job in flight.
+    const job = sim.job.get(e);
+    if (job) {
+      const needs = sim.needs.get(e);
+      const survivalKind =
+        job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter";
+      if (
+        needs &&
+        !survivalKind &&
+        ((needs.thirst <= INTERRUPT_THIRST && sim.stockpile.drink > 0) ||
+          (needs.hunger <= INTERRUPT_HUNGER && sim.stockpile.food > 0))
+      ) {
+        if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
+        sim.job.remove(e);
+        sim.pathing.remove(e);
+      }
+    }
     if (sim.job.has(e)) continue;
     const pos = sim.position.get(e);
     if (!pos) continue;
@@ -617,8 +650,56 @@ function workSystem(sim: SimWorld): void {
       case "shelter":
         progressShelter(sim, e, job, pos);
         break;
+      case "haul":
+        progressHaul(sim, e, job, pos);
+        break;
     }
   }
+}
+
+/** Two-phase hauling. progress=0 is the pickup leg: the dwarf has walked
+ * to a loose item and grabs it. progress=1 is the delivery leg: the
+ * dwarf has walked to a stockpile cell and credits the global counter.
+ * Each phase ends by clearing the job so chooseTask reissues the next
+ * leg fresh — keeps the state machine boring and easy to save. */
+function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  if (job.progress === 0) {
+    // Pickup leg.
+    if (pos.x !== job.targetX || pos.y !== job.targetY) {
+      sim.job.remove(e);
+      sim.pathing.remove(e);
+      return;
+    }
+    // Find the item at this tile.
+    const ents = sim.item.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const ie = ents[i];
+      const it = sim.item.get(ie);
+      const p = sim.position.get(ie);
+      if (!it || !p) continue;
+      if (p.x !== pos.x || p.y !== pos.y) continue;
+      sim.carrying.set(e, { kind: it.kind });
+      sim.destroyItem(ie);
+      break;
+    }
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // Delivery leg.
+  const carrying = sim.carrying.get(e);
+  if (!carrying) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  if (carrying.kind === "ore") sim.stockpile.ore++;
+  else if (carrying.kind === "stone") sim.stockpile.stone++;
+  else if (carrying.kind === "dirt") sim.stockpile.dirt++;
+  sim.carrying.remove(e);
+  sim.dwarf.get(e)!.lastJobTick = sim.tick;
+  sim.job.remove(e);
+  sim.pathing.remove(e);
 }
 
 /** Sit at the Safe Zone tile until the emergency lifts. The job is dropped
@@ -659,10 +740,13 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     // Grant mining XP and announce tier crossings ("become a Skilled Miner").
     awardSkillXp(sim, e, "mining", 1);
 
-    // Stockpile credit + first-strike narration. Real workshops in a later
-    // session refine these into bars/blocks/etc.
+    // Drop the rock as a haulable item on the freshly-excavated tile.
+    // A separate hauler job picks it up later and carries it to the
+    // stockpile. The first-strike narration still fires the moment the
+    // ore is broken.
+    let itemKind: import("./ecs/components").ItemKind | null = null;
     if (tileType === TileType.Ore) {
-      sim.stockpile.ore++;
+      itemKind = "ore";
       if (!sim.oreEverStruck) {
         sim.oreEverStruck = true;
         const dw = sim.dwarf.get(e)!;
@@ -673,9 +757,12 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         );
       }
     } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
-      sim.stockpile.stone++;
+      itemKind = "stone";
     } else if (tileType === TileType.Dirt || tileType === TileType.Sand) {
-      sim.stockpile.dirt++;
+      itemKind = "dirt";
+    }
+    if (itemKind) {
+      sim.spawnItem({ kind: itemKind, x: job.targetX, y: job.targetY });
     }
 
     sim.dwarf.get(e)!.lastJobTick = sim.tick;

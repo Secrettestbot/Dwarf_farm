@@ -1,5 +1,5 @@
 import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
-import { Dwarf, JobAssignment, Needs, Pathing, Position } from "../ecs/components";
+import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying } from "../ecs/components";
 import { Rng } from "../rng";
 import { TileGrid } from "./grid";
 import { ColonyPlanner } from "../planner/colonyPlanner";
@@ -52,6 +52,8 @@ export class SimWorld {
   readonly needs: ComponentStore<Needs>;
   readonly hostile: ComponentStore<Hostile>;
   readonly health: ComponentStore<Health>;
+  readonly item: ComponentStore<Item>;
+  readonly carrying: ComponentStore<Carrying>;
 
   // Forked RNG streams.
   readonly aiRng: Rng;
@@ -113,6 +115,8 @@ export class SimWorld {
     this.needs = new ComponentStore(maxEntities);
     this.hostile = new ComponentStore(maxEntities);
     this.health = new ComponentStore(maxEntities);
+    this.item = new ComponentStore(maxEntities);
+    this.carrying = new ComponentStore(maxEntities);
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");
@@ -185,6 +189,22 @@ export class SimWorld {
       if (p && p.x === x && p.y === y) return e;
     }
     return null;
+  }
+
+  /** Drop an item onto the floor at (x, y). Returns the new entity id.
+   * Used by the mining work system when a tile is excavated, so the rough
+   * stone / ore / dirt becomes a haulable object instead of teleporting
+   * straight into the stockpile counter. */
+  spawnItem(spec: { kind: ItemKind; x: number; y: number }): EntityId {
+    const e = this.ecs.create();
+    this.position.set(e, { x: spec.x, y: spec.y });
+    this.item.set(e, { kind: spec.kind, claimedBy: -1 });
+    return e;
+  }
+
+  /** Destroy an item entity (after it's hauled into a stockpile). */
+  destroyItem(e: EntityId): void {
+    this.ecs.destroy(e, [this.position, this.item]);
   }
 
   /** Reveal the fog-of-war mask around every living dwarf. Used at game

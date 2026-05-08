@@ -137,6 +137,25 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 6.5 Haul a loose item to a stockpile. Sits ahead of new mining so
+  //     finished cavities don't fill with debris while dwarves keep
+  //     opening new tunnels. The dwarf already carrying something jumps
+  //     straight to the delivery half via the early-return below.
+  if (age >= MIN_WORK_AGE && sim.sliders.hauling > 0.05) {
+    const carrying = sim.carrying.get(e);
+    if (carrying) {
+      const drop = findStockpileDrop(sim, pos.x, pos.y);
+      if (drop) {
+        return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
+      }
+    } else {
+      const haul = findHaulTarget(sim, e, pos.x, pos.y);
+      if (haul) {
+        return { kind: "haul" as JobKind, targetX: haul.x, targetY: haul.y, progress: 0 };
+      }
+    }
+  }
+
   // 7. Mine inside an active blueprint. Gated by the Excavation slider —
   //    set to zero, the colony stops digging entirely.
   if (age >= MIN_WORK_AGE && sim.sliders.excavation > 0.05) {
@@ -318,6 +337,64 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
       const overdue = tendedAt < 0 || sim.tick - tendedAt > TEND_VALIDITY_TICKS;
       if (!overdue) continue;
       if (claimed.has((y << 16) | x)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find an unclaimed item on the floor for this dwarf to pick up and
+ * mark it claimed in the same call so two haulers running chooseTask in
+ * the same tick don't both target it. Returns the item's tile (the dwarf
+ * walks onto it). */
+function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number): { x: number; y: number } | null {
+  let bestEnt = -1;
+  let best: { x: number; y: number; d: number } | null = null;
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const it = sim.item.get(ents[i]);
+    const p = sim.position.get(ents[i]);
+    if (!it || !p) continue;
+    if (it.claimedBy !== -1 && sim.ecs.isAlive(it.claimedBy)) continue;
+    const dx = p.x - sx;
+    const dy = p.y - sy;
+    const d = dx * dx + dy * dy;
+    if (
+      !best ||
+      d < best.d ||
+      (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
+    ) {
+      best = { x: p.x, y: p.y, d };
+      bestEnt = ents[i];
+    }
+  }
+  if (bestEnt !== -1) {
+    sim.item.get(bestEnt)!.claimedBy = hauler;
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest walkable cell inside a completed stockpile to drop a
+ * carried item. Falls back to standing-on-the-spot delivery (item just
+ * gets credited to the global counter) if no stockpile exists yet. */
+function findStockpileDrop(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "stockpile" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (!sim.grid.isWalkable(x, y)) continue;
       const dx = x - sx;
       const dy = y - sy;
       const d = dx * dx + dy * dy;

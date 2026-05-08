@@ -64,7 +64,26 @@ export interface Needs {
   decayAccumThirst: number;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter";
+/** What's loose on the floor — output of mining and (later) workshops, input
+ * to hauling jobs. The kind matches the stockpile counter that the item
+ * eventually credits when a hauler delivers it. Items are entities so
+ * pathfinding and the renderer can locate them by Position. */
+export type ItemKind = "stone" | "ore" | "dirt";
+
+export interface Item {
+  kind: ItemKind;
+  /** Entity id of the dwarf currently en route to pick this item up, or
+   * -1 if unclaimed. Prevents two haulers racing for the same crate. */
+  claimedBy: number;
+}
+
+/** Component on a dwarf currently carrying something. While set, the dwarf
+ * is in the "deliver to stockpile" half of a haul job. */
+export interface Carrying {
+  kind: ItemKind;
+}
+
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul";
 
 export interface JobAssignment {
   kind: JobKind;

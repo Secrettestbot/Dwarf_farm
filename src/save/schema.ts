@@ -52,6 +52,15 @@ export interface SavedDwarf {
   };
   /** Combat HP. Optional for back-compat with v2 saves. */
   health?: { hp: number; maxHp: number; lastAttackTick: number; wasSevereWound?: boolean };
+  /** What this dwarf is currently carrying mid-haul, if anything. */
+  carrying?: { kind: "stone" | "ore" | "dirt" };
+}
+
+/** A loose item on the floor — dropped by mining, picked up by hauling. */
+export interface SavedItem {
+  kind: "stone" | "ore" | "dirt";
+  x: number;
+  y: number;
 }
 
 /** Saved hostile entity. */
@@ -148,6 +157,8 @@ export interface SaveV1 {
   sliders?: SliderState;
   /** Active emergency-button state. Optional for back-compat. */
   emergency?: EmergencyState;
+  /** Loose items on the floor at save time. */
+  items?: SavedItem[];
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;
