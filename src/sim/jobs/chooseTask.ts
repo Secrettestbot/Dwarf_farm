@@ -56,14 +56,32 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //    and thirst defer until the panic subsides; that matches the GDD's
   //    "drop their current job (including eating, sleeping, and
   //    socialising)" rule. Lockdown does not pull dwarves — it just
-  //    blocks the perimeter and the migration system.
-  if (isShelterMode(sim.emergency)) {
+  //    blocks the perimeter and the migration system. Soldiers don't
+  //    shelter — they engage; their branch lands two priorities below
+  //    survival needs.
+  if (isShelterMode(sim.emergency) && !sim.squad.has(e)) {
     return {
       kind: "shelter" as JobKind,
       targetX: sim.spawn.x,
       targetY: sim.spawn.y,
       progress: 0,
     };
+  }
+
+  // 0.5 Engage: standing-guard soldiers head toward the nearest reachable
+  //     hostile. Civilians are *not* eligible — they flee or shelter via
+  //     the alarm path. Engagement supersedes most needs except critical
+  //     thirst / hunger / wounds (those branches sit just below).
+  if (sim.squad.has(e)) {
+    const target = findHostileTarget(sim, pos.x, pos.y);
+    if (target) {
+      return {
+        kind: "engage" as JobKind,
+        targetX: target.x,
+        targetY: target.y,
+        progress: 0,
+      };
+    }
   }
 
   // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours. The
@@ -416,6 +434,34 @@ function findStockpileDrop(sim: SimWorld, sx: number, sy: number): { x: number; 
       ) {
         best = { x, y, d };
       }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest hostile in line-of-sight range. Returns the
+ * hostile's tile so the soldier walks adjacent and the existing combat
+ * system handles the actual exchange. Range is capped so the colony's
+ * military doesn't deplete itself running across the entire fortress
+ * for a single rat — hostiles deeper than this end up handled when a
+ * soldier wanders into their pursue radius. */
+const SOLDIER_ENGAGE_RANGE = 30;
+function findHostileTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const p = sim.position.get(ents[i]);
+    if (!p) continue;
+    const dx = p.x - sx;
+    const dy = p.y - sy;
+    const d = dx * dx + dy * dy;
+    if (d > SOLDIER_ENGAGE_RANGE * SOLDIER_ENGAGE_RANGE) continue;
+    if (
+      !best ||
+      d < best.d ||
+      (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
+    ) {
+      best = { x: p.x, y: p.y, d };
     }
   }
   return best ? { x: best.x, y: best.y } : null;

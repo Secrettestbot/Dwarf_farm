@@ -28,6 +28,7 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   tend: { glyph: "✿", color: "#7aa040" },
   maintain: { glyph: "•", color: "#aaa" },
   shelter: { glyph: "!", color: "#e07050" },
+  engage: { glyph: "⚔", color: "#e0c080" },
 };
 
 export function renderWorld(

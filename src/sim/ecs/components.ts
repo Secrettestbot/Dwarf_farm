@@ -91,7 +91,18 @@ export interface Carrying {
   kind: ItemKind;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft";
+/** Membership in the colony's standing military. Auto-assigned at year
+ * boundaries based on the dwarf's Military skill — the top fraction of
+ * the population is drafted, the rest stay civilian. Squad members chase
+ * hostiles instead of fleeing them, deal a flat damage bonus in combat,
+ * and answer the Alarm by mustering at the entrance corridor. */
+export interface Squad {
+  /** Tick at which this dwarf was drafted. Used to age out a soldier
+   * back into civilian life if their skill drops below the cap. */
+  draftedAtTick: number;
+}
+
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage";
 
 export interface JobAssignment {
   kind: JobKind;

@@ -38,7 +38,7 @@ export interface SavedDwarf {
   };
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage";
     targetX: number;
     targetY: number;
     progress: number;
@@ -56,6 +56,10 @@ export interface SavedDwarf {
   health?: { hp: number; maxHp: number; lastAttackTick: number; wasSevereWound?: boolean };
   /** What this dwarf is currently carrying mid-haul, if anything. */
   carrying?: { kind: "stone" | "ore" | "dirt" };
+  /** Squad membership at save time. The draft is re-checked at the next
+   * year boundary regardless, but persisting the current state means an
+   * in-progress engagement survives a save/load cycle. */
+  squad?: { draftedAtTick: number };
 }
 
 /** A loose item on the floor — dropped by mining, picked up by hauling. */

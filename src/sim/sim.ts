@@ -54,6 +54,7 @@ export function tick(sim: SimWorld): void {
   });
   yearRolloverSystem(sim);
   emergencySystem(sim);
+  draftSystem(sim);
   pairingSystem(sim);
   reproductionSystem(sim);
   migrationSystem(sim);
@@ -69,6 +70,67 @@ export function tick(sim: SimWorld): void {
   healingSystem(sim);
   farmSystem(sim);
   visibilitySystem(sim);
+}
+
+// ---- Military draft ----------------------------------------------------
+//
+// Once per in-game year the colony picks its standing military: the top
+// fraction of adults by Military skill get a Squad component, marking
+// them as soldiers. Soldiers chase hostiles on sight (engage job),
+// answer the Alarm by mustering at the entrance, and deal a flat damage
+// bonus in melee.
+//
+// The fraction is intentionally small — five soldiers in a fifty-dwarf
+// colony, a dozen in a fortress of two hundred. The rest of the
+// population stays civilian and runs the workshops, farms, and library.
+
+const DRAFT_FRACTION = 0.1;
+const DRAFT_MIN_AGE = 18;
+const DRAFT_MIN_MILITARY_SKILL = 2;
+
+function draftSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  // Gather eligible adults sorted by Military skill descending; tie-break by
+  // entity id for determinism.
+  type Cand = { id: EntityId; military: number };
+  const eligible: Cand[] = [];
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    if (sim.ageOf(id) < DRAFT_MIN_AGE) continue;
+    const military = dw.skills.military ?? 1;
+    if (military < DRAFT_MIN_MILITARY_SKILL) continue;
+    eligible.push({ id, military });
+  }
+  eligible.sort((a, b) => (b.military - a.military) || (a.id - b.id));
+  const target = Math.max(1, Math.ceil(sim.dwarf.size() * DRAFT_FRACTION));
+  const keep = new Set<EntityId>();
+  for (let i = 0; i < Math.min(target, eligible.length); i++) {
+    const c = eligible[i];
+    keep.add(c.id);
+    if (!sim.squad.has(c.id)) {
+      sim.squad.set(c.id, { draftedAtTick: sim.tick });
+      const dw = sim.dwarf.get(c.id);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} has been drafted into the colony's standing guard.`,
+        );
+      }
+    }
+  }
+  // Anyone in the squad component but no longer in the keep set is
+  // demobilised. Mostly happens when population shrinks past the cap.
+  const sEnts = sim.squad.entities.slice();
+  for (const id of sEnts) {
+    if (!keep.has(id)) {
+      sim.squad.remove(id);
+    }
+  }
 }
 
 // ---- Emergency state machine ------------------------------------------
@@ -236,7 +298,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad]);
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -583,7 +645,10 @@ function jobAssignmentSystem(sim: SimWorld): void {
 
     // Plan a path appropriate for the kind of job.
     let path: Int32Array | null = null;
-    if (proposal.kind === "mine") {
+    if (proposal.kind === "mine" || proposal.kind === "engage") {
+      // Mine + engage walk *adjacent* to the target (the rock or the
+      // hostile) — the existing combat system handles the swing once the
+      // soldier and target share a tile boundary.
       path = sim.astar.findPathToNeighbor(sim.grid, pos.x, pos.y, proposal.targetX, proposal.targetY, 6000);
     } else {
       // Sleep / socialise / wander all walk *to* a walkable tile, not adjacent.
@@ -678,8 +743,70 @@ function workSystem(sim: SimWorld): void {
       case "craft":
         progressCraft(sim, e, job, pos);
         break;
+      case "engage":
+        progressEngage(sim, e, job, pos);
+        break;
     }
   }
+}
+
+/** Soldier engagement: stand adjacent to the target hostile tick after
+ * tick. The combat system handles the actual exchange every cooldown
+ * period — progressEngage just makes sure the soldier doesn't drift
+ * back to civilian work while the fight is on. The job ends when the
+ * hostile is dead, has moved out of range, or the soldier himself is
+ * out of HP. */
+function progressEngage(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  // Has the hostile moved? Re-target each tick: scan all hostiles, pick
+  // the one at job.targetX/Y (still there), or fall back to the nearest
+  // adjacent one.
+  let hostileEnt = -1;
+  let hostilePos: { x: number; y: number } | null = null;
+  const hEnts = sim.hostile.entities;
+  for (let i = 0; i < hEnts.length; i++) {
+    const p = sim.position.get(hEnts[i]);
+    if (!p) continue;
+    if (p.x === job.targetX && p.y === job.targetY) {
+      hostileEnt = hEnts[i];
+      hostilePos = p;
+      break;
+    }
+  }
+  // If the original hostile has moved, look for any adjacent hostile —
+  // the soldier swings at whatever's next to them — otherwise drop the
+  // job so chooseTask can re-target.
+  if (!hostilePos) {
+    for (let i = 0; i < hEnts.length; i++) {
+      const p = sim.position.get(hEnts[i]);
+      if (!p) continue;
+      if (Math.abs(p.x - pos.x) <= 1 && Math.abs(p.y - pos.y) <= 1) {
+        hostileEnt = hEnts[i];
+        hostilePos = p;
+        break;
+      }
+    }
+  }
+  if (!hostilePos) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // If we lost adjacency (hostile fled, we got knocked back), update the
+  // job target so jobAssignmentSystem repaths next tick.
+  const adjacent =
+    Math.abs(hostilePos.x - pos.x) <= 1 && Math.abs(hostilePos.y - pos.y) <= 1;
+  if (!adjacent) {
+    job.targetX = hostilePos.x;
+    job.targetY = hostilePos.y;
+    // Repath: clear the current path so jobAssignmentSystem can re-plan.
+    sim.pathing.remove(e);
+    return;
+  }
+  void hostileEnt;
+  job.progress++;
+  // Engagement keeps running as long as a hostile is present; combatSystem
+  // does the damage. The job ends naturally when the hostile dies and the
+  // re-target loop above finds none.
 }
 
 /** Run a workshop recipe: while the dwarf stands on the workstation tile,
@@ -1285,10 +1412,14 @@ function combatSystem(sim: SimWorld): void {
     if (sim.tick - dHealth.lastAttackTick >= DWARF_ATTACK_COOLDOWN) {
       dHealth.lastAttackTick = sim.tick;
       // Damage scales modestly with the military skill (no military skill
-      // = base damage). Mining skill doesn't help in a fight.
+      // = base damage). Mining skill doesn't help in a fight. Drafted
+      // soldiers carry a flat +5 bonus that civilians caught in combat
+      // don't have — a trained guard outclasses a panicking miner.
       const dwarf = sim.dwarf.get(target);
       const military = dwarf?.skills.military ?? 1;
-      const damage = DWARF_BASE_DAMAGE + Math.floor((military - 1) / 2);
+      const isSoldier = sim.squad.has(target);
+      const damage =
+        DWARF_BASE_DAMAGE + Math.floor((military - 1) / 2) + (isSoldier ? 5 : 0);
       hHealth.hp -= damage;
       if (hHealth.hp <= 0) {
         const dwarfName = dwarf?.name ?? "A dwarf";
