@@ -64,7 +64,18 @@ describe("workshop item routing", () => {
     }
     // The smelter should have produced bars without ever touching the
     // global ore counter.
-    expect(sim.stockpile.bars).toBeGreaterThan(0);
+    // Bars come out as items first; without a stockpile or forge to
+    // deliver to, the smith may end the run still carrying. Count all
+    // three places the bar might live.
+    let barItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "bars") barItems++;
+    }
+    let carriedBars = 0;
+    for (const id of sim.dwarf.entities) {
+      if (sim.carrying.get(id)?.kind === "bars") carriedBars++;
+    }
+    expect(sim.stockpile.bars + barItems + carriedBars).toBeGreaterThan(0);
     expect(sim.stockpile.ore).toBe(0);
   });
 
@@ -89,13 +100,60 @@ describe("workshop item routing", () => {
       n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
       tick(sim);
     }
-    expect(sim.stockpile.bars).toBeGreaterThan(0);
+    // Bars come out as items first; without a stockpile or forge to
+    // deliver to, the smith may end the run still carrying. Count all
+    // three places the bar might live.
+    let barItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "bars") barItems++;
+    }
+    let carriedBars = 0;
+    for (const id of sim.dwarf.entities) {
+      if (sim.carrying.get(id)?.kind === "bars") carriedBars++;
+    }
+    expect(sim.stockpile.bars + barItems + carriedBars).toBeGreaterThan(0);
     // The pre-placed ore item should have been consumed by the smith.
     let oreItemsLeft = 0;
     for (const ie of sim.item.entities) {
       if (sim.item.get(ie)?.kind === "ore") oreItemsLeft++;
     }
     expect(oreItemsLeft).toBe(0);
+  });
+
+  it("end-to-end: a smelter's bar item routes onward to a forge", () => {
+    const w = generateWorld({ seed: 407, width: 200, height: 500 });
+    const sim = new SimWorld(407, w.grid, w.surfaceY, w.spawn);
+    // Carve a long corridor: dwarf at left, smelter middle, forge right.
+    for (let xx = w.spawn.x; xx <= w.spawn.x + 12; xx++) {
+      sim.grid.setTile(xx, w.spawn.y, TileType.CorridorFloor);
+    }
+    plantWorkshop(sim, "smelter", TileType.SmelterStation, w.spawn.x + 3, w.spawn.y - 1);
+    const forge = plantWorkshop(sim, "forge", TileType.ForgeStation, w.spawn.x + 8, w.spawn.y - 1);
+    forge.id = 8501; // distinct id from the smelter
+    // Plenty of ore to seed the chain — bars come from items only.
+    sim.stockpile.ore = 20;
+    sim.stockpile.bars = 0;
+    sim.stockpile.tools = 0;
+    sim.spawnDwarf({ name: "Smith", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.spawnDwarf({ name: "Hauler", x: w.spawn.x + 1, y: w.spawn.y, age: 30 });
+    for (let i = 0; i < 1500; i++) {
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      }
+      tick(sim);
+    }
+    // The forge should have produced at least one tool (item or counter
+    // or carried), proving the smelter→forge item chain works end-to-end.
+    let toolItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "tools") toolItems++;
+    }
+    let carriedTools = 0;
+    for (const id of sim.dwarf.entities) {
+      if (sim.carrying.get(id)?.kind === "tools") carriedTools++;
+    }
+    expect(sim.stockpile.tools + toolItems + carriedTools).toBeGreaterThan(0);
   });
 
   it("workshops without a routed item still draw from the global stockpile", () => {

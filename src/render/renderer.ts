@@ -120,6 +120,8 @@ export function renderWorld(
       it.kind === "ore" ? "#e0c070" :
       it.kind === "stone" ? "#9a9aa3" :
       it.kind === "gem" ? "#a8d8e0" :
+      it.kind === "bars" ? "#d0a060" :
+      it.kind === "tools" ? "#c0c8d0" :
       "#8a6a4a";
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);

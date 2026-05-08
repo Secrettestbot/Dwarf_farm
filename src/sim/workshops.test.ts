@@ -102,7 +102,18 @@ describe("workshops", () => {
       n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
       tick(sim);
     }
-    expect(sim.stockpile.bars).toBeGreaterThan(0);
+    // Bars now drop as items at the station and only credit the global
+    // counter once a hauler delivers them to a stockpile. Either path
+    // counts as production.
+    let barItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "bars") barItems++;
+    }
+    let carriedBars = 0;
+    for (const id of sim.dwarf.entities) {
+      if (sim.carrying.get(id)?.kind === "bars") carriedBars++;
+    }
+    expect(sim.stockpile.bars + barItems + carriedBars).toBeGreaterThan(0);
     expect(sim.stockpile.ore).toBeLessThan(20);
   });
 

@@ -1159,13 +1159,36 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   const skillLevel = dw?.skills[recipe.skill] ?? 1;
   const scaledTicks = Math.max(8, Math.round(recipe.ticks * Math.max(0.4, 1 - (skillLevel - 1) * 0.04)));
   if (job.progress >= scaledTicks) {
-    sim.stockpile[recipe.outputKind] += recipe.outputQty;
+    // Workshop outputs: if the resource has an ItemKind, drop it at
+    // the station so a hauler routes it onward (smelter feeds forge,
+    // forge stocks the armoury). Otherwise credit the global counter
+    // — food, drink, and other counter-only resources still flow that
+    // way until they earn their own ItemKinds.
+    const outAsItem = outputAsItemKind(recipe.outputKind);
+    if (outAsItem) {
+      for (let i = 0; i < recipe.outputQty; i++) {
+        sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y });
+      }
+    } else {
+      sim.stockpile[recipe.outputKind] += recipe.outputQty;
+    }
     awardSkillXp(sim, e, recipe.skill, 1);
     void blueprintKind;
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
   }
+}
+
+/** Map a recipe's output resource to an ItemKind if one exists, so the
+ * workshop can drop the output as a haulable entity instead of crediting
+ * the global counter. Returns null for resources that stay counter-only
+ * (food, drink, raw stone, ore, dirt — those that aren't workshop
+ * outputs in the current recipe set). */
+function outputAsItemKind(resource: string): import("./ecs/components").ItemKind | null {
+  if (resource === "bars") return "bars";
+  if (resource === "tools") return "tools";
+  return null;
 }
 
 /** Two-phase hauling. progress=0 is the pickup leg: the dwarf has walked
@@ -1226,6 +1249,8 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     else if (carrying.kind === "stone") sim.stockpile.stone++;
     else if (carrying.kind === "dirt") sim.stockpile.dirt++;
     else if (carrying.kind === "gem") sim.stockpile.gems++;
+    else if (carrying.kind === "bars") sim.stockpile.bars++;
+    else if (carrying.kind === "tools") sim.stockpile.tools++;
   }
   sim.carrying.remove(e);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;

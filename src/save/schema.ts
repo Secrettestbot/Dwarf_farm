@@ -55,16 +55,17 @@ export interface SavedDwarf {
   /** Combat HP. Optional for back-compat with v2 saves. */
   health?: { hp: number; maxHp: number; lastAttackTick: number; wasSevereWound?: boolean };
   /** What this dwarf is currently carrying mid-haul, if anything. */
-  carrying?: { kind: "stone" | "ore" | "dirt" | "gem" };
+  carrying?: { kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" };
   /** Squad membership at save time. The draft is re-checked at the next
    * year boundary regardless, but persisting the current state means an
    * in-progress engagement survives a save/load cycle. */
   squad?: { draftedAtTick: number };
 }
 
-/** A loose item on the floor — dropped by mining, picked up by hauling. */
+/** A loose item on the floor — dropped by mining or by a workshop,
+ * picked up by hauling. */
 export interface SavedItem {
-  kind: "stone" | "ore" | "dirt" | "gem";
+  kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools";
   x: number;
   y: number;
 }
