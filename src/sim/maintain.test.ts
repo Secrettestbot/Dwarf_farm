@@ -256,6 +256,53 @@ describe("room maintenance", () => {
     expect(isRoomNeglected(bp, sim.tick)).toBe(false);
   });
 
+  it("dwarves spread across multiple neglected rooms instead of swarming one", () => {
+    // Two dwarves, two neglected rooms. Each should pick a different room so
+    // the colony actually services both — not pile onto the nearest one.
+    const w = generateWorld({ seed: 91, width: 200, height: 500 });
+    const sim = new SimWorld(91, w.grid, w.surfaceY, w.spawn);
+    sim.spawnDwarf({ name: "A", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.spawnDwarf({ name: "B", x: w.spawn.x + 1, y: w.spawn.y, age: 30 });
+    for (const e of sim.dwarf.entities) {
+      const n = sim.needs.get(e)!;
+      n.hunger = 100;
+      n.thirst = 100;
+      n.sleep = 100;
+      n.social = 100;
+    }
+    // Carve a connecting corridor so both bedrooms are reachable from spawn.
+    for (let xx = w.spawn.x; xx <= w.spawn.x + 12; xx++) {
+      sim.grid.setTile(xx, w.spawn.y, TileType.CorridorFloor);
+    }
+    plantBedroom(sim, w.spawn.x + 3, w.spawn.y, 3, 2, -1_000_000);
+    plantBedroom(sim, w.spawn.x + 8, w.spawn.y, 3, 2, -1_000_000);
+    // Re-pin needs and tick once to give jobAssignmentSystem a pass.
+    for (const e of sim.dwarf.entities) {
+      const n = sim.needs.get(e)!;
+      n.hunger = 100;
+      n.thirst = 100;
+      n.sleep = 100;
+      n.social = 100;
+    }
+    tick(sim);
+    const targets = sim.dwarf.entities
+      .map((e) => sim.job.get(e))
+      .filter((j) => j?.kind === "maintain")
+      .map((j) => `${j!.targetX},${j!.targetY}`);
+    expect(targets.length).toBe(2);
+    // Each maintain target lives inside one of the two bedrooms.
+    const inFirst = (x: number) => x >= w.spawn.x + 3 && x < w.spawn.x + 6;
+    const inSecond = (x: number) => x >= w.spawn.x + 8 && x < w.spawn.x + 11;
+    const distinctRooms = new Set(
+      targets.map((t) => {
+        const [xs] = t.split(",");
+        const x = parseInt(xs);
+        return inFirst(x) ? "first" : inSecond(x) ? "second" : "other";
+      }),
+    );
+    expect(distinctRooms.size).toBe(2);
+  });
+
   it("mining is deferred while a maintainable room is neglected", () => {
     // The whole point of the maintenance gate is that a colony can't sprawl
     // while existing rooms rot. Dwarves should pick up the maintain task in
