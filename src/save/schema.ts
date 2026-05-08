@@ -2,6 +2,7 @@
 // player-modified tiles are stored as RLE deltas in `tileOverrides`.
 
 import { SkillLevels } from "../sim/dwarves/skills";
+import { SliderState } from "../sim/sliders";
 
 export type GameMode = "legacy" | "saga";
 
@@ -141,6 +142,9 @@ export interface SaveV1 {
   lastYearAnnounced?: number;
   populationMilestones?: number[];
   hostiles?: SavedHostile[];
+  /** Player priority sliders. Optional for back-compat with v2 saves —
+   * older saves restore to the neutral defaults. */
+  sliders?: SliderState;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

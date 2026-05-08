@@ -152,6 +152,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     lastYearAnnounced: sim.lastYearAnnounced,
     populationMilestones: Array.from(sim.populationMilestones),
     hostiles: collectHostiles(sim),
+    sliders: { ...sim.sliders },
   };
 }
 
@@ -314,6 +315,9 @@ export function restore(save: SaveV1): SimWorld {
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
   if (save.populationMilestones) {
     for (const m of save.populationMilestones) sim.populationMilestones.add(m);
+  }
+  if (save.sliders) {
+    sim.sliders = { ...sim.sliders, ...save.sliders };
   }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them

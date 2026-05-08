@@ -82,10 +82,13 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   }
 
   // 4. Circadian rest — at night, a dwarf with at-least-mildly-low sleep
-  //    heads to bed instead of starting a new mining job.
+  //    heads to bed instead of starting a new mining job. The Rest slider
+  //    raises (or lowers) the threshold: a high-Rest colony goes to bed
+  //    earlier, a low-Rest colony grinds through the night.
   const hour = (sim.tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
   const isNight = hour < NIGHT_END_HOUR || hour >= NIGHT_START_HOUR;
-  if (isNight && needs && needs.sleep <= NIGHT_REST_THRESHOLD) {
+  const restThreshold = NIGHT_REST_THRESHOLD * (sim.sliders.rest * 1.4 + 0.3);
+  if (isNight && needs && needs.sleep <= restThreshold) {
     const sleepSpot = findSleepTarget(sim, pos.x, pos.y);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
@@ -96,8 +99,9 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 5. Tend a farm cell that's getting close to fallow. Higher priority
   //    than mining because a colony with no food loses fast — but lower
-  //    than survival needs above. Children skip it.
-  if (age >= MIN_WORK_AGE) {
+  //    than survival needs above. Children skip it. Gated by the Farming
+  //    & Brewing slider — set to zero, dwarves stop tending.
+  if (age >= MIN_WORK_AGE && sim.sliders.farming > 0.05) {
     const tendTarget = findTendTarget(sim, pos.x, pos.y);
     if (tendTarget) {
       return { kind: "tend" as JobKind, targetX: tendTarget.x, targetY: tendTarget.y, progress: 0 };
@@ -108,24 +112,28 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //    if a bedroom or dining hall has been left to rot, fix it before
   //    starting new excavation. The architect won't emit a fresh room
   //    until the existing ones are kept up, so a colony of 7 can't
-  //    sprawl into a kingdom-sized footprint.
-  if (age >= MIN_WORK_AGE) {
+  //    sprawl into a kingdom-sized footprint. Gated loosely by the
+  //    Construction slider since it's upkeep work.
+  if (age >= MIN_WORK_AGE && sim.sliders.construction > 0.05) {
     const maintainTarget = findMaintainTarget(sim, pos.x, pos.y);
     if (maintainTarget) {
       return { kind: "maintain" as JobKind, targetX: maintainTarget.x, targetY: maintainTarget.y, progress: 0 };
     }
   }
 
-  // 7. Mine inside an active blueprint.
-  if (age >= MIN_WORK_AGE) {
+  // 7. Mine inside an active blueprint. Gated by the Excavation slider —
+  //    set to zero, the colony stops digging entirely.
+  if (age >= MIN_WORK_AGE && sim.sliders.excavation > 0.05) {
     const mineTarget = findMineTarget(sim, pos.x, pos.y);
     if (mineTarget) {
       return { kind: "mine" as JobKind, targetX: mineTarget.x, targetY: mineTarget.y, progress: 0 };
     }
   }
 
-  // 8. Social: find an idle nearby dwarf to talk to.
-  if (needs && needs.social <= SOCIAL_THRESHOLD) {
+  // 8. Social: find an idle nearby dwarf to talk to. Slider scales the
+  //    threshold so a high-Socialising colony chats more eagerly.
+  const socialThreshold = SOCIAL_THRESHOLD * (sim.sliders.socialising * 1.6 + 0.2);
+  if (needs && needs.social <= socialThreshold) {
     const partner = findSocialPartner(sim, e, pos.x, pos.y);
     if (partner !== -1) {
       const partnerPos = sim.position.get(partner)!;
