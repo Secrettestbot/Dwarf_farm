@@ -917,6 +917,29 @@ const INTERRUPT_HUNGER = 25;
  * doesn't wait for the dwarf's bucket to come round. */
 const AI_BUCKET_COUNT = 4;
 
+/** Active-zones radius (GDD §12.3): entities further than this from any
+ * dwarf get their per-tick work skipped. Picked so the largest pursue
+ * range (cave_troll at 16) plus a comfortable margin still falls
+ * inside — a hostile that *could* see a dwarf this tick stays awake.
+ * Far hostiles in unexplored corners of the map idle at zero cost. */
+const ACTIVE_RADIUS = 100;
+const ACTIVE_RADIUS_SQ = ACTIVE_RADIUS * ACTIVE_RADIUS;
+
+/** True if any living dwarf is within ACTIVE_RADIUS of (x, y). Used by
+ * hostile movement and combat to early-skip work for entities outside
+ * the colony's active footprint. Cheap: at-most O(dwarves) but exits on
+ * the first hit, so a hostile near a busy hall returns fast. */
+function isInActiveZone(sim: SimWorld, x: number, y: number): boolean {
+  let active = false;
+  sim.forEachDwarf((_id, p) => {
+    if (active) return;
+    const dx = p.x - x;
+    const dy = p.y - y;
+    if (dx * dx + dy * dy <= ACTIVE_RADIUS_SQ) active = true;
+  });
+  return active;
+}
+
 /** For each idle dwarf, run chooseTask and assign the resulting job + path.
  * Also interrupts in-flight non-survival jobs when a critical need crosses
  * the interrupt threshold so the dwarf can divert to food / drink. */
@@ -1800,6 +1823,11 @@ function hostileMovementSystem(sim: SimWorld): void {
     if (sim.tick - h.lastMoveTick < def.moveCooldown) continue;
     const pos = sim.position.get(e);
     if (!pos) continue;
+    // Active-zones gate (GDD §12.3): if no dwarf is within ACTIVE_RADIUS
+    // of this hostile, skip the per-dwarf nearest-search entirely.
+    // Hostiles in a sealed-off corner of the map don't burn cycles
+    // until a dwarf wanders close.
+    if (!isInActiveZone(sim, pos.x, pos.y)) continue;
     // Find nearest dwarf within pursue range.
     let bestDist = def.pursueRange * def.pursueRange + 1;
     let bestPos: { x: number; y: number } | null = null;
@@ -1843,6 +1871,10 @@ function combatSystem(sim: SimWorld): void {
   for (const h of hEnts) {
     const hPos = sim.position.get(h);
     const hHealth = sim.health.get(h);
+    // Active-zones gate: if no dwarf is anywhere near this hostile,
+    // there can't be an adjacent target for combat. Skip without doing
+    // the per-dwarf adjacency scan.
+    if (hPos && !isInActiveZone(sim, hPos.x, hPos.y)) continue;
     const hostile = sim.hostile.get(h);
     if (!hPos || !hHealth || !hostile) continue;
     const def = HOSTILE_DEFS[hostile.kind];
