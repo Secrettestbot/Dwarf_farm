@@ -60,6 +60,9 @@ export interface SavedDwarf {
    * year boundary regardless, but persisting the current state means an
    * in-progress engagement survives a save/load cycle. */
   squad?: { draftedAtTick: number };
+  /** Personal equipment — a forged weapon. Sticks with the dwarf for
+   * life, so the save flows naturally; no consumption to track. */
+  equipment?: { weapon: boolean };
 }
 
 /** A loose item on the floor — dropped by mining or by a workshop,

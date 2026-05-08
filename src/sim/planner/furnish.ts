@@ -41,11 +41,25 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "library":
       furnishLibrary(grid, b);
       break;
+    case "armoury":
+      furnishArmoury(grid, b);
+      break;
     // Corridors, mines, and stairwells stay bare — they're passages or
     // active workspaces, not rooms. Real ore mines later get an extraction
     // marker; for now leaving them as plain CorridorFloor.
     default:
       break;
+  }
+}
+
+/** Armoury: rack tiles along the back wall, evenly spaced. Visual only —
+ * the draft system equips soldiers from the global tools counter when
+ * this room exists, regardless of which rack tile holds what. */
+function furnishArmoury(grid: TileGrid, b: Blueprint): void {
+  const y = b.originY;
+  for (let dx = 0; dx < b.width; dx += 2) {
+    const x = b.originX + dx;
+    if (cavityContains(b, x, y)) grid.setTile(x, y, TileType.ArmouryRack);
   }
 }
 

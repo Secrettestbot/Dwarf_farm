@@ -62,6 +62,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     const h = sim.health.get(id);
     const carrying = sim.carrying.get(id);
     const squad = sim.squad.get(id);
+    const equipment = sim.equipment.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -94,6 +95,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       pathing: savedPathing,
       carrying: carrying ? { kind: carrying.kind } : undefined,
       squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
+      equipment: equipment ? { weapon: equipment.weapon } : undefined,
     });
   });
 
@@ -300,6 +302,9 @@ export function restore(save: SaveV1): SimWorld {
     }
     if (d.squad) {
       sim.squad.set(e, { draftedAtTick: d.squad.draftedAtTick });
+    }
+    if (d.equipment) {
+      sim.equipment.set(e, { weapon: d.equipment.weapon });
     }
   }
 

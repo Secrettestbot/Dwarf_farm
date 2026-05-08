@@ -83,6 +83,8 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A trade depot is mapped out ${where}. The colony plans for visitors.`;
     case "library":
       return `A library is laid out ${where}. The scholars stir.`;
+    case "armoury":
+      return `An armoury is mapped out ${where}. The smiths sharpen their plans.`;
   }
 }
 
@@ -133,6 +135,8 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The trade depot is finished ${where}. The first caravan will be welcome.`;
     case "library":
       return `The library is opened ${where}. The first books are placed on the desks.`;
+    case "armoury":
+      return `The armoury opens ${where}. The first weapons go on the racks.`;
   }
 }
 

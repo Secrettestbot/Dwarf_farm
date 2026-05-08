@@ -65,6 +65,37 @@ describe("military squads", () => {
     expect(job?.kind).toBe("engage");
   });
 
+  it("the year-end draft equips a recruit from the global tools counter", () => {
+    const w = generateWorld({ seed: 91, width: 200, height: 500 });
+    const sim = new SimWorld(91, w.grid, w.surfaceY, w.spawn);
+    const id = sim.spawnDwarf({ name: "Recruit", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.dwarf.get(id)!.skills.military = 12;
+    sim.stockpile.tools = 5;
+    for (let i = 0; i < TICKS_PER_YEAR + 5; i++) {
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+    }
+    expect(sim.squad.has(id)).toBe(true);
+    expect(sim.equipment.get(id)?.weapon).toBe(true);
+    expect(sim.stockpile.tools).toBe(4);
+  });
+
+  it("a recruit at draft time with no tools available stays unarmed", () => {
+    const w = generateWorld({ seed: 93, width: 200, height: 500 });
+    const sim = new SimWorld(93, w.grid, w.surfaceY, w.spawn);
+    const id = sim.spawnDwarf({ name: "Recruit", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.dwarf.get(id)!.skills.military = 12;
+    sim.stockpile.tools = 0;
+    for (let i = 0; i < TICKS_PER_YEAR + 5; i++) {
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+    }
+    expect(sim.squad.has(id)).toBe(true);
+    expect(sim.equipment.has(id)).toBe(false);
+  });
+
   it("a civilian under Alarm shelters; a soldier under Alarm engages", () => {
     const w = generateWorld({ seed: 89, width: 200, height: 500 });
     const sim = new SimWorld(89, w.grid, w.surfaceY, w.spawn);

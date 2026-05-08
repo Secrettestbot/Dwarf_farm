@@ -362,9 +362,27 @@ function draftSystem(sim: SimWorld): void {
         );
       }
     }
+    // Equip the soldier from the global tools counter if they aren't
+    // already armed. The Armoury room is purely visual at this scale —
+    // the smiths' output goes into sim.stockpile.tools and the draft
+    // pulls one out for each new recruit. A future commit can route a
+    // tool item through the Armoury rack tile in real time.
+    if (!sim.equipment.has(c.id) && sim.stockpile.tools > 0) {
+      sim.stockpile.tools--;
+      sim.equipment.set(c.id, { weapon: true });
+      const dw = sim.dwarf.get(c.id);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} draws a forged tool from the armoury — a weapon now, not a pickaxe.`,
+        );
+      }
+    }
   }
   // Anyone in the squad component but no longer in the keep set is
   // demobilised. Mostly happens when population shrinks past the cap.
+  // Equipment stays with the dwarf — they keep the weapon for life.
   const sEnts = sim.squad.entities.slice();
   for (const id of sEnts) {
     if (!keep.has(id)) {
@@ -538,7 +556,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment]);
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -1790,13 +1808,18 @@ function combatSystem(sim: SimWorld): void {
       dHealth.lastAttackTick = sim.tick;
       // Damage scales modestly with the military skill (no military skill
       // = base damage). Mining skill doesn't help in a fight. Drafted
-      // soldiers carry a flat +5 bonus that civilians caught in combat
-      // don't have — a trained guard outclasses a panicking miner.
+      // soldiers carry a flat +5 bonus, and an equipped soldier adds
+      // another +8 — a trained guard with a forged tool outclasses a
+      // panicking miner two ways over.
       const dwarf = sim.dwarf.get(target);
       const military = dwarf?.skills.military ?? 1;
       const isSoldier = sim.squad.has(target);
+      const equipped = sim.equipment.get(target)?.weapon === true;
       const damage =
-        DWARF_BASE_DAMAGE + Math.floor((military - 1) / 2) + (isSoldier ? 5 : 0);
+        DWARF_BASE_DAMAGE +
+        Math.floor((military - 1) / 2) +
+        (isSoldier ? 5 : 0) +
+        (equipped ? 8 : 0);
       hHealth.hp -= damage;
       if (hHealth.hp <= 0) {
         const dwarfName = dwarf?.name ?? "A dwarf";

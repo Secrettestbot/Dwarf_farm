@@ -102,6 +102,18 @@ export interface Squad {
   draftedAtTick: number;
 }
 
+/** Personal equipment a dwarf carries — a weapon (or, in later sessions,
+ * armour, shields, etc.). Equipped soldiers deal more damage in combat
+ * than unequipped ones; civilians can be equipped too but rarely have
+ * anything worth picking up. The component sticks with the dwarf for
+ * life — demobilising a soldier doesn't take their weapon back. */
+export interface Equipment {
+  /** True when the dwarf carries a real weapon (a forge tool, in
+   * Session 5 terms). Future sessions can add armour, helm, shield,
+   * etc., as additional flags. */
+  weapon: boolean;
+}
+
 export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research";
 
 export interface JobAssignment {

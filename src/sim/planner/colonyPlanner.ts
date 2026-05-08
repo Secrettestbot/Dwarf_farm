@@ -76,6 +76,10 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Library: a quiet 4×3 chamber with two desks. Wider than the
   // workshops so two scholars can fit without colliding.
   library: { w: 4, h: 3, priority: 2 },
+  // Armoury: a 4×3 room with rack tiles along the back wall. Stores
+  // tools the smiths produced; the draft system equips soldiers from
+  // the global tools counter when this room exists.
+  armoury: { w: 4, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -190,6 +194,7 @@ export class ColonyPlanner {
     if (this.needsForge(ctx) && this.placeRoom(ctx, "forge")) return true;
     if (this.needsTradeDepot(ctx) && this.placeRoom(ctx, "trade_depot")) return true;
     if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
+    if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
 
     // 2.9 Stairwell — every few completed rooms the architect drops a
     //     vertical 2×6 shaft so the colony actually descends instead of
@@ -286,6 +291,15 @@ export class ColonyPlanner {
     // research topics.
     if (ctx.population < 5) return false;
     return this.maintainedAndActiveOfKind("library", ctx.tick) === 0;
+  }
+
+  private needsArmoury(ctx: PlannerContext): boolean {
+    // Once the colony has researched Armoury Basics (Tier 2) and is
+    // big enough to need a standing guard, drop an armoury so the
+    // soldiers' tools have somewhere to live. One per fortress.
+    if (ctx.population < 7) return false;
+    if (!(ctx.research?.completed ?? []).includes("armoury_basics")) return false;
+    return this.maintainedAndActiveOfKind("armoury", ctx.tick) === 0;
   }
 
   /**

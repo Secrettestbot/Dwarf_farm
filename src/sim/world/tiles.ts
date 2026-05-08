@@ -62,6 +62,11 @@ export const enum TileType {
   VoidOre = 27,
   /** Soul-crystal — Tier 5 special gem with attunement properties. */
   SoulCrystal = 28,
+  /** Armoury rack — decorative storage spot for weapons in an Armoury
+   * room. Walkable so soldiers can step in to grab a weapon. The
+   * mechanical effect (equipping a soldier) lands on the draft tick;
+   * this tile is the visual signal that a fortress has armed itself. */
+  ArmouryRack = 29,
 }
 
 export interface TileInfo {
@@ -102,6 +107,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Adamantite]: { name: "adamantite", walkable: false, solid: true, color: 0xc8d0ff },
   [TileType.VoidOre]: { name: "void-ore", walkable: false, solid: true, color: 0x402850 },
   [TileType.SoulCrystal]: { name: "soul-crystal", walkable: false, solid: true, color: 0x7090e0 },
+  [TileType.ArmouryRack]: { name: "armoury rack", walkable: true, solid: false, color: 0x8090a8 },
 };
 
 export function tileIsGem(t: number): boolean {

@@ -106,6 +106,12 @@ export class DwarfInspector {
       ? `${ACTIVITY_LABEL[job.kind] ?? job.kind}${path && path.pathIndex < path.path.length - 1 ? " (en route)" : ""}`
       : "idle";
 
+    const isSoldier = sim.squad.has(this.targetId);
+    const equipped = sim.equipment.get(this.targetId)?.weapon === true;
+    const militaryLine = isSoldier
+      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">⚔ Standing guard${equipped ? " · armed" : " · unarmed"}</div>`
+      : "";
+
     const health = sim.health.get(this.targetId);
     const hpHtml = health
       ? `${bar("Health", (health.hp / health.maxHp) * 100, `${health.hp}/${health.maxHp}`)}`
@@ -132,6 +138,7 @@ export class DwarfInspector {
         <button id="inspector-close" class="btn" style="padding:2px 8px;font-size:11px;">×</button>
       </div>
       ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
+      ${militaryLine}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${hpHtml}
       ${needsHtml}
