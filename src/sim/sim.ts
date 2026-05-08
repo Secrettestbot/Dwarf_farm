@@ -1121,15 +1121,36 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     sim.pathing.remove(e);
     return;
   }
-  // Reserve the input on the first tick so a sibling crafter can't drain
-  // the stockpile mid-craft.
+  // Reserve the input on the first tick. Two paths:
+  //  - An item of the recipe's input kind sitting on the station (a
+  //    hauler dropped it there). Consume the item directly — no
+  //    stockpile counter touched. This is the GDD's "items flow into
+  //    the workshop" model for resources that exist as item entities.
+  //  - Otherwise fall back to the global stockpile counter, the
+  //    pre-routing flow that still works for food / drink / bars /
+  //    tools (which don't have ItemKinds yet).
   if (job.progress === 0) {
-    if (sim.stockpile[recipe.inputKind] < recipe.inputQty) {
-      sim.job.remove(e);
-      sim.pathing.remove(e);
-      return;
+    let consumedItem = false;
+    const ents = sim.item.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const ie = ents[i];
+      const it = sim.item.get(ie);
+      const p = sim.position.get(ie);
+      if (!it || !p) continue;
+      if (p.x !== pos.x || p.y !== pos.y) continue;
+      if (it.kind !== recipe.inputKind) continue;
+      sim.destroyItem(ie);
+      consumedItem = true;
+      break;
     }
-    sim.stockpile[recipe.inputKind] -= recipe.inputQty;
+    if (!consumedItem) {
+      if (sim.stockpile[recipe.inputKind] < recipe.inputQty) {
+        sim.job.remove(e);
+        sim.pathing.remove(e);
+        return;
+      }
+      sim.stockpile[recipe.inputKind] -= recipe.inputQty;
+    }
   }
   const dw = sim.dwarf.get(e);
   const traitSpeed = dw ? effectsFor(dw.traitIds).workSpeed : 1;
@@ -1183,10 +1204,29 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.pathing.remove(e);
     return;
   }
-  if (carrying.kind === "ore") sim.stockpile.ore++;
-  else if (carrying.kind === "stone") sim.stockpile.stone++;
-  else if (carrying.kind === "dirt") sim.stockpile.dirt++;
-  else if (carrying.kind === "gem") sim.stockpile.gems++;
+  // Two delivery destinations: a workshop station that wants this
+  // resource (drop the item on the floor for the workshop's craft job
+  // to consume), or a stockpile cell (credit the global counter).
+  const tile = sim.grid.getTile(pos.x, pos.y);
+  let droppedAtWorkshop = false;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const recipe = recipeFor(b.kind);
+    if (!recipe) continue;
+    if (recipe.station !== tile) continue;
+    if (recipe.inputKind !== carrying.kind) continue;
+    if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+    if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
+    droppedAtWorkshop = true;
+    break;
+  }
+  if (!droppedAtWorkshop) {
+    if (carrying.kind === "ore") sim.stockpile.ore++;
+    else if (carrying.kind === "stone") sim.stockpile.stone++;
+    else if (carrying.kind === "dirt") sim.stockpile.dirt++;
+    else if (carrying.kind === "gem") sim.stockpile.gems++;
+  }
   sim.carrying.remove(e);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);

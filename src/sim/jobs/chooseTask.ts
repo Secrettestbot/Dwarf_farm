@@ -156,13 +156,20 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 6.5 Haul a loose item to a stockpile. Sits ahead of new mining so
-  //     finished cavities don't fill with debris while dwarves keep
-  //     opening new tunnels. The dwarf already carrying something jumps
-  //     straight to the delivery half via the early-return below.
+  // 6.5 Haul a loose item to a stockpile or a workshop that wants it.
+  //     Sits ahead of new mining so finished cavities don't fill with
+  //     debris while dwarves keep opening new tunnels. The dwarf
+  //     already carrying something jumps straight to the delivery half
+  //     via the early-return below.
   if (age >= MIN_WORK_AGE && sim.sliders.hauling > 0.05) {
     const carrying = sim.carrying.get(e);
     if (carrying) {
+      // Workshops that consume this resource get priority — feeding a
+      // smelter directly is the colony's reason for hauling ore.
+      const workshop = findWorkshopWantingInput(sim, carrying.kind, pos.x, pos.y);
+      if (workshop) {
+        return { kind: "haul" as JobKind, targetX: workshop.x, targetY: workshop.y, progress: 1 };
+      }
       const drop = findStockpileDrop(sim, pos.x, pos.y);
       if (drop) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
@@ -403,6 +410,11 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     const p = sim.position.get(ents[i]);
     if (!it || !p) continue;
     if (it.claimedBy !== -1 && sim.ecs.isAlive(it.claimedBy)) continue;
+    // Skip items already sitting on a workshop station that wants
+    // them — those are "delivered", waiting for the crafter to consume.
+    // Without this, a hauler picks up the item it just dropped at the
+    // smelter and the production chain loops forever.
+    if (isItemAtWorkshopDestination(sim, p.x, p.y, it.kind)) continue;
     const dx = p.x - sx;
     const dy = p.y - sy;
     const d = dx * dx + dy * dy;
@@ -417,6 +429,79 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
   }
   if (bestEnt !== -1) {
     sim.item.get(bestEnt)!.claimedBy = hauler;
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** True if (x, y) is a workshop station whose recipe consumes this
+ * resource. Used to mark items as "delivered" — they're not available
+ * for re-pickup. */
+function isItemAtWorkshopDestination(sim: SimWorld, x: number, y: number, kind: string): boolean {
+  const tile = sim.grid.getTile(x, y);
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const recipe = recipeFor(b.kind);
+    if (!recipe) continue;
+    if (recipe.station !== tile) continue;
+    if (recipe.inputKind !== kind) continue;
+    if (x < b.originX || x >= b.originX + b.width) continue;
+    if (y < b.originY || y >= b.originY + b.height) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Find a workshop that wants this resource as its recipe input and
+ * doesn't already have a matching item sitting on its station. Returns
+ * the station tile so the dwarf walks onto it and drops the item. The
+ * workshop's progress system then consumes the item the next tick.
+ *
+ * Only resources that exist as ItemKind values can be routed this way
+ * — food / drink / bars / tools stay in the global stockpile flow
+ * until they get item kinds of their own.
+ */
+function findWorkshopWantingInput(
+  sim: SimWorld,
+  kind: string,
+  sx: number,
+  sy: number,
+): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const recipe = recipeFor(b.kind);
+    if (!recipe || recipe.inputKind !== kind) continue;
+    // Workshop's centre is the workstation — find it.
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== recipe.station) continue;
+      // Skip if a matching item is already on this tile — no point
+      // stacking two delivery jobs at one station.
+      let alreadyStocked = false;
+      const ents = sim.item.entities;
+      for (let j = 0; j < ents.length; j++) {
+        const it = sim.item.get(ents[j]);
+        const p = sim.position.get(ents[j]);
+        if (!it || !p) continue;
+        if (p.x === x && p.y === y && it.kind === kind) {
+          alreadyStocked = true;
+          break;
+        }
+      }
+      if (alreadyStocked) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
   }
   return best ? { x: best.x, y: best.y } : null;
 }
@@ -516,23 +601,48 @@ function findCraftTarget(sim: SimWorld, sx: number, sy: number): { x: number; y:
     if (b.status !== "complete") continue;
     const recipe = recipeFor(b.kind);
     if (!recipe) continue;
-    const have = sim.stockpile[recipe.inputKind];
-    if (have < recipe.inputQty) continue;
+    // Two ways the workshop's input can be available:
+    //  - Global stockpile has enough of the input kind (the
+    //    pre-routing fallback, still valid for food / drink / bars /
+    //    tools that don't have ItemKinds).
+    //  - A matching item is sitting on the station (a hauler
+    //    delivered it).
+    const stationCells: Array<{ x: number; y: number }> = [];
     for (let i = 0; i < b.cavity.length; i++) {
       const c = b.cavity[i];
       const x = c & 0xffff;
       const y = (c >>> 16) & 0xffff;
-      if (sim.grid.getTile(x, y) !== recipe.station) continue;
-      if (claimed.has((y << 16) | x)) continue;
-      const dx = x - sx;
-      const dy = y - sy;
+      if (sim.grid.getTile(x, y) === recipe.station) stationCells.push({ x, y });
+    }
+    if (stationCells.length === 0) continue;
+    const stockpileHasInput = sim.stockpile[recipe.inputKind] >= recipe.inputQty;
+    let routedItemPresent = false;
+    if (!stockpileHasInput) {
+      const ents = sim.item.entities;
+      outer: for (const s of stationCells) {
+        for (let i = 0; i < ents.length; i++) {
+          const it = sim.item.get(ents[i]);
+          const p = sim.position.get(ents[i]);
+          if (!it || !p) continue;
+          if (p.x === s.x && p.y === s.y && it.kind === recipe.inputKind) {
+            routedItemPresent = true;
+            break outer;
+          }
+        }
+      }
+    }
+    if (!stockpileHasInput && !routedItemPresent) continue;
+    for (const s of stationCells) {
+      if (claimed.has((s.y << 16) | s.x)) continue;
+      const dx = s.x - sx;
+      const dy = s.y - sy;
       const d = dx * dx + dy * dy;
       if (
         !best ||
         d < best.d ||
-        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+        (d === best.d && (s.y < best.y || (s.y === best.y && s.x < best.x)))
       ) {
-        best = { x, y, d };
+        best = { x: s.x, y: s.y, d };
       }
     }
   }
