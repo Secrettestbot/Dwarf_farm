@@ -64,6 +64,37 @@ export function tick(sim: SimWorld): void {
   combatSystem(sim);
   healingSystem(sim);
   farmSystem(sim);
+  visibilitySystem(sim);
+}
+
+// ---- Visibility / fog of war ------------------------------------------
+//
+// Each dwarf reveals a square of tiles around them every tick. Reveal is
+// monotonic (once seen, always seen) — caves you've been in stay drawn
+// after you leave. Solid rock the dwarves haven't reached stays opaque
+// black so the cross-section feels like a discovery view.
+
+const VISIBILITY_RADIUS = 5;
+
+function visibilitySystem(sim: SimWorld): void {
+  const grid = sim.grid;
+  const dwarves = sim.dwarf.entities;
+  for (let i = 0; i < dwarves.length; i++) {
+    const pos = sim.position.get(dwarves[i]);
+    if (!pos) continue;
+    const r = VISIBILITY_RADIUS;
+    const x0 = Math.max(0, pos.x - r);
+    const y0 = Math.max(0, pos.y - r);
+    const x1 = Math.min(grid.width - 1, pos.x + r);
+    const y1 = Math.min(grid.height - 1, pos.y + r);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - pos.x;
+        const dy = y - pos.y;
+        if (dx * dx + dy * dy <= r * r) grid.markSeen(x, y);
+      }
+    }
+  }
 }
 
 // ---- Farms -------------------------------------------------------------

@@ -131,6 +131,9 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
       age: f.age,
     });
   }
+  // Reveal the founders' immediate surroundings before the first frame so
+  // the New Game screen doesn't open onto an all-black mountain.
+  sim.revealAroundDwarves();
 }
 
 async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {

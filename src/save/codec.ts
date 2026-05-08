@@ -72,6 +72,75 @@ export interface DecodedOverrides {
   apply(grid: TileGrid): void;
 }
 
+/** Encode the fog-of-war seen mask as runs of 1s (most cells in an early
+ * fortress are 0s, so this stays tiny). Format mirrors encodeOverrides
+ * minus the type byte:
+ *   4 bytes  width
+ *   4 bytes  height
+ *   4 bytes  run count N
+ *   for each run: 4 bytes idx, 4 bytes length
+ */
+export function encodeSeen(grid: TileGrid): Uint8Array {
+  const w = grid.width;
+  const h = grid.height;
+  type Run = { idx: number; len: number };
+  const runs: Run[] = [];
+  let cur: Run | null = null;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (grid.isSeen(x, y)) {
+        if (cur && cur.idx + cur.len === y * w + x) {
+          cur.len++;
+        } else {
+          if (cur) runs.push(cur);
+          cur = { idx: y * w + x, len: 1 };
+        }
+      } else if (cur) {
+        runs.push(cur);
+        cur = null;
+      }
+    }
+    if (cur) {
+      runs.push(cur);
+      cur = null;
+    }
+  }
+  if (cur) runs.push(cur);
+
+  const out = new Uint8Array(4 + 4 + 4 + runs.length * 8);
+  const dv = new DataView(out.buffer);
+  let p = 0;
+  dv.setUint32(p, w, true); p += 4;
+  dv.setUint32(p, h, true); p += 4;
+  dv.setUint32(p, runs.length, true); p += 4;
+  for (const r of runs) {
+    dv.setUint32(p, r.idx, true); p += 4;
+    dv.setUint32(p, r.len, true); p += 4;
+  }
+  return out;
+}
+
+export function decodeSeen(bytes: Uint8Array, grid: TileGrid): void {
+  if (bytes.byteLength === 0) return;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let p = 0;
+  const w = dv.getUint32(p, true); p += 4;
+  void w;
+  const h = dv.getUint32(p, true); p += 4;
+  void h;
+  const n = dv.getUint32(p, true); p += 4;
+  for (let i = 0; i < n; i++) {
+    const idx = dv.getUint32(p, true); p += 4;
+    const len = dv.getUint32(p, true); p += 4;
+    for (let k = 0; k < len; k++) {
+      const id = idx + k;
+      const x = id % grid.width;
+      const y = (id / grid.width) | 0;
+      grid.markSeen(x, y);
+    }
+  }
+}
+
 export function decodeOverrides(bytes: Uint8Array): DecodedOverrides {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let p = 0;

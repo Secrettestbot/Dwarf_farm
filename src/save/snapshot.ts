@@ -1,7 +1,7 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
 import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, GameMode } from "./schema";
-import { decodeOverrides, encodeOverrides } from "./codec";
+import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
 // Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
@@ -131,6 +131,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       planner: input.sim.plannerRng.serialize(),
     },
     tileOverrides: overrides,
+    seenMask: encodeSeen(input.sim.grid),
     dwarves,
     blueprints,
     plannerNextId: planner.nextId,
@@ -180,6 +181,15 @@ export function restore(save: SaveV1): SimWorld {
   const w = generateWorld({ seed: save.seed, width: save.width, height: save.height });
   const decoded = decodeOverrides(save.tileOverrides);
   decoded.apply(w.grid);
+  if (save.seenMask) {
+    decodeSeen(save.seenMask, w.grid);
+  } else {
+    // v2 saves had no fog of war; treat the whole map as already explored
+    // so reloading a pre-fog save doesn't black out the player's fortress.
+    for (let y = 0; y < w.grid.height; y++) {
+      for (let x = 0; x < w.grid.width; x++) w.grid.markSeen(x, y);
+    }
+  }
 
   const sim = new SimWorld(save.seed, w.grid, w.surfaceY, w.spawn);
   sim.tick = save.tick;

@@ -6,11 +6,16 @@ export class Chunk {
   readonly tiles: Uint8Array;
   // Designation flags per-tile. Bit 0 = inside a Dig Zone.
   readonly designation: Uint8Array;
+  /** Fog-of-war: 0 = never seen, 1 = seen by a dwarf. Once flipped to 1
+   * stays at 1 (revealed terrain doesn't re-fog). The renderer reads this
+   * and draws unseen tiles as opaque dark blocks. */
+  readonly seen: Uint8Array;
   dirty = true;
 
   constructor() {
     this.tiles = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
     this.designation = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
+    this.seen = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
   }
 }
 
@@ -72,6 +77,21 @@ export class TileGrid {
   isSolid(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     return tileSolid(this.getTile(x, y));
+  }
+
+  isSeen(x: number, y: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    return this.chunkAt(x, y).seen[this.localIndex(x, y)] !== 0;
+  }
+
+  markSeen(x: number, y: number): void {
+    if (!this.inBounds(x, y)) return;
+    const c = this.chunkAt(x, y);
+    const idx = this.localIndex(x, y);
+    if (c.seen[idx] === 0) {
+      c.seen[idx] = 1;
+      c.dirty = true;
+    }
   }
 
   getDesignation(x: number, y: number): number {

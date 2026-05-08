@@ -118,6 +118,9 @@ export interface SaveV1 {
 
   // RLE delta from worldgen output.
   tileOverrides: Uint8Array;
+  /** Fog-of-war seen mask, RLE-encoded runs of 1s. Optional for back-compat
+   * with v2 saves — older saves treat all in-bounds tiles as seen. */
+  seenMask?: Uint8Array;
 
   // Full dwarf list with traits, skills, profession, age.
   dwarves: SavedDwarf[];

@@ -44,11 +44,20 @@ export function renderWorld(
   for (let y = Math.max(0, y0); y < Math.min(grid.height, y1); y++) {
     const layer = layerOf(y, surfaceRefY);
     for (let x = Math.max(0, x0); x < Math.min(grid.width, x1); x++) {
+      const sx = (x - camera.x) * pt + viewW / 2;
+      const sy = (y - camera.y) * pt + viewH / 2;
+      // Fog of war: the dwarves haven't seen this tile yet — draw a flat
+      // black square so the unmined mountain is opaque, in keeping with
+      // the GDD's "the player never knows exactly what lies ahead until
+      // the stone is broken" rule.
+      if (!grid.isSeen(x, y)) {
+        ctx.fillStyle = "#050507";
+        ctx.fillRect(sx, sy, pt, pt);
+        continue;
+      }
       const t = grid.getTile(x, y);
       if (t === TileType.Air) continue;
       const sprite = getTileSpriteAtLayer(t as TileType, layer);
-      const sx = (x - camera.x) * pt + viewW / 2;
-      const sy = (y - camera.y) * pt + viewH / 2;
       ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
     }
   }

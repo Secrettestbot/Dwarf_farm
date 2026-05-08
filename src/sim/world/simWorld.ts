@@ -177,6 +177,28 @@ export class SimWorld {
     return null;
   }
 
+  /** Reveal the fog-of-war mask around every living dwarf. Used at game
+   * start so the spawn cavern is visible before the first tick fires. */
+  revealAroundDwarves(radius = 5): void {
+    const grid = this.grid;
+    const ents = this.dwarf.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const p = this.position.get(ents[i]);
+      if (!p) continue;
+      const x0 = Math.max(0, p.x - radius);
+      const y0 = Math.max(0, p.y - radius);
+      const x1 = Math.min(grid.width - 1, p.x + radius);
+      const y1 = Math.min(grid.height - 1, p.y + radius);
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const dx = x - p.x;
+          const dy = y - p.y;
+          if (dx * dx + dy * dy <= radius * radius) grid.markSeen(x, y);
+        }
+      }
+    }
+  }
+
   /** Compute a dwarf's current age in in-game years. */
   ageOf(e: EntityId): number {
     const dw = this.dwarf.get(e);

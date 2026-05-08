@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { generateWorld } from "../sim/world/worldgen";
 import { TileType } from "../sim/world/tiles";
-import { encodeOverrides, decodeOverrides } from "./codec";
+import { encodeOverrides, decodeOverrides, encodeSeen, decodeSeen } from "./codec";
 
 describe("save codec", () => {
   it("round-trips with no changes producing a tiny payload", () => {
@@ -29,6 +29,28 @@ describe("save codec", () => {
     for (let i = 0; i < 50; i++) {
       expect(restored.grid.getTile(50 + i, 100)).toBe(TileType.CorridorFloor);
     }
+  });
+
+  it("seen-mask round-trips through encode/decode", () => {
+    const a = generateWorld({ seed: 9, width: 200, height: 500 });
+    // Mark a small explored island.
+    for (let y = 40; y < 50; y++) {
+      for (let x = 60; x < 80; x++) a.grid.markSeen(x, y);
+    }
+    const bytes = encodeSeen(a.grid);
+    expect(bytes.length).toBeLessThan(200);
+    const b = generateWorld({ seed: 9, width: 200, height: 500 });
+    decodeSeen(bytes, b.grid);
+    let seenCount = 0;
+    for (let y = 40; y < 50; y++) {
+      for (let x = 60; x < 80; x++) {
+        if (b.grid.isSeen(x, y)) seenCount++;
+      }
+    }
+    expect(seenCount).toBe(10 * 20);
+    // Outside the explored island stays unseen.
+    expect(b.grid.isSeen(0, 0)).toBe(false);
+    expect(b.grid.isSeen(150, 250)).toBe(false);
   });
 
   it("delta is small even after substantial mining", () => {
