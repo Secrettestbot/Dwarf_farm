@@ -163,6 +163,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
     populationMilestones: Array.from(sim.populationMilestones),
+    narrativeMilestones: Array.from(sim.narrativeMilestones),
     hostiles: collectHostiles(sim),
     sliders: { ...sim.sliders },
     emergency: { ...sim.emergency },
@@ -363,6 +364,9 @@ export function restore(save: SaveV1): SimWorld {
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
   if (save.populationMilestones) {
     for (const m of save.populationMilestones) sim.populationMilestones.add(m);
+  }
+  if (save.narrativeMilestones) {
+    for (const m of save.narrativeMilestones) sim.narrativeMilestones.add(m);
   }
   if (save.sliders) {
     sim.sliders = { ...sim.sliders, ...save.sliders };

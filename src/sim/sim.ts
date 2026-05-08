@@ -74,6 +74,7 @@ export function tick(sim: SimWorld): void {
   farmSystem(sim);
   tradeSystem(sim);
   hollowKingSystem(sim);
+  depthMilestoneSystem(sim);
   visibilitySystem(sim);
 }
 
@@ -114,6 +115,11 @@ function hollowKingSystem(sim: SimWorld): void {
         sim.tick,
         "crisis",
         "Something deep beneath the stone has noticed the colony. The dwarves at the deepest face go quiet for a long minute.",
+      );
+      fireMilestone(
+        sim,
+        "voice_in_the_stone",
+        "Voice in the Stone. The Hollow King is awake to the colony's presence.",
       );
     }
     return;
@@ -421,6 +427,44 @@ function emergencySystem(sim: SimWorld): void {
     e.mode = "none";
     e.alarmCooldownUntil = sim.tick + ALARM_COOLDOWN_TICKS;
     sim.events.add(sim.tick, "crisis", "The alarm has been lifted. The fortress returns to its work.");
+  }
+}
+
+// ---- Narrative milestones (GDD §10.2) ---------------------------------
+//
+// One-shot announcements that mark a fortress's history: the first
+// hearth lit, the first bar smelted, the first diamond struck, the
+// first time a dwarf stands in the Gem Seam or the Ancient Dark. Each
+// is gated by a string id stored in sim.narrativeMilestones so reloads
+// don't replay them.
+
+function fireMilestone(sim: SimWorld, id: string, text: string): void {
+  if (sim.narrativeMilestones.has(id)) return;
+  sim.narrativeMilestones.add(id);
+  sim.events.add(sim.tick, "milestone", text);
+}
+
+/** Watch the deepest dwarf and fire layer-crossing milestones the
+ * first time the colony's deepest reach lands in each layer band. */
+function depthMilestoneSystem(sim: SimWorld): void {
+  let deepest = sim.spawn.y;
+  sim.forEachDwarf((_id, p) => {
+    if (p.y > deepest) deepest = p.y;
+  });
+  const depth = deepest - sim.spawn.y;
+  if (depth >= 700) {
+    fireMilestone(
+      sim,
+      "the_gem_seam",
+      "The Gem Seam. The colony has reached the gem seam — the deepest face glints unfamiliar colours.",
+    );
+  }
+  if (depth >= 1200) {
+    fireMilestone(
+      sim,
+      "the_ancient_dark",
+      "The Ancient Dark. The dwarves stand in the layer the old songs warned them about.",
+    );
   }
 }
 
@@ -1271,7 +1315,23 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       sim.stockpile[recipe.outputKind] += recipe.outputQty;
     }
     awardSkillXp(sim, e, recipe.skill, 1);
-    void blueprintKind;
+    // Workshop-firsts as named GDD milestones — Iron Mountain (first
+    // bar smelted) and the parallel "first hearth lit" beat for the
+    // kitchen.
+    if (blueprintKind === "smelter" && recipe.outputKind === "bars") {
+      fireMilestone(
+        sim,
+        "iron_mountain",
+        "Iron Mountain. The first bar of metal is drawn from the smelter.",
+      );
+    }
+    if (blueprintKind === "kitchen" && recipe.outputKind === "meals") {
+      fireMilestone(
+        sim,
+        "the_first_hearth",
+        "The First Hearth. The kitchen has cooked its first meal.",
+      );
+    }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -1443,6 +1503,13 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         "discovery",
         `${dw.name} strikes a ${gemName} cluster, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
       );
+      if (tileType === TileType.RawDiamond) {
+        fireMilestone(
+          sim,
+          "the_first_diamond",
+          `The First Diamond. ${dw.name} has cut a diamond from the rock.`,
+        );
+      }
     } else if (tileType === TileType.Adamantite || tileType === TileType.VoidOre) {
       // Treated as ore for now — Tier 5 Adamantite Smelting and Tier 6
       // Void Metallurgy split these out into their own counters when

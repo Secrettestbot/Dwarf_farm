@@ -175,6 +175,12 @@ export interface SaveV1 {
   items?: SavedItem[];
   /** Research progress. Optional for back-compat with v2 saves. */
   research?: { current: string | null; progress: number; completed: string[] };
+  /** GDD §10.2 narrative milestones already announced (e.g. "The First
+   * Hearth", "Iron Mountain"). Optional for back-compat — older saves
+   * lose the bookkeeping but the milestones don't re-fire because the
+   * triggering events (first kitchen output, etc.) have already
+   * happened in the saved state. */
+  narrativeMilestones?: string[];
   /** Whether the Hollow King has noticed the colony yet. Optional for
    * back-compat — older saves treat the King as dormant. */
   hollowKingAware?: boolean;

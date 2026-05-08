@@ -113,6 +113,11 @@ export class SimWorld {
   /** Population thresholds that have already been announced as milestones. */
   populationMilestones: Set<number> = new Set();
 
+  /** GDD §10.2 named milestones already announced — "The First Hearth",
+   * "Iron Mountain", "The First Diamond", etc. Each is one-shot per
+   * fortress. Round-trips through save so a reload doesn't replay them. */
+  narrativeMilestones: Set<string> = new Set();
+
   /** Player-tweakable priority sliders (GDD §4.1). Mutated directly by the
    * UI; read by chooseTask each tick. Round-trips through save. */
   sliders: SliderState = defaultSliders();
