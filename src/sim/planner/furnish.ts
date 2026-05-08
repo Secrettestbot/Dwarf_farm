@@ -34,8 +34,10 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
   }
 }
 
-/** Farm: every cavity cell becomes a FarmTile. The farm production
- * system runs over these to deliver food to the stockpile. */
+/** Farm: every cavity cell becomes a FarmTile. Initialise the
+ * cell-tended-at array so the farm starts fresh — every cell counts as
+ * just-tended when the dwarves first plant it; they'll need to come
+ * back inside TEND_VALIDITY ticks to keep it productive. */
 function furnishFarm(grid: TileGrid, b: Blueprint): void {
   for (let i = 0; i < b.cavity.length; i++) {
     const c = b.cavity[i];
@@ -43,6 +45,10 @@ function furnishFarm(grid: TileGrid, b: Blueprint): void {
     const y = (c >>> 16) & 0xffff;
     grid.setTile(x, y, TileType.FarmTile);
   }
+  // Lazily initialise; farms set cellTendedAt to a fresh array. The
+  // planner doesn't know the current tick, so the farmSystem fills in
+  // the actual planted-at tick on its first run over the farm.
+  b.cellTendedAt = new Int32Array(b.cavity.length).fill(-1);
 }
 
 /** Bedroom: one bed, tucked into the upper-left corner of the cavity. */

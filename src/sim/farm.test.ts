@@ -82,22 +82,26 @@ describe("farms", () => {
       const c = cavity[k];
       sim.grid.setTile(c & 0xffff, (c >>> 16) & 0xffff, TileType.FarmTile);
     }
-    sim.planner.blueprints.push({
+    const farm = {
       id: 9999,
-      kind: "farm",
+      kind: "farm" as const,
       originX: w.spawn.x + 1,
       originY: w.spawn.y + 1,
       width: 3,
       height: 1,
       cavity,
-      status: "complete",
+      status: "complete" as const,
       priority: 1,
       createdTick: 0,
-    });
-    // Run ~1 in-game day worth of ticks. With FARM_YIELD_CHANCE=0.18 per
-    // FarmTile per in-game hour and 3 cells, expected yield ≈ 0.18 × 3 ×
-    // 24 ≈ 13 food per day.
-    for (let i = 0; i < 1500; i++) tick(sim);
+      // Tended cells produce food; pin them as just-tended every tick so
+      // we're testing yield, not the tending rhythm.
+      cellTendedAt: new Int32Array(cavity.length),
+    };
+    sim.planner.blueprints.push(farm);
+    for (let i = 0; i < 1500; i++) {
+      farm.cellTendedAt.fill(sim.tick);
+      tick(sim);
+    }
     expect(sim.stockpile.food).toBeGreaterThan(0);
   });
 });

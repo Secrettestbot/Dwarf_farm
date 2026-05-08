@@ -46,6 +46,11 @@ export interface Blueprint {
   priority: number;
   // Tick at which this blueprint was emitted (for narrative / event log later).
   createdTick: number;
+  /** For farms: tick at which each cavity cell was last tended by a dwarf.
+   * Parallel to `cavity` so cavity[i] ↔ cellTendedAt[i]. The farm system
+   * only yields food on cells tended within TEND_VALIDITY ticks; untended
+   * cells go fallow and produce nothing. Undefined for non-farm kinds. */
+  cellTendedAt?: Int32Array;
 }
 
 export function packCell(x: number, y: number): number {
