@@ -71,6 +71,14 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       ]);
     case "stairwell":
       return `A stairwell is laid out, descending into the rock.`;
+    case "kitchen":
+      return `The colony marks out a new kitchen ${where}.`;
+    case "brewery":
+      return `A brewery is laid out ${where}. The dwarves are pleased.`;
+    case "smelter":
+      return `A smelter is planned ${where}. Smoke will follow.`;
+    case "forge":
+      return `A forge is sketched in the stone ${where}.`;
   }
 }
 
@@ -109,6 +117,14 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       ]);
     case "stairwell":
       return `The stairwell is finished. The colony reaches further into the mountain.`;
+    case "kitchen":
+      return `The kitchen is complete ${where}. The cooks light their first fire.`;
+    case "brewery":
+      return `The brewery stands ready ${where}. Barrels are rolled into place.`;
+    case "smelter":
+      return `The smelter is fired ${where}. The first bars are cast.`;
+    case "forge":
+      return `The forge rings to life ${where}. The first tool is hammered out.`;
   }
 }
 

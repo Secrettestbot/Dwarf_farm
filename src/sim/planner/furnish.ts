@@ -26,11 +26,33 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "farm":
       furnishFarm(grid, b);
       break;
+    case "kitchen":
+      furnishWorkshop(grid, b, TileType.KitchenStation);
+      break;
+    case "brewery":
+      furnishWorkshop(grid, b, TileType.BreweryStation);
+      break;
+    case "smelter":
+      furnishWorkshop(grid, b, TileType.SmelterStation);
+      break;
+    case "forge":
+      furnishWorkshop(grid, b, TileType.ForgeStation);
+      break;
     // Corridors, mines, and stairwells stay bare — they're passages or
     // active workspaces, not rooms. Real ore mines later get an extraction
     // marker; for now leaving them as plain CorridorFloor.
     default:
       break;
+  }
+}
+
+/** Workshops drop a single workstation tile in the centre of their cavity.
+ * The crafter dwarf stands on it for the duration of a recipe. */
+function furnishWorkshop(grid: TileGrid, b: Blueprint, station: TileType): void {
+  const cx = b.originX + Math.floor(b.width / 2);
+  const cy = b.originY + Math.floor(b.height / 2);
+  if (cavityContains(b, cx, cy)) {
+    grid.setTile(cx, cy, station);
   }
 }
 

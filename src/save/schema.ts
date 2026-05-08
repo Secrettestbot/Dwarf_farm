@@ -36,7 +36,7 @@ export interface SavedDwarf {
   };
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft";
     targetX: number;
     targetY: number;
     progress: number;
@@ -107,6 +107,8 @@ export interface SavedStockpile {
   dirt: number;
   food?: number;
   drink?: number;
+  bars?: number;
+  tools?: number;
 }
 
 export interface SaveV1 {

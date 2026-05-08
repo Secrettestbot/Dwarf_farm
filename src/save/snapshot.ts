@@ -149,6 +149,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       dirt: sim.stockpile.dirt,
       food: sim.stockpile.food,
       drink: sim.stockpile.drink,
+      bars: sim.stockpile.bars,
+      tools: sim.stockpile.tools,
     },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
@@ -330,6 +332,8 @@ export function restore(save: SaveV1): SimWorld {
     sim.stockpile.dirt = save.stockpile.dirt;
     if (save.stockpile.food !== undefined) sim.stockpile.food = save.stockpile.food;
     if (save.stockpile.drink !== undefined) sim.stockpile.drink = save.stockpile.drink;
+    if (save.stockpile.bars !== undefined) sim.stockpile.bars = save.stockpile.bars;
+    if (save.stockpile.tools !== undefined) sim.stockpile.tools = save.stockpile.tools;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;

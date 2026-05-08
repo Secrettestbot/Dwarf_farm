@@ -58,6 +58,13 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   mine: { w: 2, h: 2, priority: 2 },
   farm: { w: 4, h: 3, priority: 2 },
   stairwell: { w: 2, h: 6, priority: 5 },
+  // Workshops: a small chamber with the workstation in its centre. Big
+  // enough that a hauler can squeeze past the crafter, small enough not
+  // to bloat the architect's footprint when several workshops drop in.
+  kitchen: { w: 3, h: 3, priority: 2 },
+  brewery: { w: 3, h: 3, priority: 2 },
+  smelter: { w: 3, h: 3, priority: 2 },
+  forge: { w: 3, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -162,6 +169,15 @@ export class ColonyPlanner {
     //     so a growing colony stays self-sufficient.
     if (this.needsFarm(ctx) && this.placeRoom(ctx, "farm")) return true;
 
+    // 2.7 Workshops — kitchen, brewery, smelter, forge. Each lands once
+    //     the colony is large enough to use it. Kitchen + brewery come
+    //     first (food / drink loops directly impact survival); smelter
+    //     and forge follow as the colony's mining output grows.
+    if (this.needsKitchen(ctx) && this.placeRoom(ctx, "kitchen")) return true;
+    if (this.needsBrewery(ctx) && this.placeRoom(ctx, "brewery")) return true;
+    if (this.needsSmelter(ctx) && this.placeRoom(ctx, "smelter")) return true;
+    if (this.needsForge(ctx) && this.placeRoom(ctx, "forge")) return true;
+
     // 3. Periodic corridor — every two completed rooms the colony wants
     //    another corridor segment so its reach keeps growing. This is what
     //    turns "a cluster of rooms around spawn" into "a network of tunnels".
@@ -205,6 +221,30 @@ export class ColonyPlanner {
     // emits another one — capping the colony's footprint at what its
     // dwarves can actually keep up with.
     return this.maintainedAndActiveOfKind("bedroom", ctx.tick) < target;
+  }
+
+  private needsKitchen(ctx: PlannerContext): boolean {
+    if (ctx.population < 5) return false;
+    return this.maintainedAndActiveOfKind("kitchen", ctx.tick) === 0;
+  }
+
+  private needsBrewery(ctx: PlannerContext): boolean {
+    if (ctx.population < 5) return false;
+    return this.maintainedAndActiveOfKind("brewery", ctx.tick) === 0;
+  }
+
+  private needsSmelter(ctx: PlannerContext): boolean {
+    // The smelter only matters once there's actually ore to smelt and a
+    // population large enough to spare a dedicated smith.
+    if (ctx.population < 8) return false;
+    return this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0;
+  }
+
+  private needsForge(ctx: PlannerContext): boolean {
+    // The forge needs the smelter to feed it; gate one tier above.
+    if (ctx.population < 10) return false;
+    if (this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0) return false;
+    return this.maintainedAndActiveOfKind("forge", ctx.tick) === 0;
   }
 
   /**

@@ -83,7 +83,7 @@ export interface Carrying {
   kind: ItemKind;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul";
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft";
 
 export interface JobAssignment {
   kind: JobKind;

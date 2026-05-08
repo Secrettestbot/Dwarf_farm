@@ -12,6 +12,10 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   mine: { fill: "rgba(220, 130, 60, 0.14)", stroke: "rgba(240, 150, 70, 0.7)" },
   farm: { fill: "rgba(140, 200, 90, 0.12)", stroke: "rgba(160, 220, 110, 0.65)" },
   stairwell: { fill: "rgba(230, 130, 200, 0.10)", stroke: "rgba(230, 130, 200, 0.55)" },
+  kitchen: { fill: "rgba(220, 110, 80, 0.12)", stroke: "rgba(230, 130, 90, 0.65)" },
+  brewery: { fill: "rgba(120, 180, 90, 0.12)", stroke: "rgba(140, 200, 110, 0.65)" },
+  smelter: { fill: "rgba(190, 90, 60, 0.14)", stroke: "rgba(220, 110, 70, 0.7)" },
+  forge: { fill: "rgba(220, 140, 80, 0.14)", stroke: "rgba(240, 160, 100, 0.7)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -19,6 +23,11 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   sleep: { glyph: "z", color: "#8aa9ff" },
   socialise: { glyph: "♥", color: "#ff9aa2" },
   wander: { glyph: ".", color: "#999" },
+  haul: { glyph: "↕", color: "#9ad3a3" },
+  craft: { glyph: "✦", color: "#e0a070" },
+  tend: { glyph: "✿", color: "#7aa040" },
+  maintain: { glyph: "•", color: "#aaa" },
+  shelter: { glyph: "!", color: "#e07050" },
 };
 
 export function renderWorld(
@@ -158,5 +167,9 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "mine": return "mine";
     case "farm": return "farm";
     case "stairwell": return "stair";
+    case "kitchen": return "kitchen";
+    case "brewery": return "brewery";
+    case "smelter": return "smelter";
+    case "forge": return "forge";
   }
 }

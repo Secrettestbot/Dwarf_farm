@@ -27,6 +27,12 @@ export interface Stockpile {
   food: number;
   /** Drink units (water, ale). Same model as food. */
   drink: number;
+  /** Smelted metal bars — output of the Smelter, future input to the
+   * Forge. No direct consumer yet beyond the Forge itself. */
+  bars: number;
+  /** Forged metal tools — pickaxes, axes, etc. No direct consumer yet;
+   * future sessions wire them into mining / woodcutting speed bonuses. */
+  tools: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -73,7 +79,15 @@ export class SimWorld {
   // Resource accumulation — a real stockpile system with workshops arrives
   // in a later session, but tracking what's been pulled from the rock now
   // gives the player something concrete to watch grow.
-  readonly stockpile: Stockpile = { ore: 0, stone: 0, dirt: 0, food: STARTER_FOOD, drink: STARTER_DRINK };
+  readonly stockpile: Stockpile = {
+    ore: 0,
+    stone: 0,
+    dirt: 0,
+    food: STARTER_FOOD,
+    drink: STARTER_DRINK,
+    bars: 0,
+    tools: 0,
+  };
 
   // True once the colony has hit its first ore tile. Used to fire a one-
   // time discovery event the next time a dwarf strikes ore.

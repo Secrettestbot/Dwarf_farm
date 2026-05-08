@@ -99,7 +99,9 @@ export class Hud {
     this.stockpileLabel.innerHTML =
       `<span style="color:#9ad3a3;">Food ${sp.food}</span> · ` +
       `<span style="color:#8aa9ff;">Drink ${sp.drink}</span> · ` +
-      `Ore ${sp.ore} · Stone ${sp.stone}`;
+      `Ore ${sp.ore} · Stone ${sp.stone}` +
+      (sp.bars > 0 ? ` · <span style="color:#e0a070;">Bars ${sp.bars}</span>` : "") +
+      (sp.tools > 0 ? ` · <span style="color:#e0c080;">Tools ${sp.tools}</span>` : "");
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }

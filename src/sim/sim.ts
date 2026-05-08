@@ -12,6 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
+import { recipeFor } from "./planner/recipes";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -653,7 +654,65 @@ function workSystem(sim: SimWorld): void {
       case "haul":
         progressHaul(sim, e, job, pos);
         break;
+      case "craft":
+        progressCraft(sim, e, job, pos);
+        break;
     }
+  }
+}
+
+/** Run a workshop recipe: while the dwarf stands on the workstation tile,
+ * tick a progress counter to the recipe's required ticks, then consume
+ * the input quantity from the stockpile and credit the output. The first
+ * tick reserves the inputs so a fast recipe can't outrun the stockpile.
+ * Skill speeds the work and grants XP per craft. */
+function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  if (pos.x !== job.targetX || pos.y !== job.targetY) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  const tile = sim.grid.getTile(pos.x, pos.y);
+  // Find the workshop blueprint that owns this workstation.
+  let recipe: import("./planner/recipes").Recipe | undefined;
+  let blueprintKind: string | undefined;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const r = recipeFor(b.kind);
+    if (!r || r.station !== tile) continue;
+    if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+    if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+    recipe = r;
+    blueprintKind = b.kind;
+    break;
+  }
+  if (!recipe) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // Reserve the input on the first tick so a sibling crafter can't drain
+  // the stockpile mid-craft.
+  if (job.progress === 0) {
+    if (sim.stockpile[recipe.inputKind] < recipe.inputQty) {
+      sim.job.remove(e);
+      sim.pathing.remove(e);
+      return;
+    }
+    sim.stockpile[recipe.inputKind] -= recipe.inputQty;
+  }
+  job.progress++;
+  // Skill scales work speed: each level above Novice shaves 4% off ticks.
+  const dw = sim.dwarf.get(e);
+  const skillLevel = dw?.skills[recipe.skill] ?? 1;
+  const scaledTicks = Math.max(8, Math.round(recipe.ticks * Math.max(0.4, 1 - (skillLevel - 1) * 0.04)));
+  if (job.progress >= scaledTicks) {
+    sim.stockpile[recipe.outputKind] += recipe.outputQty;
+    awardSkillXp(sim, e, recipe.skill, 1);
+    void blueprintKind;
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
   }
 }
 

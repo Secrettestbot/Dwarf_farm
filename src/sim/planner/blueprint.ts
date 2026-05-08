@@ -14,7 +14,11 @@ export type BlueprintKind =
   | "corridor"
   | "mine"
   | "farm"
-  | "stairwell";
+  | "stairwell"
+  | "kitchen"
+  | "brewery"
+  | "smelter"
+  | "forge";
 
 export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   bedroom: "Bedroom",
@@ -24,6 +28,10 @@ export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   mine: "Mine",
   farm: "Farm",
   stairwell: "Stairwell",
+  kitchen: "Kitchen",
+  brewery: "Brewery",
+  smelter: "Smelter",
+  forge: "Forge",
 };
 
 export type BlueprintStatus = "digging" | "complete";
@@ -102,7 +110,16 @@ export function isRoomNeglected(b: Blueprint, currentTick: number): boolean {
 /** Whether a room of this kind takes general upkeep. Corridors, tunnels,
  * stairwells, and mines are bare passages that don't require it. */
 export function isMaintainable(kind: BlueprintKind): boolean {
-  return kind === "bedroom" || kind === "dining_hall" || kind === "stockpile" || kind === "farm";
+  return (
+    kind === "bedroom" ||
+    kind === "dining_hall" ||
+    kind === "stockpile" ||
+    kind === "farm" ||
+    kind === "kitchen" ||
+    kind === "brewery" ||
+    kind === "smelter" ||
+    kind === "forge"
+  );
 }
 
 /** Build a rectangular cavity from corner + dims. */

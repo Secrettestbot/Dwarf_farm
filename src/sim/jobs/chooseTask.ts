@@ -10,6 +10,7 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
 import { BlueprintKind, isRoomNeglected } from "../planner/blueprint";
 import { isShelterMode } from "../emergency";
+import { recipeFor } from "../planner/recipes";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
@@ -153,6 +154,16 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       if (haul) {
         return { kind: "haul" as JobKind, targetX: haul.x, targetY: haul.y, progress: 0 };
       }
+    }
+  }
+
+  // 6.7 Craft at a workshop. Gated by the Crafting slider. Skips
+  //     workshops whose recipe input isn't in the stockpile so a smelter
+  //     with no ore doesn't tie up a dwarf for nothing.
+  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+    const craftTarget = findCraftTarget(sim, pos.x, pos.y);
+    if (craftTarget) {
+      return { kind: "craft" as JobKind, targetX: craftTarget.x, targetY: craftTarget.y, progress: 0 };
     }
   }
 
@@ -395,6 +406,40 @@ function findStockpileDrop(sim: SimWorld, sx: number, sy: number): { x: number; 
       const x = c & 0xffff;
       const y = (c >>> 16) & 0xffff;
       if (!sim.grid.isWalkable(x, y)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest workstation tile in a completed workshop where the
+ * recipe's input is available in the stockpile. Skips workshops already
+ * being worked at (claim by job target) so a colony of seven crafters
+ * spreads across the workshops it has. */
+function findCraftTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "craft");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const recipe = recipeFor(b.kind);
+    if (!recipe) continue;
+    const have = sim.stockpile[recipe.inputKind];
+    if (have < recipe.inputQty) continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== recipe.station) continue;
+      if (claimed.has((y << 16) | x)) continue;
       const dx = x - sx;
       const dy = y - sy;
       const d = dx * dx + dy * dy;

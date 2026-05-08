@@ -29,6 +29,14 @@ export const enum TileType {
   // arrives abstractly, the way underground subsistence farming
   // implicitly works in the GDD).
   FarmTile = 15,
+  // Workshop workstations — the focal tile of a workshop room where the
+  // crafter dwarf stands while running a recipe. One workstation per
+  // cavity for the simple session-3 implementation; more elaborate
+  // multi-station workshops land later.
+  KitchenStation = 16,
+  BreweryStation = 17,
+  SmelterStation = 18,
+  ForgeStation = 19,
 }
 
 export interface TileInfo {
@@ -56,7 +64,20 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Bin]: { name: "bin", walkable: true, solid: false, color: 0x5a4633 },
   [TileType.Memorial]: { name: "memorial", walkable: true, solid: false, color: 0xc0a070 },
   [TileType.FarmTile]: { name: "farm", walkable: true, solid: false, color: 0x6a8a3a },
+  [TileType.KitchenStation]: { name: "kitchen", walkable: true, solid: false, color: 0xc06040 },
+  [TileType.BreweryStation]: { name: "brewery", walkable: true, solid: false, color: 0x5a8a40 },
+  [TileType.SmelterStation]: { name: "smelter", walkable: true, solid: false, color: 0xa05030 },
+  [TileType.ForgeStation]: { name: "forge", walkable: true, solid: false, color: 0xb07040 },
 };
+
+export function tileIsWorkshopStation(t: number): boolean {
+  return (
+    t === TileType.KitchenStation ||
+    t === TileType.BreweryStation ||
+    t === TileType.SmelterStation ||
+    t === TileType.ForgeStation
+  );
+}
 
 export function tileIsBed(t: number): boolean {
   return t === TileType.Bed;
