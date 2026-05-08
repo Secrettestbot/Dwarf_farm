@@ -14,7 +14,9 @@ export const PALETTE: string[] = [
   "#5a5a62", // 9 — granite
   "#6a6a72", // 10 — stone
   "#8a8a92", // 11 — stone highlight
-  "#c0a070", // 12 — torch glow
+  "#7aa040", // 12 — sprout green (was torch glow; the few torch / cap pixels
+             //      that referenced it now use 13 / blonde, which reads as
+             //      lit gold under candlelight anyway)
   "#e0c080", // 13 — beard blonde
   "#a04030", // 14 — clothes red
   "#3060a0", // 15 — clothes blue
