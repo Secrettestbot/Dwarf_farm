@@ -29,7 +29,10 @@ export class DwarfInspector {
     const wrap = document.createElement("div");
     wrap.className = "panel";
     wrap.style.cssText =
-      "position:absolute;top:8px;right:8px;width:300px;max-width:42vw;padding:10px 12px;font-size:12px;color:#ccc;display:none;";
+      // Sit below the slider panel on the right edge so neither hides
+      // the other when both are visible. Z-index above the sliders so
+      // the inspector wins if heights overlap on a short viewport.
+      "position:absolute;top:8px;right:240px;width:300px;max-width:42vw;padding:10px 12px;font-size:12px;color:#ccc;display:none;z-index:5;";
     this.host.appendChild(wrap);
     this.root = wrap;
   }
