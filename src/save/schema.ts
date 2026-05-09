@@ -107,6 +107,9 @@ export interface SavedBlueprint {
    * a small colony can't sprawl beyond what its dwarves can keep up.
    * Optional for back-compat with v2 saves. */
   lastMaintainedTick?: number;
+  /** Room quality (0-100). Optional for back-compat — older saves
+   * default to base quality on restore. */
+  quality?: number;
 }
 
 export interface SavedLogEvent {

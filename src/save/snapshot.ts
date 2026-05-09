@@ -121,6 +121,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       createdTick: b.createdTick,
       cellTendedAt: b.cellTendedAt ? Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
+      quality: b.quality,
     };
   });
 
@@ -336,6 +337,7 @@ export function restore(save: SaveV1): SimWorld {
       createdTick: b.createdTick,
       cellTendedAt: b.cellTendedAt ? Int32Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
+      quality: b.quality,
     };
   });
   sim.planner.blueprints = blueprints;

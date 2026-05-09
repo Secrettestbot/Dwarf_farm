@@ -13,6 +13,7 @@ import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skil
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 import { recipeFor } from "./planner/recipes";
+import { QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID } from "./research";
 
@@ -1959,10 +1960,35 @@ function progressSleep(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     needs.sleep = Math.min(100, needs.sleep + 1);
   }
   if (job.progress >= SLEEP_TICKS || needs.sleep >= 95) {
+    // Sleeping in a high-quality bedroom raises morale (GDD §6.4
+    // Esteem). A rough cavity at QUALITY_BASE adds nothing; a
+    // legendary bedroom hands a meaningful morale bump on every
+    // night's rest.
+    if (pos) {
+      const q = roomQualityAt(sim, pos.x, pos.y, "bedroom");
+      if (q > QUALITY_BASE) {
+        const bump = Math.floor((q - QUALITY_BASE) / 10);
+        needs.morale = Math.min(100, needs.morale + bump);
+      }
+    }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
   }
+}
+
+/** Return the quality of a completed room of the given kind whose
+ * cavity contains (x, y), or 0 if no such room is here. Used by
+ * progressSleep / progressEat to scale morale gain by room quality
+ * (GDD §6.4 Esteem). */
+function roomQualityAt(sim: SimWorld, x: number, y: number, kind: string): number {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== kind || b.status !== "complete") continue;
+    if (x < b.originX || x >= b.originX + b.width) continue;
+    if (y < b.originY || y >= b.originY + b.height) continue;
+    return b.quality ?? QUALITY_BASE;
+  }
+  return 0;
 }
 
 function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void {
@@ -2019,6 +2045,17 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   }
   job.progress++;
   if (job.progress >= EAT_TICKS) {
+    // Eating in a high-quality dining hall is a small morale lift
+    // (GDD §6.4): the carved chairs, the engraved walls, the company
+    // are good. A rough cavity does nothing extra.
+    const pos = sim.position.get(e);
+    if (pos) {
+      const q = roomQualityAt(sim, pos.x, pos.y, "dining_hall");
+      if (q > QUALITY_BASE) {
+        const bump = Math.floor((q - QUALITY_BASE) / 10);
+        needs.morale = Math.min(100, needs.morale + bump);
+      }
+    }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -2088,6 +2125,11 @@ function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: {
       }
       if (!inside) continue;
       b.lastMaintainedTick = sim.tick;
+      // Each maintenance pass also nudges the room's quality upward
+      // (GDD §7.3). The oldest, best-kept rooms become legendary;
+      // neglected ones stay rough.
+      const cur = b.quality ?? QUALITY_BASE;
+      b.quality = Math.min(QUALITY_MAX, cur + QUALITY_PER_MAINTAIN);
       break;
     }
   }

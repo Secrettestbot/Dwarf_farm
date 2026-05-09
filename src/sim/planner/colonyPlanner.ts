@@ -25,7 +25,7 @@ import { TileType } from "../world/tiles";
 import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
-import { Blueprint, BlueprintKind, isComplete, isRoomNeglected, rectCavity } from "./blueprint";
+import { Blueprint, BlueprintKind, isComplete, isRoomNeglected, rectCavity, QUALITY_BASE } from "./blueprint";
 import { furnishRoom } from "./furnish";
 
 export interface PlannerContext {
@@ -913,8 +913,11 @@ export class ColonyPlanner {
         this.completed++;
         this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
         // A freshly-dug room counts as fully maintained — the dig itself
-        // exercised every cell. The maintenance clock starts now.
+        // exercised every cell. The maintenance clock starts now, and
+        // quality starts at the freshly-dug baseline. Later sessions
+        // raise quality through maintenance + (eventually) decoration.
         b.lastMaintainedTick = ctx.tick;
+        if (b.quality === undefined) b.quality = QUALITY_BASE;
         for (let i = 0; i < b.cavity.length; i++) {
           const c = b.cavity[i];
           const x = c & 0xffff;

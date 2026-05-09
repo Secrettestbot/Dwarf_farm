@@ -75,7 +75,26 @@ export interface Blueprint {
    * MAINTAIN_VALIDITY_TICKS stop counting toward the architect's targets,
    * so the colony can't sprawl beyond what its dwarves can keep up. */
   lastMaintainedTick?: number;
+  /** Room quality in 0..100. A freshly-dug room starts at QUALITY_BASE
+   * and creeps up each time it's maintained — engravings, gem inlays,
+   * carved chairs, the oldest rooms become the most beautiful (GDD
+   * §7.3). Sleeping or eating in a higher-quality room boosts morale
+   * more than a bare cavity does. Optional in saved data: missing
+   * means base quality (the architect's freshly-finished default). */
+  quality?: number;
 }
+
+/** Quality of a freshly-finished room. The architect counts the dig
+ * itself as the first round of work; subsequent maintenance cycles
+ * raise quality from here. */
+export const QUALITY_BASE = 30;
+/** Cap quality can climb to. Leaves a small dead-zone above 90 so a
+ * legendary room is *visibly* a thing, not a slow asymptote. */
+export const QUALITY_MAX = 100;
+/** Per-maintain-cycle quality bump. ~30 cycles past the baseline takes
+ * a room from 'rough cavity' to 'legendary', which is exactly the
+ * fortress-history pacing the GDD describes. */
+export const QUALITY_PER_MAINTAIN = 2;
 
 export function packCell(x: number, y: number): number {
   return (y << 16) | x;
