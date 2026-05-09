@@ -28,7 +28,7 @@ export class EmergencyPanel {
     const root = document.createElement("div");
     root.className = "panel";
     root.style.cssText =
-      "position:absolute;left:8px;bottom:8px;display:flex;flex-direction:column;gap:4px;min-width:240px;";
+      "position:absolute;left:8px;bottom:240px;display:flex;flex-direction:column;gap:4px;min-width:240px;";
 
     const title = document.createElement("div");
     title.style.cssText = "color:#888;font-size:10px;letter-spacing:3px;margin-bottom:2px;";
