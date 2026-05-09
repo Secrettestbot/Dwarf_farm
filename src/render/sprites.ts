@@ -632,11 +632,57 @@ const CAVE_DOG_PIXELS: string[] = [
   "0000000000000000",
 ];
 
+// Cave falcon: wings spread, sharp profile in clothes-blue body
+// with a dark beak. Distinct from the bat's chunkier silhouette so
+// the two pets read at a glance.
+const CAVE_FALCON_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0001100000011000",
+  "0011510000015100",
+  "0015511111155100",
+  "0015555111555100",
+  "0015555111155100",
+  "0001515551111000",
+  "0000115551100000",
+  "0000011110000000",
+  "0000010110000000",
+  "0000010100000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+// Cave bat-as-pet: reuse the hostile bat sprite but tinted lighter.
+const CAVE_BAT_PET_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0011000000001100",
+  "0151100000011510",
+  "0155100000015510",
+  "0015510000155100",
+  "0001551115551000",
+  "0000155CCC100000",
+  "0000015551000000",
+  "0000001110000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
 export function getPetSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {
   const key = `pet:${kind}`;
   let s = cache.get(key);
   if (!s) {
-    s = paintFromRows(kind === "cave_dog" ? CAVE_DOG_PIXELS : CAVE_DOG_PIXELS);
+    const rows =
+      kind === "cave_falcon" ? CAVE_FALCON_PIXELS :
+      kind === "cave_bat" ? CAVE_BAT_PET_PIXELS :
+      CAVE_DOG_PIXELS;
+    s = paintFromRows(rows);
     cache.set(key, s);
   }
   return s;

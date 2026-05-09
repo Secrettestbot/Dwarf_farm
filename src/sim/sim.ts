@@ -119,7 +119,10 @@ export function tick(sim: SimWorld): void {
   petSpawnSystem(sim);
   petSystem(sim);
   mayorSystem(sim);
+  kingSystem(sim);
   festivalSystem(sim);
+  diseaseSystem(sim);
+  argumentSystem(sim);
   engravingSystem(sim);
   floodSystem(sim);
   depthMilestoneSystem(sim);
@@ -453,12 +456,81 @@ const PET_TAME_THRESHOLD = 90; // ~1.5 in-game hours of contact
 const PET_TAME_PROGRESS_PER_TICK = 1;
 /** A tame pet stays within this radius of its owner. */
 const PET_FOLLOW_RADIUS = 6;
-const PET_ATTACK_COOLDOWN = 60;
-const PET_ATTACK_DAMAGE = 8;
-const PET_ATTACK_RADIUS = 1; // adjacent only
 /** Hostile kinds a tame pet will engage. Cave dogs aren't going
  * to take on a troll — pest tier only. */
 const PET_TARGET_KINDS: ReadonlyArray<HostileKind> = ["cave_rat", "cave_bat", "cave_spider"];
+
+interface PetDef {
+  kind: import("./ecs/components").PetKind;
+  /** Display label for chronicle lines. */
+  label: string;
+  /** Article for "a/an X" — keeps narration grammatical without
+   * a vowel-detection loop. */
+  spawnArticle: string;
+  /** Spawn weight — falcons are rarer than dogs, bats sit between. */
+  spawnWeight: number;
+  attackDamage: number;
+  attackCooldown: number;
+  /** Tile radius the pet checks for adjacent pests. Falcons get
+   * a 2-tile range (a quick stoop) instead of dogs' 1-tile. */
+  attackRadius: number;
+  /** Visibility bonus the pet grants its owner — extra reveal-tiles
+   * around the dwarf each tick. The cave bat's echolocation. */
+  visionRadius: number;
+  /** Max HP. Falcons are fragile; bats fragiler still. */
+  maxHp: number;
+}
+
+const PET_DEFS: Record<import("./ecs/components").PetKind, PetDef> = {
+  cave_dog: {
+    kind: "cave_dog",
+    label: "cave dog",
+    spawnArticle: "a cave dog",
+    spawnWeight: 60,
+    attackDamage: 8,
+    attackCooldown: 60,
+    attackRadius: 1,
+    visionRadius: 0,
+    maxHp: 35,
+  },
+  cave_bat: {
+    kind: "cave_bat",
+    label: "cave bat",
+    spawnArticle: "a cave bat",
+    spawnWeight: 25,
+    // The bat doesn't fight directly — its passive vision bonus is
+    // its job. Tiny attack stats just so a cornered bat does
+    // something rather than nothing.
+    attackDamage: 2,
+    attackCooldown: 120,
+    attackRadius: 1,
+    visionRadius: 4,
+    maxHp: 12,
+  },
+  cave_falcon: {
+    kind: "cave_falcon",
+    label: "cave falcon",
+    spawnArticle: "a cave falcon",
+    spawnWeight: 15,
+    attackDamage: 6,
+    attackCooldown: 45,
+    // Stoop range — a falcon swoops from a few tiles out.
+    attackRadius: 2,
+    visionRadius: 0,
+    maxHp: 18,
+  },
+};
+
+function pickPetKind(rng: import("./rng").Rng): import("./ecs/components").PetKind {
+  const totalWeight = PET_DEFS.cave_dog.spawnWeight + PET_DEFS.cave_bat.spawnWeight + PET_DEFS.cave_falcon.spawnWeight;
+  const r = rng.nextFloat() * totalWeight;
+  let acc = 0;
+  for (const def of [PET_DEFS.cave_dog, PET_DEFS.cave_bat, PET_DEFS.cave_falcon]) {
+    acc += def.spawnWeight;
+    if (r < acc) return def.kind;
+  }
+  return "cave_dog";
+}
 
 function petSpawnSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
@@ -478,11 +550,13 @@ function petSpawnSystem(sim: SimWorld): void {
     sy++;
   }
   if (!sim.grid.isWalkable(sx, sy)) return;
-  sim.spawnPet({ kind: "cave_dog", x: sx, y: sy });
+  const kind = pickPetKind(sim.aiRng);
+  const def = PET_DEFS[kind];
+  sim.spawnPet({ kind, x: sx, y: sy, maxHp: def.maxHp });
   sim.events.add(
     sim.tick,
     "discovery",
-    `A wild cave dog has wandered up to the entrance. It eyes the gate without hostility.`,
+    `${def.spawnArticle.charAt(0).toUpperCase() + def.spawnArticle.slice(1)} has wandered up to the entrance. It eyes the gate without hostility.`,
   );
 }
 
@@ -499,14 +573,15 @@ function petSystem(sim: SimWorld): void {
     const pos = sim.position.get(id);
     const hp = sim.health.get(id);
     if (!pet || !pos || !hp) continue;
+    const def = PET_DEFS[pet.kind];
     if (hp.hp <= 0) {
       // Dead pet: chronicle line, then despawn.
       sim.events.add(
         sim.tick,
         "crisis",
         pet.tamedAtTick > 0
-          ? `The colony's cave dog has been killed in the tunnels.`
-          : `The wild cave dog dies of its wounds.`,
+          ? `The colony's ${def.label} has been killed in the tunnels.`
+          : `The wild ${def.label} dies of its wounds.`,
       );
       sim.destroyPet(id);
       continue;
@@ -535,7 +610,7 @@ function petSystem(sim: SimWorld): void {
             sim.events.add(
               sim.tick,
               "social",
-              `${tamerDw.name} tames the cave dog. It will follow them now.`,
+              `${tamerDw.name} tames the ${def.label}. It will follow them now.`,
             );
           }
         }
@@ -544,22 +619,22 @@ function petSystem(sim: SimWorld): void {
       continue;
     }
     // Tame: combat first (pests within range), then follow.
-    if (sim.tick - pet.lastAttackTick >= PET_ATTACK_COOLDOWN) {
-      const target = findPetTarget(sim, pos.x, pos.y);
+    if (sim.tick - pet.lastAttackTick >= def.attackCooldown) {
+      const target = findPetTarget(sim, pos.x, pos.y, def.attackRadius);
       if (target !== -1) {
         const tHp = sim.health.get(target);
         if (tHp) {
-          tHp.hp -= PET_ATTACK_DAMAGE;
+          tHp.hp -= def.attackDamage;
           pet.lastAttackTick = sim.tick;
           if (tHp.hp <= 0) {
             const hostile = sim.hostile.get(target);
-            const def = hostile ? HOSTILE_DEFS[hostile.kind] : null;
-            const ownerName = pet.ownerName ?? "the cave dog";
-            if (def) {
+            const hDef = hostile ? HOSTILE_DEFS[hostile.kind] : null;
+            const ownerName = pet.ownerName ?? `the ${def.label}`;
+            if (hDef) {
               sim.events.add(
                 sim.tick,
                 "discovery",
-                `${ownerName}'s cave dog brings down a ${def.name}.`,
+                `${ownerName}'s ${def.label} brings down a ${hDef.name}.`,
               );
             }
             sim.ecs.destroy(target, [sim.position, sim.hostile, sim.health]);
@@ -568,6 +643,13 @@ function petSystem(sim: SimWorld): void {
         }
       }
     }
+    // Vision bonus — cave bats reveal a small radius around the
+    // owner's tile every tick. The vision radius is added to the
+    // owner's normal sight via the existing fog-of-war reveal hooks
+    // — visibilitySystem reads pet.kind to apply the bump.
+    // (Implemented in visibilitySystem itself for proximity to the
+    // existing radius logic.)
+    void def.visionRadius;
     // Follow the owner — if they're alive, drift one tile toward
     // them whenever we exceed the follow radius. Cheap step rather
     // than full A*.
@@ -579,7 +661,7 @@ function petSystem(sim: SimWorld): void {
       sim.events.add(
         sim.tick,
         "social",
-        `${pet.ownerName ?? "Someone"}'s cave dog wanders the halls alone now.`,
+        `${pet.ownerName ?? "Someone"}'s ${def.label} wanders the halls alone now.`,
       );
       owner = -1;
     }
@@ -604,7 +686,7 @@ function petSystem(sim: SimWorld): void {
   }
 }
 
-function findPetTarget(sim: SimWorld, sx: number, sy: number): number {
+function findPetTarget(sim: SimWorld, sx: number, sy: number, radius: number): number {
   const ents = sim.hostile.entities;
   for (let i = 0; i < ents.length; i++) {
     const id = ents[i];
@@ -614,7 +696,7 @@ function findPetTarget(sim: SimWorld, sx: number, sy: number): number {
     if (!PET_TARGET_KINDS.includes(h.kind)) continue;
     const dx = Math.abs(p.x - sx);
     const dy = Math.abs(p.y - sy);
-    if (dx <= PET_ATTACK_RADIUS && dy <= PET_ATTACK_RADIUS) return id;
+    if (dx <= radius && dy <= radius) return id;
   }
   return -1;
 }
@@ -675,6 +757,307 @@ function mayorSystem(sim: SimWorld): void {
     "social",
     `The colony recognises ${dw.name} as its new Mayor. Their leadership: ${skillTierLabel(best.skill)}.`,
   );
+}
+
+/** Population at which the colony stops being a Mayor's town and
+ * starts wanting a King. Tuned so a small fortress doesn't crown
+ * itself the moment a throne room finishes. */
+const KING_POPULATION_THRESHOLD = 50;
+/** Skill threshold a dwarf has to clear in BOTH leadership and
+ * military to be eligible for kingship. The colony's leader has
+ * to be both respected and dangerous. */
+const KING_MIN_SKILL = 9; // Skilled
+
+function kingSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  // Throne room must exist and be complete.
+  let hasThroneRoom = false;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind === "throne_room" && b.status === "complete") {
+      hasThroneRoom = true;
+      break;
+    }
+  }
+  if (!hasThroneRoom) {
+    if (sim.kingName) {
+      // Throne room destroyed somehow? Strip royalty.
+      sim.kingName = "";
+    }
+    return;
+  }
+  if (sim.dwarf.size() < KING_POPULATION_THRESHOLD) return;
+  // Find the most-respected combatant: highest combined leadership +
+  // military skill among adults meeting both thresholds.
+  let best: { id: EntityId; score: number } | null = null;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    if (sim.ageOf(id) < 25) continue;
+    const lead = dw.skills.leadership ?? 1;
+    const mil = dw.skills.military ?? 1;
+    if (lead < KING_MIN_SKILL || mil < KING_MIN_SKILL) continue;
+    const score = lead + mil;
+    if (!best || score > best.score || (score === best.score && id < best.id)) {
+      best = { id, score };
+    }
+  }
+  if (!best) {
+    // No qualifying dwarf yet — the throne sits empty until one
+    // emerges. The chronicle has noted the throne room before;
+    // this is just a quiet pass.
+    return;
+  }
+  const dw = sim.dwarf.get(best.id);
+  if (!dw) return;
+  if (dw.name === sim.kingName) return; // re-coronation, no event
+  const previous = sim.kingName;
+  sim.kingName = dw.name;
+  if (previous) {
+    sim.events.add(
+      sim.tick,
+      "milestone",
+      `${dw.name} is crowned the new King. ${previous} steps down with their honour intact.`,
+    );
+  } else {
+    sim.events.add(
+      sim.tick,
+      "milestone",
+      `${dw.name} is crowned the colony's first King. The throne room is no longer empty.`,
+    );
+    fireMilestone(
+      sim,
+      "the_first_king",
+      `The First King. ${dw.name} sits the throne, by virtue of leadership and arms both.`,
+    );
+  }
+}
+
+// ---- Diseases / plague ------------------------------------------------
+//
+// Three illnesses can take a dwarf — cave cough (mild), deep fever
+// (Gem Seam+ exposure), and wound sickness (post-severe-injury
+// infection). The diseaseSystem rolls per-day for new contractions,
+// drains HP on a slower per-hour cadence, and grants a recovery
+// chance when the patient is resting in a Hospital cot under a
+// competent medic.
+
+interface DiseaseDef {
+  kind: import("./ecs/components").DiseaseKind;
+  label: string;
+  /** HP drained per disease-tick. */
+  drain: number;
+  /** Ticks of medic-supervised treatment to reach a cure. */
+  cureTicks: number;
+}
+
+const DISEASE_DEFS: Record<import("./ecs/components").DiseaseKind, DiseaseDef> = {
+  cave_cough: { kind: "cave_cough", label: "cave cough", drain: 1, cureTicks: 200 },
+  deep_fever: { kind: "deep_fever", label: "deep fever", drain: 2, cureTicks: 400 },
+  wound_sickness: { kind: "wound_sickness", label: "wound sickness", drain: 3, cureTicks: 500 },
+};
+
+const DISEASE_TICK_INTERVAL = 60; // once per in-game hour
+const DISEASE_DAILY_CHECK = TICKS_PER_DAY;
+/** Per-day contraction probabilities. */
+const COVE_COUGH_BASE_CHANCE = 0.012; // ~5% per in-game year baseline
+const DEEP_FEVER_DEPTH = 700; // Gem Seam threshold
+const DEEP_FEVER_BASE_CHANCE = 0.020;
+const WOUND_SICKNESS_HP_RATIO = 0.30; // below 30% HP, susceptible
+const WOUND_SICKNESS_BASE_CHANCE = 0.04;
+
+function diseaseSystem(sim: SimWorld): void {
+  // Per-hour drain + medic recovery pass.
+  if (sim.tick % DISEASE_TICK_INTERVAL === 0 && sim.tick > 0) {
+    const sick = sim.disease.entities.slice();
+    for (const id of sick) {
+      const d = sim.disease.get(id);
+      const hp = sim.health.get(id);
+      if (!d || !hp) continue;
+      const def = DISEASE_DEFS[d.kind];
+      // Iron Constitution cuts the drain by half — the trait that
+      // already softens needs decay shaves the disease too.
+      const dw = sim.dwarf.get(id);
+      const eff = dw ? effectsFor(dw.traitIds) : null;
+      const drain = Math.max(1, Math.round(def.drain * (eff && eff.needDecay > 1 ? 0.5 : 1)));
+      hp.hp = Math.max(0, hp.hp - drain);
+      // Recovery: if the dwarf is resting on a Hospital cot and a
+      // skilled medic is on duty, accumulate treatProgress. Below
+      // the bed bar they recover much more slowly — basically only
+      // by trait-driven natural healing.
+      const pos = sim.position.get(id);
+      const job = sim.job.get(id);
+      const onCot = pos ? sim.grid.getTile(pos.x, pos.y) === TileType.HospitalBed : false;
+      const sleeping = job?.kind === "sleep";
+      let progress = 0;
+      if (onCot && sleeping) {
+        const medic = findBestMedic(sim);
+        if (medic !== -1 && medic !== id) {
+          const medDw = sim.dwarf.get(medic);
+          const medSkill = medDw?.skills.medicine ?? 1;
+          // Skilled medic: 1 progress/hour. Higher skills speed up.
+          progress = 1 + Math.floor((medSkill - 1) / 4);
+          // Award medicine XP for active treatment.
+          awardSkillXp(sim, medic, "medicine", 1);
+        }
+      } else if (sleeping) {
+        // A bed (any kind) helps a little even without a medic.
+        progress = 1;
+      }
+      d.treatProgress += progress;
+      if (d.treatProgress >= def.cureTicks) {
+        const days = Math.max(1, Math.floor((sim.tick - d.contractedAtTick) / TICKS_PER_DAY));
+        if (dw) {
+          sim.events.add(
+            sim.tick,
+            "social",
+            `${dw.name} has recovered from ${def.label} after ${days} day${days === 1 ? "" : "s"}.`,
+          );
+        }
+        sim.disease.remove(id);
+      }
+    }
+  }
+  // Per-day contraction roll.
+  if (sim.tick === 0 || sim.tick % DISEASE_DAILY_CHECK !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    if (sim.disease.has(id)) continue;
+    const dw = sim.dwarf.get(id);
+    const hp = sim.health.get(id);
+    const pos = sim.position.get(id);
+    if (!dw || !hp || !pos) continue;
+    const eff = effectsFor(dw.traitIds);
+    // Iron Constitution roughly halves contraction probability;
+    // Sickly traits raise it. Use the existing needDecay multiplier
+    // as a stand-in (>1 = sturdy, <1 = fragile).
+    const susceptScale = 1 / Math.max(0.5, eff.needDecay);
+    // 1. Wound sickness — most likely when already badly wounded.
+    if (hp.hp < hp.maxHp * WOUND_SICKNESS_HP_RATIO) {
+      if (sim.aiRng.nextFloat() < WOUND_SICKNESS_BASE_CHANCE * susceptScale) {
+        contractDisease(sim, id, "wound_sickness");
+        continue;
+      }
+    }
+    // 2. Deep fever — only at Gem Seam depth or below.
+    const depth = pos.y - sim.spawn.y;
+    if (depth >= DEEP_FEVER_DEPTH) {
+      if (sim.aiRng.nextFloat() < DEEP_FEVER_BASE_CHANCE * susceptScale) {
+        contractDisease(sim, id, "deep_fever");
+        continue;
+      }
+    }
+    // 3. Cave cough — the always-on mild illness, picked up from
+    // dust and damp.
+    if (sim.aiRng.nextFloat() < COVE_COUGH_BASE_CHANCE * susceptScale) {
+      contractDisease(sim, id, "cave_cough");
+    }
+  }
+}
+
+function contractDisease(sim: SimWorld, e: EntityId, kind: import("./ecs/components").DiseaseKind): void {
+  const def = DISEASE_DEFS[kind];
+  sim.disease.set(e, { kind, contractedAtTick: sim.tick, treatProgress: 0 });
+  const dw = sim.dwarf.get(e);
+  if (dw) {
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      `${dw.name} has come down with ${def.label}.`,
+    );
+  }
+}
+
+// ---- Arguments + brawls ----------------------------------------------
+//
+// Once per in-game day the colony's social tensions get a single
+// roll: every adjacent pair with at least one Antagonistic dwarf
+// has a chance of arguing (small morale hit on both, chronicle
+// line); a tantruming dwarf has a higher chance of throwing a
+// punch (small HP hit on the neighbour, larger morale hit on both).
+// The brawl roll is the only way the colony's internal social
+// stress translates to physical injury.
+
+const ARGUMENT_DAILY_CHANCE = 0.4;
+const ARGUMENT_MORALE_HIT = 5;
+const BRAWL_TANTRUM_CHANCE = 0.5;
+const BRAWL_DAMAGE = 4;
+const BRAWL_MORALE_HIT = 10;
+
+function argumentSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_DAY !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  if (dwarves.length < 2) return;
+  // Pre-build a position lookup so we can find adjacent pairs in
+  // O(N) instead of O(N²). Key: packed (y << 16 | x).
+  const tileToDwarf = new Map<number, EntityId>();
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    const p = sim.position.get(id);
+    if (!p) continue;
+    tileToDwarf.set((p.y << 16) | p.x, id);
+  }
+  // Iterate dwarves; for each, check the four cardinal neighbours
+  // for another dwarf. Sort the pair by id so we don't fire twice.
+  const seenPairs = new Set<string>();
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    const p = sim.position.get(id);
+    const dw = sim.dwarf.get(id);
+    if (!p || !dw) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const other = tileToDwarf.get(((p.y + dy) << 16) | (p.x + dx));
+      if (other === undefined || other === id) continue;
+      const pairKey = id < other ? `${id}:${other}` : `${other}:${id}`;
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      const otherDw = sim.dwarf.get(other);
+      if (!otherDw) continue;
+      const aAntag = dw.traitIds.includes("antagonistic");
+      const bAntag = otherDw.traitIds.includes("antagonistic");
+      const inTantrumA = sim.tantrum.has(id);
+      const inTantrumB = sim.tantrum.has(other);
+      // Tantrum brawl: one of the pair is broken and lashes out.
+      if (inTantrumA || inTantrumB) {
+        if (sim.aiRng.nextFloat() < BRAWL_TANTRUM_CHANCE) {
+          const aggressor = inTantrumA ? id : other;
+          const victim = inTantrumA ? other : id;
+          const aDw = sim.dwarf.get(aggressor)!;
+          const vDw = sim.dwarf.get(victim)!;
+          const vHp = sim.health.get(victim);
+          if (vHp) vHp.hp = Math.max(0, vHp.hp - BRAWL_DAMAGE);
+          const aN = sim.needs.get(aggressor);
+          const vN = sim.needs.get(victim);
+          if (aN) aN.morale = Math.max(0, aN.morale - BRAWL_MORALE_HIT);
+          if (vN) vN.morale = Math.max(0, vN.morale - BRAWL_MORALE_HIT);
+          sim.events.add(
+            sim.tick,
+            "crisis",
+            `${aDw.name} strikes ${vDw.name} in their fury. The colony watches in silence.`,
+          );
+        }
+        continue;
+      }
+      // Argument: at least one Antagonistic, regular morale hit.
+      if (aAntag || bAntag) {
+        if (sim.aiRng.nextFloat() < ARGUMENT_DAILY_CHANCE) {
+          const aN = sim.needs.get(id);
+          const bN = sim.needs.get(other);
+          if (aN) aN.morale = Math.max(0, aN.morale - ARGUMENT_MORALE_HIT);
+          if (bN) bN.morale = Math.max(0, bN.morale - ARGUMENT_MORALE_HIT);
+          sim.events.add(
+            sim.tick,
+            "social",
+            `${dw.name} and ${otherDw.name} argue heatedly. Old grievances surface.`,
+          );
+        }
+      }
+    }
+  }
 }
 
 function festivalSystem(sim: SimWorld): void {
@@ -759,6 +1142,34 @@ function passiveTraitSystem(sim: SimWorld): void {
         if (!n) continue;
         n.morale = Math.min(100, n.morale + 1);
       }
+    }
+  }
+  // King aura: a stronger fortress-wide bump than the mayor. The
+  // King's presence is the colony's pride.
+  if (sim.kingName) {
+    let kingAlive = false;
+    for (const id of ents) {
+      const dw = sim.dwarf.get(id);
+      if (dw && dw.name === sim.kingName) {
+        kingAlive = true;
+        break;
+      }
+    }
+    if (kingAlive) {
+      for (const other of ents) {
+        const n = sim.needs.get(other);
+        if (!n) continue;
+        n.morale = Math.min(100, n.morale + 2);
+      }
+    } else if (sim.kingName) {
+      // King died or was lost. Strip the title; the next yearly
+      // tick of kingSystem will pick a successor.
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `The King is dead. The throne sits empty, awaiting a worthy successor.`,
+      );
+      sim.kingName = "";
     }
   }
   // Phobia: Deep Rock pass.
@@ -1576,13 +1987,27 @@ const VISIBILITY_RADIUS = 5;
 function visibilitySystem(sim: SimWorld): void {
   const grid = sim.grid;
   const dwarves = sim.dwarf.entities;
+  // Pre-compute per-owner pet vision bonuses (cave bats grant a
+  // visionRadius bump to whoever owns them). One pass over the pet
+  // store builds an owner→bonus map; the dwarf loop then folds it
+  // into each dwarf's reveal radius.
+  const ownerBonus = new Map<number, number>();
+  const petEnts = sim.pet.entities;
+  for (let i = 0; i < petEnts.length; i++) {
+    const pet = sim.pet.get(petEnts[i]);
+    if (!pet || pet.tamedAtTick < 0 || pet.ownerId === -1) continue;
+    const def = PET_DEFS[pet.kind];
+    if (def.visionRadius === 0) continue;
+    ownerBonus.set(pet.ownerId, (ownerBonus.get(pet.ownerId) ?? 0) + def.visionRadius);
+  }
   for (let i = 0; i < dwarves.length; i++) {
     const id = dwarves[i];
     const pos = sim.position.get(id);
     if (!pos) continue;
     // Eagle-Eyed dwarves see further into the fog (GDD §6.5).
     const dw = sim.dwarf.get(id);
-    const r = dw ? effectsFor(dw.traitIds).visibilityRadius : VISIBILITY_RADIUS;
+    const traitR = dw ? effectsFor(dw.traitIds).visibilityRadius : VISIBILITY_RADIUS;
+    const r = traitR + (ownerBonus.get(id) ?? 0);
     const x0 = Math.max(0, pos.x - r);
     const y0 = Math.max(0, pos.y - r);
     const x1 = Math.min(grid.width - 1, pos.x + r);
@@ -1904,7 +2329,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession, sim.tantrum]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession, sim.tantrum, sim.disease]);
 }
 
 /** Find an empty Grave plot in any complete Cemetery and turn it

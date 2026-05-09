@@ -79,6 +79,9 @@ export interface SavedDwarf {
   /** Active tantrum (broken-morale state), if any. Round-trips so
    * a save mid-breakdown restores the same state. */
   tantrum?: { startedAtTick: number; endsAtTick: number };
+  /** Active disease, if any. Round-trips so a save mid-illness
+   * restores the same condition. */
+  disease?: { kind: string; contractedAtTick: number; treatProgress: number };
 }
 
 /** A loose item on the floor — dropped by mining or by a workshop,
@@ -280,6 +283,8 @@ export interface SaveV1 {
   }>;
   /** Currently-recognised Mayor's name. */
   mayorName?: string;
+  /** Currently-recognised King's name (empty if no King yet). */
+  kingName?: string;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

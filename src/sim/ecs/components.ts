@@ -225,7 +225,33 @@ export interface Pet {
   lastAttackTick: number;
 }
 
-export type PetKind = "cave_dog";
+export type PetKind = "cave_dog" | "cave_bat" | "cave_falcon";
+
+/** Active illness on a dwarf. Diseases tick HP down slowly while
+ * set; recovery comes either from time spent in a Hospital cot with
+ * a competent medic on duty, or from sufficient idle / healing
+ * time at higher Iron Constitution. The chronicle records each
+ * contraction and recovery. */
+export interface Disease {
+  kind: DiseaseKind;
+  /** Tick at which the dwarf first fell ill. Used for the recovery
+   * narrative line ("X has recovered after N days") and for
+   * difficulty scaling on long illnesses. */
+  contractedAtTick: number;
+  /** Cumulative ticks of medic-supervised treatment. Once this
+   * crosses DISEASE_CURE_THRESHOLD the disease clears. */
+  treatProgress: number;
+}
+
+export type DiseaseKind =
+  /** Mild cave-air illness — light HP drain, easy to shake. */
+  | "cave_cough"
+  /** Deep Rock fever from prolonged depth exposure — moderate
+   * drain, harder to recover from without a hospital. */
+  | "deep_fever"
+  /** Wound infection — sets in after a severe injury. Fast HP
+   * drain; the colony's most lethal disease without medicine. */
+  | "wound_sickness";
 
 export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
 

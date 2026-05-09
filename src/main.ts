@@ -203,7 +203,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
   let isPanning = false;
 
   const hud = new Hud(uiHost, {
-    fortressName: active.fortressName,
+    fortressName: () => active.fortressName,
     mode: active.mode,
     onSpeedChange(s: SpeedLevel) { clock.setSpeed(s); },
     async onSave() {
@@ -216,6 +216,13 @@ function runGame(active: ActiveFortress, camera: Camera) {
     },
     onShowHistory: () => {
       historyPanel.open(active.sim);
+    },
+    onRenameFortress: () => {
+      const next = window.prompt("Rename the fortress:", active.fortressName);
+      if (next && next.trim()) {
+        active.fortressName = next.trim().slice(0, 60);
+        void persist(active, camera);
+      }
     },
   });
   const eventPanel = new EventLogPanel(uiHost);

@@ -131,6 +131,13 @@ export class DwarfInspector {
     const mayorLine = sim.mayorName === dw.name
       ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">Mayor of the colony — leadership ${dw.skills.leadership ?? 1}</div>`
       : "";
+    const kingLine = sim.kingName === dw.name
+      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">King of the Colony — leadership ${dw.skills.leadership ?? 1}, military ${dw.skills.military ?? 1}</div>`
+      : "";
+    const disease = sim.disease.get(this.targetId);
+    const diseaseLine = disease
+      ? `<div style="margin-top:4px;font-size:11px;color:#ff7060;">Ill: ${diseaseLabel(disease.kind)}</div>`
+      : "";
 
     const health = sim.health.get(this.targetId);
     const hpHtml = health
@@ -152,14 +159,19 @@ export class DwarfInspector {
           ${escapeHtml(dw.name.slice(0, 1))}
         </div>
         <div style="flex:1;min-width:0;">
-          <div style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(dw.name)}</div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(dw.name)}</span>
+            <button id="inspector-rename" class="btn" style="padding:0px 6px;font-size:10px;" title="Rename this dwarf">edit</button>
+          </div>
           <div style="font-size:11px;color:#888;">${escapeHtml(dw.profession)} · ${lifeStage} · age ${age} · @ ${pos.x},${pos.y}</div>
         </div>
         <button id="inspector-close" class="btn" style="padding:2px 8px;font-size:11px;">×</button>
       </div>
       ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
       ${familyHtml(family)}
+      ${kingLine}
       ${mayorLine}
+      ${diseaseLine}
       ${militaryLine}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${hpHtml}
@@ -169,6 +181,22 @@ export class DwarfInspector {
     `;
     const closeBtn = this.root.querySelector("#inspector-close") as HTMLButtonElement | null;
     if (closeBtn) closeBtn.onclick = () => this.close();
+    const renameBtn = this.root.querySelector("#inspector-rename") as HTMLButtonElement | null;
+    if (renameBtn) {
+      renameBtn.onclick = () => {
+        if (this.targetId === null) return;
+        const target = sim.dwarf.get(this.targetId);
+        if (!target) return;
+        const next = window.prompt("Rename this dwarf:", target.name);
+        if (!next || !next.trim()) return;
+        const trimmed = next.trim().slice(0, 40);
+        if (trimmed === target.name) return;
+        target.name = trimmed;
+        // Re-render so the new name lands without waiting for the
+        // next per-frame update tick.
+        this.update(sim);
+      };
+    }
   }
 }
 
@@ -269,6 +297,13 @@ function familyHtml(family: FamilySnapshot): string {
     rows.push(`<div>Siblings: ${stext}${more}</div>`);
   }
   return `<div style="margin-top:6px;font-size:11px;color:#888;line-height:1.5;">${rows.join("")}</div>`;
+}
+
+function diseaseLabel(kind: string): string {
+  if (kind === "cave_cough") return "cave cough";
+  if (kind === "deep_fever") return "deep fever";
+  if (kind === "wound_sickness") return "wound sickness";
+  return kind;
 }
 
 function moraleLabel(v: number): string {

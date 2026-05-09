@@ -65,6 +65,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     const equipment = sim.equipment.get(id);
     const obsession = sim.obsession.get(id);
     const tantrum = sim.tantrum.get(id);
+    const disease = sim.disease.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -104,6 +105,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
       obsession: obsession ? { skillId: obsession.skillId, endsAtTick: obsession.endsAtTick } : undefined,
       tantrum: tantrum ? { startedAtTick: tantrum.startedAtTick, endsAtTick: tantrum.endsAtTick } : undefined,
+      disease: disease ? { kind: disease.kind, contractedAtTick: disease.contractedAtTick, treatProgress: disease.treatProgress } : undefined,
     });
   });
 
@@ -206,6 +208,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     artifactsNextId: sim.artifactsNextId,
     books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
     mayorName: sim.mayorName || undefined,
+    kingName: sim.kingName || undefined,
   };
 }
 
@@ -375,6 +378,13 @@ export function restore(save: SaveV1): SimWorld {
     if (d.tantrum) {
       sim.tantrum.set(e, { startedAtTick: d.tantrum.startedAtTick, endsAtTick: d.tantrum.endsAtTick });
     }
+    if (d.disease) {
+      sim.disease.set(e, {
+        kind: d.disease.kind as import("../sim/ecs/components").DiseaseKind,
+        contractedAtTick: d.disease.contractedAtTick,
+        treatProgress: d.disease.treatProgress,
+      });
+    }
   }
 
   // Restore Colony Planner.
@@ -484,6 +494,7 @@ export function restore(save: SaveV1): SimWorld {
     for (const b of save.books) sim.books.push({ ...b });
   }
   if (save.mayorName) sim.mayorName = save.mayorName;
+  if (save.kingName) sim.kingName = save.kingName;
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).

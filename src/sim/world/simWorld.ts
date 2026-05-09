@@ -1,5 +1,5 @@
 import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
-import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying, Squad, Equipment, Fury, Obsession, Tantrum, Pet } from "../ecs/components";
+import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying, Squad, Equipment, Fury, Obsession, Tantrum, Pet, Disease } from "../ecs/components";
 import { effectsFor } from "../dwarves/traitEffects";
 import { Rng } from "../rng";
 import { TileGrid } from "./grid";
@@ -149,6 +149,7 @@ export class SimWorld {
   readonly obsession: ComponentStore<Obsession>;
   readonly tantrum: ComponentStore<Tantrum>;
   readonly pet: ComponentStore<Pet>;
+  readonly disease: ComponentStore<Disease>;
 
   // Forked RNG streams.
   readonly aiRng: Rng;
@@ -274,6 +275,14 @@ export class SimWorld {
    * highest leadership skill ≥ 5; their presence anywhere on the
    * map gives a small fortress-wide morale aura. */
   mayorName = "";
+
+  /** Name of the colony's current King — emerges once the colony
+   * reaches royal size (pop ≥ KING_POPULATION_THRESHOLD) and a
+   * Throne Room exists. Picked from the dwarf with the highest
+   * combined leadership + military skill. The King's presence
+   * gives the entire fortress a stronger morale aura than the
+   * Mayor and the chronicle marks each succession. */
+  kingName = "";
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */
@@ -309,6 +318,7 @@ export class SimWorld {
     this.obsession = new ComponentStore(maxEntities);
     this.tantrum = new ComponentStore(maxEntities);
     this.pet = new ComponentStore(maxEntities);
+    this.disease = new ComponentStore(maxEntities);
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");

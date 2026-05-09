@@ -4,7 +4,9 @@ import { GameMode } from "../save/schema";
 import { isMuted, setMuted } from "../audio/sound";
 
 export interface HudHandlers {
-  fortressName: string;
+  /** Reads the current fortress name; called on each render so the
+   * label updates when the player renames the fortress. */
+  fortressName(): string;
   mode: GameMode;
   onSpeedChange(s: SpeedLevel): void;
   onSave(): void;
@@ -16,6 +18,9 @@ export interface HudHandlers {
   onShowTutorial(): void;
   /** Open the history panel — artifacts, books, graves. */
   onShowHistory(): void;
+  /** Player wants to rename the fortress; the host pops a prompt
+   * and, on a non-empty answer, calls `setFortressName`. */
+  onRenameFortress(): void;
 }
 
 export class Hud {
@@ -25,8 +30,11 @@ export class Hud {
   private dwarfLabel: HTMLDivElement;
   private plannerLabel: HTMLDivElement;
   private stockpileLabel!: HTMLDivElement;
+  private nameLabel!: HTMLDivElement;
+  private handlers: HudHandlers;
 
   constructor(host: HTMLElement, handlers: HudHandlers) {
+    this.handlers = handlers;
     const top = document.createElement("div");
     top.className = "panel";
     top.style.cssText =
@@ -37,8 +45,14 @@ export class Hud {
         : `<span style="color:#789;font-size:9px;letter-spacing:2px;">LEGACY</span>`;
     top.innerHTML = `
       <div style="color:#888;font-size:10px;letter-spacing:3px;">⛏ DWARVEN DEEP</div>
-      <div style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(handlers.fortressName)} ${modeBadge}</div>
+      <div id="hud-fortress-name" style="color:#e0c080;font-size:14px;line-height:1.2;cursor:pointer;" title="Click to rename"></div>
     `;
+    this.nameLabel = top.querySelector("#hud-fortress-name") as HTMLDivElement;
+    this.refreshFortressName(modeBadge);
+    this.nameLabel.addEventListener("click", () => {
+      handlers.onRenameFortress();
+      this.refreshFortressName(modeBadge);
+    });
 
     this.clockLabel = document.createElement("div");
     this.clockLabel.style.fontSize = "11px";
@@ -187,6 +201,10 @@ export class Hud {
 
   destroy(): void {
     this.root.remove();
+  }
+
+  private refreshFortressName(modeBadge: string): void {
+    this.nameLabel.innerHTML = `${escapeHtml(this.handlers.fortressName())} ${modeBadge}`;
   }
 }
 
