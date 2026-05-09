@@ -63,6 +63,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     const carrying = sim.carrying.get(id);
     const squad = sim.squad.get(id);
     const equipment = sim.equipment.get(id);
+    const obsession = sim.obsession.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -97,6 +98,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       carrying: carrying ? { kind: carrying.kind, quality: carrying.quality } : undefined,
       squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
       equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
+      obsession: obsession ? { skillId: obsession.skillId, endsAtTick: obsession.endsAtTick } : undefined,
     });
   });
 
@@ -313,6 +315,9 @@ export function restore(save: SaveV1): SimWorld {
     }
     if (d.equipment) {
       sim.equipment.set(e, { weapon: d.equipment.weapon, weaponQuality: d.equipment.weaponQuality });
+    }
+    if (d.obsession) {
+      sim.obsession.set(e, { skillId: d.obsession.skillId, endsAtTick: d.obsession.endsAtTick });
     }
   }
 

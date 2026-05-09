@@ -67,6 +67,9 @@ export interface SavedDwarf {
   /** Personal equipment — a forged weapon. Sticks with the dwarf for
    * life, so the save flows naturally; no consumption to track. */
   equipment?: { weapon: boolean; weaponQuality?: number };
+  /** Active Obsessive fixation, if any. Round-trips so a saved
+   * fortress reopens with the dwarf still grinding the same skill. */
+  obsession?: { skillId: string; endsAtTick: number };
 }
 
 /** A loose item on the floor — dropped by mining or by a workshop,

@@ -153,6 +153,18 @@ export interface Fury {
   used: boolean;
 }
 
+/** Obsessive (GDD §6.5 rare trait): the dwarf periodically fixates on
+ * a single skill, grinding it at 2× XP for an in-game week, then
+ * returns to normal. The component lives on the dwarf only while the
+ * grind is active; it's removed when the timer elapses. */
+export interface Obsession {
+  /** Skill being obsessed over. awardSkillXp doubles XP when the
+   * incoming skill matches. */
+  skillId: string;
+  /** Tick at which the obsession ends and the component is removed. */
+  endsAtTick: number;
+}
+
 export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump";
 
 export interface JobAssignment {

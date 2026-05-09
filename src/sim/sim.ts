@@ -100,9 +100,62 @@ export function tick(sim: SimWorld): void {
 const STONE_SPEAKER_INTERVAL = TICKS_PER_DAY * 6; // once per season
 const ANCESTOR_VOICE_INTERVAL = TICKS_PER_DAY * 7; // once per in-game week
 const STONE_SPEAKER_RANGE = 200;
+/** Per-day chance for an Obsessive dwarf without an active obsession
+ * to fall into one. Tuned so most Obsessive dwarves fixate a few
+ * times per in-game year — frequent enough that a fortress with one
+ * actually feels their presence. */
+const OBSESSION_DAILY_CHANCE = 0.02;
+const OBSESSION_DURATION_TICKS = TICKS_PER_DAY * 7;
+/** Skill ids the Obsessive trait can fixate on. Subset of the GDD's
+ * full skill list — only the ones a dwarf actually trains in
+ * gameplay today. */
+const OBSESSION_SKILLS = [
+  "mining",
+  "smithing",
+  "cooking",
+  "brewing",
+  "scholarship",
+  "military",
+  "artistry",
+  "trading",
+] as const;
 
 function specialTraitSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
+  // Obsession lifecycle (GDD §6.5 Obsessive): expire any active
+  // obsessions whose timer has elapsed, then roll once per in-game
+  // day for new ones on the dwarves who carry the trait.
+  const obsEnts = sim.obsession.entities.slice();
+  for (const id of obsEnts) {
+    const ob = sim.obsession.get(id);
+    if (!ob) continue;
+    if (sim.tick >= ob.endsAtTick) {
+      const dw = sim.dwarf.get(id);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} loses their grip on the obsession with ${ob.skillId}. They look around as if waking up.`,
+        );
+      }
+      sim.obsession.remove(id);
+    }
+  }
+  if (sim.tick % TICKS_PER_DAY === 0) {
+    for (const id of sim.dwarf.entities) {
+      const dw = sim.dwarf.get(id);
+      if (!dw || !dw.traitIds.includes("obsessive")) continue;
+      if (sim.obsession.has(id)) continue;
+      if (sim.aiRng.nextFloat() >= OBSESSION_DAILY_CHANCE) continue;
+      const skillId = OBSESSION_SKILLS[sim.aiRng.nextRange(0, OBSESSION_SKILLS.length)];
+      sim.obsession.set(id, { skillId, endsAtTick: sim.tick + OBSESSION_DURATION_TICKS });
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} has fallen into a deep fixation with ${skillId}. They are not to be reasoned with for a week.`,
+      );
+    }
+  }
   if (sim.tick % STONE_SPEAKER_INTERVAL === 0) {
     // For each Stone-Speaker, find the nearest still-unseen valuable
     // tile within range and write a vision line in their voice.
@@ -1127,7 +1180,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession]);
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -1218,6 +1271,9 @@ function reproductionSystem(sim: SimWorld): void {
 function awardSkillXp(sim: SimWorld, e: EntityId, skill: SkillId, amount: number): void {
   const dw = sim.dwarf.get(e);
   if (!dw) return;
+  // Obsessive: 2× XP gain on the fixation skill (GDD §6.5).
+  const ob = sim.obsession.get(e);
+  if (ob && ob.skillId === skill) amount *= 2;
   const oldXp = dw.skillXp[skill] ?? 0;
   const newXp = oldXp + amount;
   dw.skillXp[skill] = newXp;
