@@ -118,6 +118,8 @@ export function tick(sim: SimWorld): void {
   tantrumSystem(sim);
   petSpawnSystem(sim);
   petSystem(sim);
+  mayorSystem(sim);
+  festivalSystem(sim);
   engravingSystem(sim);
   floodSystem(sim);
   depthMilestoneSystem(sim);
@@ -337,6 +339,34 @@ const TANTRUM_MAX_DURATION = TICKS_PER_DAY * 4;
 /** Once the dwarf's morale is back above this, they recover (after
  * the minimum duration has elapsed). */
 const TANTRUM_RECOVERY_MORALE = 40;
+/** Ticks between potential smash attempts. */
+const TANTRUM_SMASH_INTERVAL = 120; // every two in-game hours
+
+/** Find a furniture tile adjacent to a tantruming dwarf and smash
+ * it back to CorridorFloor. Beds / tables / bins are fair game;
+ * Memorial / Headstone / Grave / FarmTile are not — even broken
+ * dwarves don't deface graves or trample the crops. Chronicle
+ * records each smash. */
+function smashAdjacentFurniture(sim: SimWorld, dw: import("./ecs/components").Dwarf, pos: { x: number; y: number }): void {
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    const x = pos.x + dx;
+    const y = pos.y + dy;
+    const t = sim.grid.getTile(x, y);
+    let label = "";
+    if (t === TileType.Bed) label = "bed";
+    else if (t === TileType.Table) label = "table";
+    else if (t === TileType.Bin) label = "bin";
+    else continue;
+    sim.grid.setTile(x, y, TileType.CorridorFloor);
+    sim.regions.invalidate();
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      `${dw.name} smashes a ${label} in their grief. Splinters fly.`,
+    );
+    return;
+  }
+}
 
 function tantrumSystem(sim: SimWorld): void {
   // Recovery / expiration loop — runs every tick.
@@ -358,6 +388,19 @@ function tantrumSystem(sim: SimWorld): void {
         );
       }
       sim.tantrum.remove(id);
+      continue;
+    }
+    // Tantrum smashing: every TANTRUM_SMASH_INTERVAL ticks the
+    // dwarf takes a swing at adjacent furniture — a Bed, Table, or
+    // Bin reverts to CorridorFloor, the chronicle records the
+    // damage. Hospital cots and headstones are untouchable (the
+    // dwarf has some grief left in them).
+    if ((sim.tick - t.startedAtTick) % TANTRUM_SMASH_INTERVAL === 0) {
+      const pos = sim.position.get(id);
+      const dw = sim.dwarf.get(id);
+      if (pos && dw) {
+        smashAdjacentFurniture(sim, dw, pos);
+      }
     }
   }
   // Trigger roll — once per in-game day.
@@ -576,6 +619,91 @@ function findPetTarget(sim: SimWorld, sx: number, sy: number): number {
   return -1;
 }
 
+// ---- Mayor + festival -------------------------------------------------
+//
+// Once per in-game year the colony elects (informally — Dwarven
+// tradition is rough about it) a Mayor: the dwarf with the highest
+// leadership skill, provided they meet the minimum threshold. Their
+// presence in any tile gives the fortress a small morale aura via
+// the existing passive-trait sweep, just like a Natural Leader. The
+// chronicle records each new term:
+//
+//   "The colony recognises Borin as its new Mayor. The leadership
+//    skill: Skilled."
+//
+// Festivals fire once per in-game season when the colony's median
+// morale is high — a quiet affirmation of good times. Bumps every
+// dwarf's morale by FESTIVAL_MORALE_BUMP and writes a celebratory
+// line to the chronicle.
+
+const MAYOR_MIN_SKILL = 5; // Adequate Leadership
+const FESTIVAL_INTERVAL = TICKS_PER_SEASON;
+const FESTIVAL_MIN_MEDIAN_MORALE = 75;
+const FESTIVAL_MORALE_BUMP = 5;
+const FESTIVAL_LINES: ReadonlyArray<string> = [
+  "The colony holds a small festival in the dining hall. Songs are sung; old grievances are laughed off.",
+  "The colony toasts a quiet good year. Even the gloomiest dwarves crack a smile.",
+  "A festival is held — no particular reason, only that the mood is good and the larder is full.",
+];
+
+function mayorSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  let best: { id: EntityId; skill: number } | null = null;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    const skill = dw.skills.leadership ?? 1;
+    if (skill < MAYOR_MIN_SKILL) continue;
+    if (sim.ageOf(id) < 18) continue;
+    if (!best || skill > best.skill || (skill === best.skill && id < best.id)) {
+      best = { id, skill };
+    }
+  }
+  if (!best) {
+    sim.mayorName = "";
+    return;
+  }
+  const dw = sim.dwarf.get(best.id);
+  if (!dw) return;
+  if (dw.name === sim.mayorName) return; // re-elected, no event
+  sim.mayorName = dw.name;
+  sim.events.add(
+    sim.tick,
+    "social",
+    `The colony recognises ${dw.name} as its new Mayor. Their leadership: ${skillTierLabel(best.skill)}.`,
+  );
+}
+
+function festivalSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % FESTIVAL_INTERVAL !== 0) return;
+  if (sim.emergency.mode !== "none") return;
+  const ents = sim.dwarf.entities;
+  if (ents.length < 4) return;
+  // Median morale — a festival happens when the colony's mood is
+  // broadly good, not when one cheerful elder pulls the average up.
+  const morales: number[] = [];
+  for (let i = 0; i < ents.length; i++) {
+    const n = sim.needs.get(ents[i]);
+    if (n) morales.push(n.morale);
+  }
+  if (morales.length === 0) return;
+  morales.sort((a, b) => a - b);
+  const median = morales[Math.floor(morales.length / 2)];
+  if (median < FESTIVAL_MIN_MEDIAN_MORALE) return;
+  // Bump everyone's morale a touch.
+  for (let i = 0; i < ents.length; i++) {
+    const n = sim.needs.get(ents[i]);
+    if (!n) continue;
+    n.morale = Math.min(100, n.morale + FESTIVAL_MORALE_BUMP);
+  }
+  const line = FESTIVAL_LINES[sim.aiRng.nextRange(0, FESTIVAL_LINES.length)];
+  sim.events.add(sim.tick, "social", line);
+}
+
 // ---- Passive trait auras (GDD §6.5) ----------------------------------
 //
 // Some traits influence the dwarves around them rather than
@@ -594,7 +722,8 @@ function passiveTraitSystem(sim: SimWorld): void {
   const ents = sim.dwarf.entities;
   // Aura pass — Natural Leader (+1) and Antagonistic (-1) both run
   // through the same shape: walk every dwarf within LEADER_AURA_RADIUS
-  // and apply auraMorale.
+  // and apply auraMorale. The Mayor adds another +1 fortress-wide
+  // (no radius) — the colony's general sense of "being led".
   for (const id of ents) {
     const dw = sim.dwarf.get(id);
     if (!dw) continue;
@@ -611,6 +740,25 @@ function passiveTraitSystem(sim: SimWorld): void {
       const n = sim.needs.get(other);
       if (!n) continue;
       n.morale = Math.max(0, Math.min(100, n.morale + aura));
+    }
+  }
+  // Mayor aura: a small fortress-wide morale bump. The mayor name
+  // is set yearly by mayorSystem; we re-resolve their entity here.
+  if (sim.mayorName) {
+    let mayorAlive = false;
+    for (const id of ents) {
+      const dw = sim.dwarf.get(id);
+      if (dw && dw.name === sim.mayorName) {
+        mayorAlive = true;
+        break;
+      }
+    }
+    if (mayorAlive) {
+      for (const other of ents) {
+        const n = sim.needs.get(other);
+        if (!n) continue;
+        n.morale = Math.min(100, n.morale + 1);
+      }
     }
   }
   // Phobia: Deep Rock pass.

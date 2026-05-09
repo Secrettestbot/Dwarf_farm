@@ -278,6 +278,8 @@ export interface SaveV1 {
     authorName: string;
     writtenAtTick: number;
   }>;
+  /** Currently-recognised Mayor's name. */
+  mayorName?: string;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

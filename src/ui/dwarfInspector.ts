@@ -128,6 +128,9 @@ export class DwarfInspector {
     const militaryLine = isSoldier
       ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">⚔ Standing guard${armedText}</div>`
       : "";
+    const mayorLine = sim.mayorName === dw.name
+      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">Mayor of the colony — leadership ${dw.skills.leadership ?? 1}</div>`
+      : "";
 
     const health = sim.health.get(this.targetId);
     const hpHtml = health
@@ -156,6 +159,7 @@ export class DwarfInspector {
       </div>
       ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
       ${familyHtml(family)}
+      ${mayorLine}
       ${militaryLine}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${hpHtml}

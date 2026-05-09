@@ -268,6 +268,12 @@ export class SimWorld {
    * library's size, and the inspector shows a "Library: N books"
    * line. */
   books: Book[] = [];
+
+  /** Name of the colony's currently-recognised Mayor, or empty
+   * string if none. Picked annually from the dwarf with the
+   * highest leadership skill ≥ 5; their presence anywhere on the
+   * map gives a small fortress-wide morale aura. */
+  mayorName = "";
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */

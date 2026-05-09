@@ -205,6 +205,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
     artifactsNextId: sim.artifactsNextId,
     books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
+    mayorName: sim.mayorName || undefined,
   };
 }
 
@@ -482,6 +483,7 @@ export function restore(save: SaveV1): SimWorld {
   if (save.books) {
     for (const b of save.books) sim.books.push({ ...b });
   }
+  if (save.mayorName) sim.mayorName = save.mayorName;
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).
