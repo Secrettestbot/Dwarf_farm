@@ -5,7 +5,7 @@ import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
 import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival } from "./events/narrator";
-import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR } from "./time";
+import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, seasonOf, Season } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
 import { levelFromXp } from "./dwarves/skillProgress";
@@ -89,6 +89,7 @@ export function tick(sim: SimWorld): void {
     aquiferBreached: sim.aquiferBreachTick >= 0,
   });
   yearRolloverSystem(sim);
+  seasonRolloverSystem(sim);
   emergencySystem(sim);
   researchPickSystem(sim);
   draftSystem(sim);
@@ -798,6 +799,23 @@ function tradeSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
   if (sim.tick % TRADE_INTERVAL_TICKS !== 0) return;
   if (sim.emergency.mode === "lockdown") return;
+  // Seasonal arrival roll: winter cancels most caravans (snowed in),
+  // summer brings extras, spring/autumn baseline.
+  const season = seasonOf(sim.tick);
+  const arrivalChance =
+    season === "winter" ? 0.3 :
+    season === "summer" ? 1.0 :
+    0.85;
+  if (sim.aiRng.nextFloat() >= arrivalChance) {
+    if (season === "winter") {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `Heavy snow on the slopes — no caravan reaches the gate this season.`,
+      );
+    }
+    return;
+  }
   // Need an active Trade Depot. Find its centre while we're at it so
   // the visible trader can park there.
   let depot: { cx: number; cy: number } | null = null;
@@ -1313,7 +1331,17 @@ function farmSystem(sim: SimWorld): void {
   // chance climbs 50%. The same untended-cell rule still applies, so
   // the boost only lands where the colony's actually doing the work.
   const undergroundAg = sim.research.completed.includes("underground_agriculture");
-  const yieldChance = FARM_YIELD_CHANCE * (undergroundAg ? 1.5 : 1);
+  // Seasonal yield modifier: even underground farms feel the year
+  // through warmth, daylight bleeding through the entrance shaft,
+  // and the colony's own rhythms. Spring/summer above 1.0×, winter
+  // well below.
+  const season = seasonOf(sim.tick);
+  const seasonScale =
+    season === "spring" ? 1.1 :
+    season === "summer" ? 1.2 :
+    season === "autumn" ? 0.9 :
+    0.5; // winter
+  const yieldChance = FARM_YIELD_CHANCE * (undergroundAg ? 1.5 : 1) * seasonScale;
   for (const b of sim.planner.blueprints) {
     if (b.kind !== "farm") continue;
     if (b.status !== "complete") continue;
@@ -1764,6 +1792,24 @@ function yearRolloverSystem(sim: SimWorld): void {
       sim.events.add(sim.tick, "milestone", `Year ${year + 1} begins in the mountain.`);
     }
   }
+}
+
+const SEASON_NARRATION: Record<Season, string> = {
+  spring: "Spring returns to the mountain. Surface meltwater drips from the entrance shaft.",
+  summer: "Summer sets in. The surface clearing turns gold; caravans roll more often.",
+  autumn: "Autumn comes to the slopes. The surface trees redden; the harvest is brought in.",
+  winter: "Winter sets in. Snow buries the surface; few caravans reach the gate.",
+};
+
+/** Quarterly season-rollover beat: when the tick crosses a season
+ * boundary, log the seasonal arrival. The active season is otherwise
+ * derived from sim.tick via seasonOf — no per-frame state to keep in
+ * sync — so this system only fires the chronicle line. */
+function seasonRolloverSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_SEASON !== 0) return;
+  const s = seasonOf(sim.tick);
+  sim.events.add(sim.tick, "milestone", SEASON_NARRATION[s]);
 }
 
 /**
@@ -2306,6 +2352,14 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       for (let i = 0; i < outputQty; i++) {
         sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y, quality });
       }
+      // Notable artifact roll: a Legendary maker (skill ≥ 17) producing
+      // a Masterwork (q=4) names the result with some probability. The
+      // chronicle records it; the colony's history collects it.
+      if (quality === 4 && dw && (dw.skills[recipe.skill] ?? 1) >= LEGENDARY_THRESHOLD) {
+        if (sim.aiRng.nextFloat() < ARTIFACT_NAMING_CHANCE) {
+          coinArtifact(sim, dw, outAsItem, recipe.skill);
+        }
+      }
     } else {
       sim.stockpile[recipe.outputKind] += outputQty;
     }
@@ -2331,6 +2385,91 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     sim.job.remove(e);
     sim.pathing.remove(e);
   }
+}
+
+/** Artifact naming: how often a Masterwork from a Legendary maker
+ * gets named. Lower than 1.0 so most Masterworks pass without fanfare
+ * and the named ones feel like rare events worth bragging about. */
+const ARTIFACT_NAMING_CHANCE = 0.4;
+
+/** Adjective + noun pools for the artifact name generator. The maker
+ * picks a name that fits the item kind, then a fortress-affiliated
+ * tail when the colony has the surplus to spare. */
+const ARTIFACT_ADJECTIVES: ReadonlyArray<string> = [
+  "Storm", "Iron", "Deep", "Hollow", "Crown", "First", "Last", "Eternal",
+  "Forge", "Stone", "Frost", "Sun", "Moon", "Dawn", "Dusk", "Far",
+  "Old", "Bright", "Quiet", "Sharp", "Silent", "Burning", "Singing",
+];
+const ARTIFACT_NOUNS_TOOL: ReadonlyArray<string> = [
+  "Breaker", "Hammer", "Pick", "Splitter", "Edge", "Bite", "Tooth", "Fang",
+  "Cleaver", "Maul",
+];
+const ARTIFACT_NOUNS_BAR: ReadonlyArray<string> = [
+  "Ingot", "Crown", "Gleam", "Shine", "Heart",
+];
+const ARTIFACT_NOUNS_GEM: ReadonlyArray<string> = [
+  "Star", "Tear", "Eye", "Heart", "Light", "Dream",
+];
+const ARTIFACT_NOUNS_BLOCK: ReadonlyArray<string> = [
+  "Cornerstone", "Foundation", "Standard", "Hold", "Anchor",
+];
+const ARTIFACT_NOUNS_PLANK: ReadonlyArray<string> = [
+  "Stave", "Beam", "Bone", "Mast", "Spar",
+];
+const ARTIFACT_NOUNS_FALLBACK: ReadonlyArray<string> = [
+  "Mark", "Token", "Sign", "Pride",
+];
+
+const ARTIFACT_KIND_LABELS: Record<string, string> = {
+  tools: "tool",
+  bars: "bar",
+  cut_gems: "cut gem",
+  gem: "rough gem",
+  blocks: "stone block",
+  planks: "plank",
+  wood: "log",
+  meal: "ceremonial dish",
+  drink: "vintage cask",
+  hide: "tanned hide",
+  ore: "ore vein-piece",
+  stone: "stoneworking",
+  dirt: "earthwork",
+  food: "preserve",
+};
+
+function pickArtifactNoun(rng: import("./rng").Rng, itemKind: string): string {
+  let pool = ARTIFACT_NOUNS_FALLBACK;
+  if (itemKind === "tools") pool = ARTIFACT_NOUNS_TOOL;
+  else if (itemKind === "bars") pool = ARTIFACT_NOUNS_BAR;
+  else if (itemKind === "gem" || itemKind === "cut_gems") pool = ARTIFACT_NOUNS_GEM;
+  else if (itemKind === "blocks") pool = ARTIFACT_NOUNS_BLOCK;
+  else if (itemKind === "planks" || itemKind === "wood") pool = ARTIFACT_NOUNS_PLANK;
+  return pool[rng.nextRange(0, pool.length)];
+}
+
+/** Coin a name for the Masterwork the dwarf just produced and add
+ * an entry to the colony's artifact registry. The chronicle gets a
+ * one-line announcement; future displays (throne room, inspector)
+ * read from sim.artifacts. */
+function coinArtifact(sim: SimWorld, dw: import("./ecs/components").Dwarf, itemKind: string, skill: import("./dwarves/skills").SkillId): void {
+  const adj = ARTIFACT_ADJECTIVES[sim.aiRng.nextRange(0, ARTIFACT_ADJECTIVES.length)];
+  const noun = pickArtifactNoun(sim.aiRng, itemKind);
+  const name = `${adj}${noun}`;
+  const kindLabel = ARTIFACT_KIND_LABELS[itemKind] ?? "artifact";
+  const id = sim.artifactsNextId++;
+  sim.artifacts.push({
+    id,
+    name,
+    kindLabel,
+    makerName: dw.name,
+    makerProfession: dw.profession,
+    createdTick: sim.tick,
+  });
+  sim.events.add(
+    sim.tick,
+    "milestone",
+    `${dw.name} the ${dw.profession} forges ${name}, a ${kindLabel} of legendary ${skill}.`,
+  );
 }
 
 /** Map a recipe's output resource to an ItemKind if one exists, so the

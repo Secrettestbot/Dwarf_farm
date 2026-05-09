@@ -28,6 +28,20 @@ export interface Grave {
   cause: string;
 }
 
+/** A named artifact in the colony's history — a Masterwork item
+ * sufficiently extraordinary that the colony gave it a name. The
+ * underlying item entity may have been hauled, consumed, equipped,
+ * or destroyed; the artifact record persists as chronicle. */
+export interface Artifact {
+  id: number;
+  name: string;
+  /** Item-kind label shown in the chronicle ("an iron pickaxe"). */
+  kindLabel: string;
+  makerName: string;
+  makerProfession: string;
+  createdTick: number;
+}
+
 export interface Stockpile {
   /** Generic ore tally — any TileType.Ore mined. Later sessions split into
    * iron / copper / silver / gold etc. */
@@ -227,6 +241,14 @@ export class SimWorld {
    * through save so a reload restores the colony's full memorial roll
    * call. */
   graves: Grave[] = [];
+
+  /** Notable artifacts registry — when a Legendary crafter produces
+   * a Masterwork the colony occasionally names the result and adds
+   * it to this list. Pure history: the chronicle references entries
+   * by id, the throne-room display reads it, but the simulation
+   * itself doesn't gate on artifacts. */
+  artifacts: Artifact[] = [];
+  artifactsNextId = 1;
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */

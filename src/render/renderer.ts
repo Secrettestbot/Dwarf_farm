@@ -3,6 +3,17 @@ import { SimWorld } from "../sim/world/simWorld";
 import { TileType } from "../sim/world/tiles";
 import { getDwarfSprite, getHostileSprite, getTileSpriteAtLayer, layerOf, SPRITE_TILE_SIZE } from "./sprites";
 import { BlueprintKind } from "../sim/planner/blueprint";
+import { seasonOf } from "../sim/time";
+
+/** Per-season RGBA overlay applied to surface tiles (Grass, Tree).
+ * Spring is baseline (no overlay); summer adds a warm gold cast;
+ * autumn paints orange-red; winter washes everything white-grey. */
+const SEASON_TINTS: Record<"spring" | "summer" | "autumn" | "winter", string | null> = {
+  spring: null,
+  summer: "rgba(240, 200, 80, 0.18)",
+  autumn: "rgba(220, 110, 40, 0.25)",
+  winter: "rgba(220, 230, 255, 0.45)",
+};
 
 const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> = {
   bedroom: { fill: "rgba(220, 180, 90, 0.10)", stroke: "rgba(220, 180, 90, 0.55)" },
@@ -88,6 +99,17 @@ export function renderWorld(
       if (t === TileType.Air) continue;
       const sprite = getTileSpriteAtLayer(t as TileType, layer);
       ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
+      // Seasonal overlay on surface tiles (Grass + Tree). Other
+      // tiles stay constant — the deep mountain doesn't have
+      // seasons. Overlay alpha is small for spring/summer, large for
+      // winter so snow reads at a glance.
+      if (t === TileType.Grass || t === TileType.Tree) {
+        const tint = SEASON_TINTS[seasonOf(sim.tick)];
+        if (tint) {
+          ctx.fillStyle = tint;
+          ctx.fillRect(sx, sy, pt, pt);
+        }
+      }
     }
   }
 

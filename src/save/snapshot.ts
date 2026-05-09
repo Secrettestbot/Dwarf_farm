@@ -196,6 +196,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       ? { x: sim.caravanX, y: sim.caravanY, leavesTick: sim.caravanLeavesTick, origin: sim.caravanOrigin }
       : undefined,
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
+    artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
+    artifactsNextId: sim.artifactsNextId,
   };
 }
 
@@ -433,6 +435,10 @@ export function restore(save: SaveV1): SimWorld {
   if (save.graves) {
     for (const g of save.graves) sim.graves.push({ ...g });
   }
+  if (save.artifacts) {
+    for (const a of save.artifacts) sim.artifacts.push({ ...a });
+  }
+  if (save.artifactsNextId !== undefined) sim.artifactsNextId = save.artifactsNextId;
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).

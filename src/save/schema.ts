@@ -234,6 +234,17 @@ export interface SaveV1 {
     deathTick: number;
     cause: string;
   }>;
+  /** Notable artifacts registry — Masterworks the colony has named.
+   * Round-trips through save so the history persists across reloads. */
+  artifacts?: Array<{
+    id: number;
+    name: string;
+    kindLabel: string;
+    makerName: string;
+    makerProfession: string;
+    createdTick: number;
+  }>;
+  artifactsNextId?: number;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

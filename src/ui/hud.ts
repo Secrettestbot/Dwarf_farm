@@ -1,4 +1,4 @@
-import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY } from "../sim/time";
+import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY, seasonOf } from "../sim/time";
 import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
 import { isMuted, setMuted } from "../audio/sound";
@@ -143,7 +143,9 @@ export class Hud {
     const day = Math.floor(tick / TICKS_PER_DAY) + 1;
     const hour = Math.floor((tick % TICKS_PER_DAY) / TICKS_PER_HOUR);
     const min = tick % TICKS_PER_HOUR;
-    this.clockLabel.textContent = `Day ${day} · ${pad(hour)}:${pad(min)}  (tick ${tick})`;
+    const season = seasonOf(tick);
+    const seasonLabel = season.charAt(0).toUpperCase() + season.slice(1);
+    this.clockLabel.textContent = `Day ${day} · ${pad(hour)}:${pad(min)} · ${seasonLabel}  (tick ${tick})`;
     const dwarfCount = sim.dwarf.size();
     this.dwarfLabel.textContent = `${dwarfCount} dwarf${dwarfCount === 1 ? "" : "ves"}`;
     const active = sim.planner.activeCount();
