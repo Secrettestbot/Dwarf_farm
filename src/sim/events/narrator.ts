@@ -47,6 +47,7 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   tannery: "tannery",
   loom: "loom",
   hospital: "hospital",
+  tavern: "tavern",
 };
 
 export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): string {
@@ -122,6 +123,8 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A loom is set up ${where}. Fibre will become cloth.`;
     case "hospital":
       return `A hospital is laid out ${where}. The wounded will have somewhere to recover.`;
+    case "tavern":
+      return `A tavern is laid out ${where}. The colony's centre of gravity shifts a little.`;
   }
 }
 
@@ -194,6 +197,8 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The loom clatters to life ${where}. The first bolt of cloth comes off the warp.`;
     case "hospital":
       return `The hospital opens ${where}. The first cot is made up.`;
+    case "tavern":
+      return `The tavern opens its doors. The first toast is raised.`;
   }
 }
 

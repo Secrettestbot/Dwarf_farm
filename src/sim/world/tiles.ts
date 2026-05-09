@@ -119,6 +119,10 @@ export const enum TileType {
    * colony's best-skilled medic with medicine XP every tick a wounded
    * dwarf rests on it (GDD §10.2 Tier 2 Medical Practice). */
   HospitalBed = 42,
+  /** Tavern counter — focal tile of a Tavern room. The barkeep stands
+   * here while pouring; visiting dwarves get a morale bump for stopping
+   * by. */
+  TavernCounter = 43,
 }
 
 export interface TileInfo {
@@ -173,6 +177,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.TannerStation]: { name: "tanner's bench", walkable: true, solid: false, color: 0x886040 },
   [TileType.LoomStation]: { name: "loom", walkable: true, solid: false, color: 0xd0c8b0 },
   [TileType.HospitalBed]: { name: "hospital cot", walkable: true, solid: false, color: 0xd0a0a0 },
+  [TileType.TavernCounter]: { name: "tavern counter", walkable: true, solid: false, color: 0x9a6a3a },
 };
 
 export function tileIsGem(t: number): boolean {

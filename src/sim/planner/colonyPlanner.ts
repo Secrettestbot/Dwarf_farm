@@ -118,6 +118,8 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // wounded dwarves heal substantially faster on the cots and the
   // colony's medic earns medicine XP every tick a wound is tended.
   hospital: { w: 4, h: 3, priority: 2 },
+  // Tavern: 5×4 social hall. The colony's morale-recovery space.
+  tavern: { w: 5, h: 4, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -242,6 +244,7 @@ export class ColonyPlanner {
     if (this.needsTannery(ctx) && this.placeRoom(ctx, "tannery")) return true;
     if (this.needsLoom(ctx) && this.placeRoom(ctx, "loom")) return true;
     if (this.needsHospital(ctx) && this.placeRoom(ctx, "hospital")) return true;
+    if (this.needsTavern(ctx) && this.placeRoom(ctx, "tavern")) return true;
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -439,6 +442,13 @@ export class ColonyPlanner {
     if (ctx.population < 10) return false;
     if (!(ctx.research?.completed ?? []).includes("medical_practice")) return false;
     return this.maintainedAndActiveOfKind("hospital", ctx.tick) === 0;
+  }
+
+  private needsTavern(ctx: PlannerContext): boolean {
+    // Tavern: a social space. No research gate — the architect drops one
+    // once the colony's big enough to want a centralised hangout.
+    if (ctx.population < 8) return false;
+    return this.maintainedAndActiveOfKind("tavern", ctx.tick) === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's

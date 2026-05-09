@@ -74,6 +74,8 @@ export function tick(sim: SimWorld): void {
   combatSystem(sim);
   healingSystem(sim);
   farmSystem(sim);
+  tavernSystem(sim);
+  legendarySpecialtiesSystem(sim);
   tradeSystem(sim);
   hollowKingSystem(sim);
   hollowKingManifestSystem(sim);
@@ -1043,6 +1045,98 @@ function countItemsAt(sim: SimWorld, x: number, y: number, kind: import("./ecs/c
     if (p.x === x && p.y === y && it.kind === kind) n++;
   }
   return n;
+}
+
+/** Tavern visits: once per in-game day, every dwarf below MORALE_HIGH
+ * picks up a small morale boost from time spent at the colony's
+ * tavern. Skipped while shelter modes are active — nobody drinks
+ * during an alarm. */
+const TAVERN_TICK_INTERVAL = TICKS_PER_DAY;
+const TAVERN_VISIT_BUMP = 5;
+const TAVERN_VISIT_CAP = 90;
+function tavernSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TAVERN_TICK_INTERVAL !== 0) return;
+  if (sim.emergency.mode === "alarm" || sim.emergency.mode === "evacuate") return;
+  let hasTavern = false;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind === "tavern" && b.status === "complete") {
+      hasTavern = true;
+      break;
+    }
+  }
+  if (!hasTavern) return;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const n = sim.needs.get(e);
+    if (!n) continue;
+    if (n.morale >= TAVERN_VISIT_CAP) continue;
+    n.morale = Math.min(TAVERN_VISIT_CAP, n.morale + TAVERN_VISIT_BUMP);
+  }
+}
+
+/** Legendary brewer + Legendary artist specialties (GDD §6.3): once
+ * per in-game season the colony fires a Reserve Ale event if a
+ * Legendary brewer is on staff with a brewery, or a Magnum Opus event
+ * if a Legendary artist is in the fortress. Cooldown is per-event so
+ * both can fire in the same season. */
+const LEGENDARY_SPECIALTY_INTERVAL = TICKS_PER_DAY * 30; // a season = 30 in-game days
+const LEGENDARY_THRESHOLD = 17;
+function legendarySpecialtiesSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % LEGENDARY_SPECIALTY_INTERVAL !== 0) return;
+  // Reserve Ale: Legendary brewer + complete brewery → fortress-wide
+  // morale bump and a chronicle entry. The colony's drink stockpile
+  // also gets a sizeable cask delivery.
+  const reserveBrewer = findLegendaryDwarf(sim, "brewing");
+  const hasBrewery = sim.planner.blueprints.some((b) => b.kind === "brewery" && b.status === "complete");
+  if (reserveBrewer !== -1 && hasBrewery) {
+    const dw = sim.dwarf.get(reserveBrewer);
+    sim.stockpile.drink += 50;
+    bumpAllMorale(sim, 8);
+    if (dw) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} pulls a Reserve Ale from the cellar. The colony toasts a barrel that has been waiting all season.`,
+      );
+    }
+  }
+  // Magnum Opus: Legendary artist anywhere in the fortress → a
+  // morale-defining work of art lands in the chronicle.
+  const magnumArtist = findLegendaryDwarf(sim, "artistry");
+  if (magnumArtist !== -1) {
+    const dw = sim.dwarf.get(magnumArtist);
+    bumpAllMorale(sim, 12);
+    if (dw) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} unveils a Magnum Opus — a work of art the colony will speak of for generations.`,
+      );
+    }
+  }
+}
+
+function findLegendaryDwarf(sim: SimWorld, skill: SkillId): EntityId {
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const dw = sim.dwarf.get(e);
+    if (!dw) continue;
+    if ((dw.skills[skill] ?? 1) >= LEGENDARY_THRESHOLD) return e;
+  }
+  return -1;
+}
+
+function bumpAllMorale(sim: SimWorld, amount: number): void {
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const n = sim.needs.get(ents[i]);
+    if (!n) continue;
+    n.morale = Math.min(100, n.morale + amount);
+  }
 }
 
 function farmSystem(sim: SimWorld): void {

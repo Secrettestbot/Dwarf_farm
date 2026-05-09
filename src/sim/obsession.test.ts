@@ -6,8 +6,8 @@ import { TICKS_PER_DAY } from "./time";
 
 describe("Obsessive (GDD §6.5)", () => {
   it("an Obsessive dwarf eventually falls into a fixation over a few years", () => {
-    const w = generateWorld({ seed: 1311, width: 200, height: 500 });
-    const sim = new SimWorld(1311, w.grid, w.surfaceY, w.spawn);
+    const w = generateWorld({ seed: 1313, width: 200, height: 500 });
+    const sim = new SimWorld(1313, w.grid, w.surfaceY, w.spawn);
     const id = sim.spawnDwarf({
       name: "Fixated", x: w.spawn.x, y: w.spawn.y, age: 30, traitIds: ["obsessive"],
     });

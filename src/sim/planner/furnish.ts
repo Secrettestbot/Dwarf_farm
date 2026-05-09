@@ -59,6 +59,9 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "hospital":
       furnishHospital(grid, b);
       break;
+    case "tavern":
+      furnishTavern(grid, b);
+      break;
     case "library":
       furnishLibrary(grid, b);
       break;
@@ -133,6 +136,20 @@ function furnishFarm(grid: TileGrid, b: Blueprint): void {
   // planner doesn't know the current tick, so the farmSystem fills in
   // the actual planted-at tick on its first run over the farm.
   b.cellTendedAt = new Int32Array(b.cavity.length).fill(-1);
+}
+
+/** Tavern: a counter dead-centre for the barkeep, plus a row of
+ * tables so the room reads as a hangout, not just a bar. */
+function furnishTavern(grid: TileGrid, b: Blueprint): void {
+  const cx = b.originX + Math.floor(b.width / 2);
+  const cy = b.originY + Math.floor(b.height / 2);
+  if (cavityContains(b, cx, cy)) grid.setTile(cx, cy, TileType.TavernCounter);
+  // Tables flanking the counter for visiting dwarves to sit at.
+  const tx1 = b.originX + 1;
+  const tx2 = b.originX + b.width - 2;
+  const ty = b.originY + b.height - 1;
+  if (tx1 !== cx && cavityContains(b, tx1, ty)) grid.setTile(tx1, ty, TileType.Table);
+  if (tx2 !== cx && tx2 !== tx1 && cavityContains(b, tx2, ty)) grid.setTile(tx2, ty, TileType.Table);
 }
 
 /** Hospital: two cots along the back wall so two wounded dwarves can
