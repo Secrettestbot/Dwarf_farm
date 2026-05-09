@@ -1,6 +1,7 @@
 import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY } from "../sim/time";
 import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
+import { isMuted, setMuted } from "../audio/sound";
 
 export interface HudHandlers {
   fortressName: string;
@@ -11,6 +12,8 @@ export interface HudHandlers {
    * read it lazily — the live SimWorld instance can be replaced by
    * save/restore between HUD construction and the click. */
   worldSeed(): number;
+  /** Re-open the tutorial overlay. */
+  onShowTutorial(): void;
 }
 
 export class Hud {
@@ -99,6 +102,30 @@ export class Hud {
       window.setTimeout(() => { seedButton.textContent = "Share seed"; }, 1800);
     });
     tools.appendChild(seedButton);
+
+    // Mute toggle — Web Audio is the colony's only sound output, so
+    // a single button is enough. Persists in localStorage.
+    const muteButton = document.createElement("button");
+    muteButton.className = "btn";
+    muteButton.title = "Toggle sound";
+    const refreshMute = () => {
+      muteButton.textContent = isMuted() ? "Sound: off" : "Sound: on";
+    };
+    refreshMute();
+    muteButton.addEventListener("click", () => {
+      setMuted(!isMuted());
+      refreshMute();
+    });
+    tools.appendChild(muteButton);
+
+    // Tutorial replay — opens the new-player overlay any time.
+    const helpButton = document.createElement("button");
+    helpButton.className = "btn";
+    helpButton.textContent = "?";
+    helpButton.title = "Show tutorial";
+    helpButton.addEventListener("click", () => handlers.onShowTutorial());
+    tools.appendChild(helpButton);
+
     top.appendChild(tools);
 
     const help = document.createElement("div");

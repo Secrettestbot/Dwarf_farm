@@ -19,6 +19,8 @@ import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
 import { WorkerToMain } from "./shared/protocol";
 import { Founder } from "./sim/dwarves/founders";
 import { narrateFounding } from "./sim/events/narrator";
+import { playEventSound } from "./audio/sound";
+import { showTutorial, tutorialAlreadySeen } from "./ui/tutorial";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
 // 200×500 world for speed; live play uses the full size.
@@ -80,6 +82,11 @@ async function boot() {
     camera.setZoom(2);
     active = { sim, slotId: choice.slotId, fortressName: founderResult.fortressName, mode: choice.mode };
     await persist(active, camera);
+    // First-fortress tutorial — shown once across the player's
+    // localStorage. The replay button on the HUD opens it again.
+    if (!tutorialAlreadySeen()) {
+      await showTutorial(uiHost);
+    }
   } else {
     const save = await loadGame(choice.slotId);
     if (!save) throw new Error(`No save in ${choice.slotId}`);
@@ -201,6 +208,9 @@ function runGame(active: ActiveFortress, camera: Camera) {
       flashSave();
     },
     worldSeed: () => sim.seed,
+    onShowTutorial: () => {
+      void showTutorial(uiHost);
+    },
   });
   const eventPanel = new EventLogPanel(uiHost);
   const inspector = new DwarfInspector(uiHost);
@@ -274,6 +284,11 @@ function runGame(active: ActiveFortress, camera: Camera) {
   });
 
   // ---- Game loop ----
+  // Sound trigger: when the chronicle grows, play a category-tagged
+  // motif for the new entries. We also rate-limit to one sound per
+  // category per frame so a single tick that produces a milestone +
+  // a crisis + four constructions doesn't sound like a slot machine.
+  let lastEventCount = sim.events.size();
   let lastFrame = performance.now();
   function frame(now: number) {
     const dt = Math.min(100, now - lastFrame);
@@ -286,6 +301,20 @@ function runGame(active: ActiveFortress, camera: Camera) {
     if (autoSaveAccum >= 60) {
       autoSaveAccum = 0;
       void persist(active, camera);
+    }
+
+    // Play sounds for any chronicle entries added this frame, deduped
+    // by category so a busy tick doesn't overflow the audio bus.
+    const evCount = sim.events.size();
+    if (evCount > lastEventCount) {
+      const played = new Set<string>();
+      for (let i = lastEventCount; i < evCount; i++) {
+        const cat = sim.events.events[i].category;
+        if (played.has(cat)) continue;
+        played.add(cat);
+        playEventSound(cat);
+      }
+      lastEventCount = evCount;
     }
 
     minimap.refresh(sim, now);
