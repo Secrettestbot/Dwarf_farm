@@ -21,6 +21,8 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   armoury: { fill: "rgba(180, 180, 220, 0.10)", stroke: "rgba(200, 200, 240, 0.65)" },
   throne_room: { fill: "rgba(160, 100, 200, 0.12)", stroke: "rgba(180, 120, 230, 0.7)" },
   pump_station: { fill: "rgba(60, 130, 170, 0.12)", stroke: "rgba(90, 160, 200, 0.65)" },
+  mason: { fill: "rgba(140, 140, 160, 0.12)", stroke: "rgba(170, 170, 190, 0.65)" },
+  jeweller: { fill: "rgba(180, 130, 220, 0.12)", stroke: "rgba(200, 160, 240, 0.7)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -193,5 +195,7 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "armoury": return "armoury";
     case "throne_room": return "throne";
     case "pump_station": return "pump";
+    case "mason": return "mason";
+    case "jeweller": return "jeweller";
   }
 }

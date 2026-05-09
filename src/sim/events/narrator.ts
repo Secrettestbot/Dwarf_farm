@@ -89,6 +89,10 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A throne room is sketched ${where}. The colony plans for ceremony.`;
     case "pump_station":
       return `A pump station is sketched ${where}. The flood has somewhere to go.`;
+    case "mason":
+      return `A mason's workshop is mapped out ${where}. Rough stone will become block.`;
+    case "jeweller":
+      return `A jeweller's workshop is sketched ${where}. Rough stones will catch the light.`;
   }
 }
 
@@ -145,6 +149,10 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The throne room stands finished ${where}. The hall awaits its first procession.`;
     case "pump_station":
       return `The pump station is built ${where}. The flood begins to recede.`;
+    case "mason":
+      return `The mason's workshop opens ${where}. The first block is cut.`;
+    case "jeweller":
+      return `The jeweller's workshop opens ${where}. The first cut gem catches the light.`;
   }
 }
 

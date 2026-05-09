@@ -128,9 +128,11 @@ export class Hud {
       `<span style="color:#8aa9ff;">Drink ${sp.drink}</span> · ` +
       (sp.meals > 0 ? `<span style="color:#e0c080;">Meals ${sp.meals}</span> · ` : "") +
       `Ore ${sp.ore} · Stone ${sp.stone}` +
+      (sp.blocks > 0 ? ` · <span style="color:#b8b8c8;">Blocks ${sp.blocks}</span>` : "") +
       (sp.bars > 0 ? ` · <span style="color:#e0a070;">Bars ${sp.bars}</span>` : "") +
       (sp.tools > 0 ? ` · <span style="color:#e0c080;">Tools ${sp.tools}</span>` : "") +
-      (sp.gems > 0 ? ` · <span style="color:#a8d8e0;">Gems ${sp.gems}</span>` : "");
+      (sp.gems > 0 ? ` · <span style="color:#a8d8e0;">Gems ${sp.gems}</span>` : "") +
+      (sp.cut_gems > 0 ? ` · <span style="color:#d8a8f0;">Cut Gems ${sp.cut_gems}</span>` : "");
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }

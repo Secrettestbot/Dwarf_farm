@@ -133,6 +133,8 @@ export interface SavedStockpile {
   tools?: number;
   gems?: number;
   meals?: number;
+  blocks?: number;
+  cut_gems?: number;
 }
 
 export interface SaveV1 {

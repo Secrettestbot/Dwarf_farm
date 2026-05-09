@@ -43,6 +43,14 @@ export interface Stockpile {
    * (90 vs 60 per unit). progressEat prefers meals when both are
    * available. */
   meals: number;
+  /** Cut stone blocks — Mason's Workshop output (GDD §8.2). Used by
+   * future masonry & mortaring research to build constructed walls /
+   * fortifications; for now just accumulates as a counter. */
+  blocks: number;
+  /** Cut gems — Jeweller's Workshop output (GDD §10.2 Tier 3 Gem
+   * Cutting). Trade-good with no in-game consumer yet beyond the
+   * trade caravan. */
+  cut_gems: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -103,6 +111,8 @@ export class SimWorld {
     tools: 0,
     gems: 0,
     meals: 0,
+    blocks: 0,
+    cut_gems: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-

@@ -88,6 +88,13 @@ export const enum TileType {
    * drains one adjacent water tile per pump cycle, reclaiming flooded
    * corridors after an aquifer breach. */
   PumpStation = 33,
+  /** Mason's bench — workstation in a Mason's Workshop (GDD §10.2
+   * Tier 1 Basic Stonecutting). Cuts loose stone into blocks. */
+  MasonStation = 34,
+  /** Jeweller's bench — workstation in a Jeweller's Workshop (GDD
+   * §10.2 Tier 3 Gem Cutting). Cuts rough gems into cut gems for
+   * trade and inlay. */
+  JewellerStation = 35,
 }
 
 export interface TileInfo {
@@ -133,6 +140,8 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Throne]: { name: "throne", walkable: true, solid: false, color: 0x6040a0 },
   [TileType.Aquifer]: { name: "aquifer", walkable: false, solid: true, color: 0x3a5078 },
   [TileType.PumpStation]: { name: "pump", walkable: true, solid: false, color: 0x4080a0 },
+  [TileType.MasonStation]: { name: "mason's bench", walkable: true, solid: false, color: 0x9090a0 },
+  [TileType.JewellerStation]: { name: "jeweller's bench", walkable: true, solid: false, color: 0xb888d0 },
 };
 
 export function tileIsGem(t: number): boolean {

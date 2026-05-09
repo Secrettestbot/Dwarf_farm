@@ -163,6 +163,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       tools: sim.stockpile.tools,
       gems: sim.stockpile.gems,
       meals: sim.stockpile.meals,
+      blocks: sim.stockpile.blocks,
+      cut_gems: sim.stockpile.cut_gems,
     },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
@@ -371,6 +373,8 @@ export function restore(save: SaveV1): SimWorld {
     if (save.stockpile.tools !== undefined) sim.stockpile.tools = save.stockpile.tools;
     if (save.stockpile.gems !== undefined) sim.stockpile.gems = save.stockpile.gems;
     if (save.stockpile.meals !== undefined) sim.stockpile.meals = save.stockpile.meals;
+    if (save.stockpile.blocks !== undefined) sim.stockpile.blocks = save.stockpile.blocks;
+    if (save.stockpile.cut_gems !== undefined) sim.stockpile.cut_gems = save.stockpile.cut_gems;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;

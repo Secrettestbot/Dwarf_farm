@@ -92,6 +92,13 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // flooded corridors after an aquifer breach; gated on the Tier 2
   // Hydraulic Basics topic + a breach having actually happened.
   pump_station: { w: 3, h: 3, priority: 2 },
+  // Mason's Workshop: 3×3 with a bench in the centre. Gated on the
+  // Tier 1 Basic Stonecutting topic — the colony has to know how
+  // before it cuts stone.
+  mason: { w: 3, h: 3, priority: 2 },
+  // Jeweller's Workshop: 3×3. Tier 3 Gem Cutting + at least one gem
+  // discovered before the architect bothers laying it out.
+  jeweller: { w: 3, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -209,6 +216,8 @@ export class ColonyPlanner {
     if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
     if (this.needsThroneRoom(ctx) && this.placeRoom(ctx, "throne_room")) return true;
     if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
+    if (this.needsMason(ctx) && this.placeRoom(ctx, "mason")) return true;
+    if (this.needsJeweller(ctx) && this.placeRoom(ctx, "jeweller")) return true;
 
     // 2.9 Stairwell — every few completed rooms the architect drops a
     //     vertical 2×6 shaft so the colony actually descends instead of
@@ -336,6 +345,25 @@ export class ColonyPlanner {
     if (!ctx.aquiferBreached) return false;
     if (!(ctx.research?.completed ?? []).includes("hydraulic_basics")) return false;
     return this.maintainedAndActiveOfKind("pump_station", ctx.tick) === 0;
+  }
+
+  private needsMason(ctx: PlannerContext): boolean {
+    // Mason's Workshop is gated on Basic Stonecutting (Tier 1) — the
+    // first masonry topic the scholars will research. Once they have
+    // it, the architect lays out a workshop so the colony can start
+    // turning rough stone into blocks.
+    if (ctx.population < 6) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_stonecutting")) return false;
+    return this.maintainedAndActiveOfKind("mason", ctx.tick) === 0;
+  }
+
+  private needsJeweller(ctx: PlannerContext): boolean {
+    // Tier 3 Gem Cutting gates the Jeweller. Plus the colony has to
+    // have seen at least one gem — laying out a Jeweller's Workshop
+    // before any gems exist would be ornament for ornament's sake.
+    if (ctx.population < 10) return false;
+    if (!(ctx.research?.completed ?? []).includes("gem_cutting")) return false;
+    return this.maintainedAndActiveOfKind("jeweller", ctx.tick) === 0;
   }
 
   /**
