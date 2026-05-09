@@ -484,6 +484,7 @@ function floodSystem(sim: SimWorld): void {
     if (!grid.inBounds(nx, ny)) continue;
     if (!grid.isWalkable(nx, ny)) continue;
     grid.setTile(nx, ny, TileType.Water);
+    sim.regions.invalidate();
     return;
   }
   // Source had no spread targets — happens if the breach tile is
@@ -942,13 +943,16 @@ function sweepDoors(sim: SimWorld, barred: boolean): void {
   const from = barred ? TileType.Door : TileType.DoorBarred;
   const to = barred ? TileType.DoorBarred : TileType.Door;
   const grid = sim.grid;
+  let changed = false;
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
       if (grid.getTile(x, y) === from) {
         grid.setTile(x, y, to);
+        changed = true;
       }
     }
   }
+  if (changed) sim.regions.invalidate();
 }
 
 // ---- Narrative milestones (GDD §10.2) ---------------------------------
@@ -1920,6 +1924,7 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   if (best) {
     sim.grid.setTile(best.x, best.y, TileType.CorridorFloor);
+    sim.regions.invalidate();
   }
   // Operating the pump is engineering work — credit the skill so a
   // dedicated pump-jockey actually levels up over months of flood
@@ -2420,6 +2425,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       tileType === TileType.Tree ? TileType.Grass : TileType.CorridorFloor;
     sim.grid.setTile(job.targetX, job.targetY, postMineTile);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
+    sim.regions.invalidate();
     sim.releaseMineTarget(job.targetX, job.targetY);
     if (tileType === TileType.Tree) {
       awardSkillXp(sim, e, "carpentry", 1);

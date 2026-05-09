@@ -5,6 +5,7 @@ import { Rng } from "../rng";
 import { TileGrid } from "./grid";
 import { ColonyPlanner } from "../planner/colonyPlanner";
 import { AStar } from "../pathing/astar";
+import { RegionMap } from "../pathing/regionMap";
 import { EventLog } from "../events/eventLog";
 import { TICKS_PER_YEAR } from "../time";
 import { Hostile, Health, HOSTILE_DEFS, HostileKind } from "../hostiles/types";
@@ -89,6 +90,11 @@ export class SimWorld {
   readonly ecs: EcsWorld;
   readonly planner = new ColonyPlanner();
   readonly astar: AStar;
+  /** Coarse-grained region map — pairs with AStar to fast-fail
+   * pathfinds whose start and goal lie in disconnected walkable
+   * regions. Invalidated whenever walkable space changes (mining,
+   * flooding, doors barring). */
+  readonly regions: RegionMap;
 
   // Component stores.
   readonly position: ComponentStore<Position>;
@@ -229,6 +235,8 @@ export class SimWorld {
     this.worldRng = root.fork("world");
     this.plannerRng = root.fork("planner");
     this.astar = new AStar(grid.width, grid.height);
+    this.regions = new RegionMap(grid.width, grid.height);
+    this.astar.regions = this.regions;
   }
 
   spawnDwarf(spec: {

@@ -1,7 +1,14 @@
 import { TileGrid } from "../world/grid";
+import { RegionMap } from "./regionMap";
 
 // 8-connected A* with octile heuristic. All buffers preallocated and reused
 // across calls — `findPath` is allocation-free in the hot path.
+//
+// Hierarchical fast-fail: when a RegionMap is supplied, A* checks
+// chunk-resolution connectivity first and returns null immediately for
+// goals in a disconnected region. This is the main performance win on
+// the 400×2000 world — the colony stops burning 6000-node searches on
+// targets behind unmined rock.
 
 const CARDINAL_COST = 10;
 const DIAGONAL_COST = 14;
@@ -32,6 +39,10 @@ export class AStar {
   private heap: Int32Array;
   private heapSize = 0;
 
+  /** Optional region map — when set, findPath fast-fails on
+   * disconnected goals before running the heap-based search. */
+  regions: RegionMap | null = null;
+
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
@@ -56,6 +67,13 @@ export class AStar {
       const out = new Int32Array(1);
       out[0] = (sy << 16) | sx;
       return out;
+    }
+    // Hierarchical fast-fail: if start and goal lie in disconnected
+    // regions of walkable space, no A* search will find a path. The
+    // region map is much cheaper to consult than running 6000 nodes
+    // of A* only to time out.
+    if (this.regions && !this.regions.connected(grid, sx, sy, gx, gy)) {
+      return null;
     }
     this.generation = (this.generation + 1) | 0;
     if (this.generation === 0) this.generation = 1;
