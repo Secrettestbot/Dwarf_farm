@@ -1057,6 +1057,27 @@ const TAVERN_VISIT_CAP = 90;
 function tavernSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
   if (sim.tick % TAVERN_TICK_INTERVAL !== 0) return;
+  // Leadership XP: once per in-game day, the dwarf with the highest
+  // leadership skill earns one practice-tick. The skill represents the
+  // colony's informal captaincy — quartermaster, foreman, the dwarf
+  // whose word carries weight at the dining hall — so it grows with
+  // time spent leading. This fires regardless of whether a tavern
+  // exists; even shelter modes don't suspend it.
+  let bestLeader: EntityId = -1;
+  let bestLeaderSkill = 0;
+  const dEnts = sim.dwarf.entities;
+  for (let i = 0; i < dEnts.length; i++) {
+    const id = dEnts[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    const skill = dw.skills.leadership ?? 1;
+    if (bestLeader === -1 || skill > bestLeaderSkill || (skill === bestLeaderSkill && id < bestLeader)) {
+      bestLeader = id;
+      bestLeaderSkill = skill;
+    }
+  }
+  if (bestLeader !== -1) awardSkillXp(sim, bestLeader, "leadership", 1);
+
   if (sim.emergency.mode === "alarm" || sim.emergency.mode === "evacuate") return;
   let hasTavern = false;
   for (const b of sim.planner.blueprints) {
@@ -1865,6 +1886,11 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (best) {
     sim.grid.setTile(best.x, best.y, TileType.CorridorFloor);
   }
+  // Operating the pump is engineering work — credit the skill so a
+  // dedicated pump-jockey actually levels up over months of flood
+  // duty. Pumps are the only engineering job for now; future
+  // mechanisms (drawbridges, traps) wire in here too.
+  awardSkillXp(sim, e, "engineering", 1);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
   sim.pathing.remove(e);
@@ -2219,6 +2245,10 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     else if (carrying.kind === "hide") sim.stockpile.hide++;
   }
   sim.carrying.remove(e);
+  // Hauling earns hauling XP — every successful delivery counts as
+  // practice. The Strong-Backed and Patient traits already factor into
+  // movement and persistence; here we let the skill itself climb.
+  awardSkillXp(sim, e, "hauling", 1);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
   sim.pathing.remove(e);
@@ -2533,6 +2563,7 @@ function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   job.progress++;
   if (job.progress >= TEND_TICKS) {
+    awardSkillXp(sim, e, "farming", 1);
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -2576,6 +2607,10 @@ function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: {
   }
   job.progress++;
   if (job.progress >= MAINTAIN_TICKS) {
+    // Maintenance is general upkeep — credit masonry XP, the broad
+    // industry skill that matches scrubbing, fitting blocks, and
+    // tidying joinery.
+    awardSkillXp(sim, e, "masonry", 1);
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -2933,6 +2968,11 @@ function combatSystem(sim: SimWorld): void {
         (equipped && ambidextrous ? 4 : 0) + // Two-weapon flourish (GDD §6.5).
         (inFury ? 30 : 0); // The Fury: huge bonus, hostiles fall fast.
       hHealth.hp -= damage;
+      // Every successful retaliation hit earns military XP — combat
+      // experience is the only way the skill grows. Soldiers practising
+      // against rats and spiders eventually reach Skilled / Expert and
+      // their squad bonus actually matters.
+      awardSkillXp(sim, target, "military", 1);
       if (hHealth.hp <= 0) {
         const dwarfName = dwarf?.name ?? "A dwarf";
         sim.events.add(
