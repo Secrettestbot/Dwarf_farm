@@ -83,6 +83,32 @@ describe("more wired traits (GDD §6.5)", () => {
     expect(sim.needs.get(id)!.morale).toBeLessThan(50);
   });
 
+  it("Focused/Distractible scale interruptScale and distractChance", () => {
+    expect(effectsFor(["focused"]).interruptScale).toBe(0.5);
+    expect(effectsFor(["distractible"]).interruptScale).toBe(1.5);
+    expect(effectsFor(["distractible"]).distractChance).toBeGreaterThan(0);
+    expect(effectsFor([]).distractChance).toBe(0);
+  });
+
+  it("Charismatic gives the trade broker a deal-bonus", () => {
+    expect(effectsFor(["charismatic"]).tradeBonus).toBeGreaterThan(0);
+  });
+
+  it("Antagonistic has a negative auraMorale", () => {
+    expect(effectsFor(["antagonistic"]).auraMorale).toBe(-1);
+  });
+
+  it("an Antagonistic dwarf drops the morale of nearby dwarves over an hour", () => {
+    const w = generateWorld({ seed: 1211, width: 200, height: 500 });
+    const sim = new SimWorld(1211, w.grid, w.surfaceY, w.spawn);
+    sim.spawnDwarf({ name: "Grouch", x: w.spawn.x, y: w.spawn.y, age: 30, traitIds: ["antagonistic"] });
+    sim.spawnDwarf({ name: "Bystander", x: w.spawn.x + 2, y: w.spawn.y, age: 30 });
+    const bystander = sim.dwarf.entities[1];
+    sim.needs.get(bystander)!.morale = 80;
+    for (let i = 0; i < 60; i++) tick(sim);
+    expect(sim.needs.get(bystander)!.morale).toBeLessThan(80);
+  });
+
   it("a Slow dwarf takes fewer steps than the path length over a fixed window", () => {
     const w = generateWorld({ seed: 1209, width: 200, height: 500 });
     const sim = new SimWorld(1209, w.grid, w.surfaceY, w.spawn);

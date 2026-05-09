@@ -39,6 +39,22 @@ export interface TraitEffects {
   /** Multiplier on morale gained from a high-quality room — Proud
    * dwarves care twice as much, Humble ones half. */
   roomQualityScale: number;
+  /** Multiplier on the survival-need interrupt threshold. Focused
+   * dwarves resist interruption (lower threshold = need has to bite
+   * harder to drop the current job). Distractible ones interrupt at
+   * the slightest twinge. Default 1.0. */
+  interruptScale: number;
+  /** Per-tick chance to abandon a non-survival job out of pure
+   * distraction (GDD §6.5). Adds randomness on top of the trait-
+   * driven threshold scaling. */
+  distractChance: number;
+  /** Trade-deal bonus per Charismatic broker (GDD §6.5 Charismatic):
+   * stacks multiplicatively on the broker's Trading-skill bonus. */
+  tradeBonus: number;
+  /** Per-hour passive morale delta this dwarf hands to every other
+   * dwarf within LEADER_AURA_RADIUS. Natural Leader sets +1, Antagonistic
+   * sets -1. */
+  auraMorale: number;
 }
 
 export function defaultEffects(): TraitEffects {
@@ -56,6 +72,10 @@ export function defaultEffects(): TraitEffects {
     bereavementScale: 1,
     moveSpeed: 1,
     roomQualityScale: 1,
+    interruptScale: 1,
+    distractChance: 0,
+    tradeBonus: 0,
+    auraMorale: 0,
   };
 }
 
@@ -85,6 +105,17 @@ function applyTraitEffects(e: TraitEffects, id: string): void {
       break;
     case "efficient":
       e.workSpeed *= 1.1;
+      break;
+    case "focused":
+      // Focused dwarves resist interruption — only the most critical
+      // need pulls them off the bench.
+      e.interruptScale = 0.5;
+      break;
+    case "distractible":
+      // Distractible dwarves interrupt at the slightest twinge AND
+      // sometimes drop work for no need-driven reason at all.
+      e.interruptScale = 1.5;
+      e.distractChance = 0.005;
       break;
     // Mood baseline
     case "cheerful":
@@ -140,6 +171,19 @@ function applyTraitEffects(e: TraitEffects, id: string): void {
       break;
     case "humble":
       e.roomQualityScale = 0.25;
+      break;
+    case "natural_leader":
+      // Captain's presence — nearby dwarves drift upward.
+      e.auraMorale = 1;
+      break;
+    case "antagonistic":
+      // Frequent arguments — nearby dwarves drift downward.
+      e.auraMorale = -1;
+      break;
+    case "charismatic":
+      // Better trade outcomes (GDD §6.5 — also lifts tavern morale,
+      // which lands when the tavern arrives).
+      e.tradeBonus = 0.15;
       break;
     case "iron_constitution":
       e.needDecay *= 1.3; // 30% slower decay

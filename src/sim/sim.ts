@@ -237,10 +237,14 @@ function passiveTraitSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
   if (sim.tick % PASSIVE_TRAIT_INTERVAL !== 0) return;
   const ents = sim.dwarf.entities;
-  // Natural Leader pass.
+  // Aura pass — Natural Leader (+1) and Antagonistic (-1) both run
+  // through the same shape: walk every dwarf within LEADER_AURA_RADIUS
+  // and apply auraMorale.
   for (const id of ents) {
     const dw = sim.dwarf.get(id);
-    if (!dw || !dw.traitIds.includes("natural_leader")) continue;
+    if (!dw) continue;
+    const aura = effectsFor(dw.traitIds).auraMorale;
+    if (aura === 0) continue;
     const pos = sim.position.get(id);
     if (!pos) continue;
     for (const other of ents) {
@@ -250,7 +254,8 @@ function passiveTraitSystem(sim: SimWorld): void {
       const dy = op.y - pos.y;
       if (dx * dx + dy * dy > LEADER_AURA_RADIUS * LEADER_AURA_RADIUS) continue;
       const n = sim.needs.get(other);
-      if (n) n.morale = Math.min(100, n.morale + 1);
+      if (!n) continue;
+      n.morale = Math.max(0, Math.min(100, n.morale + aura));
     }
   }
   // Phobia: Deep Rock pass.
@@ -626,7 +631,10 @@ function tradeSystem(sim: SimWorld): void {
   else if (drinkLow) kind = "drink";
   else kind = "tools";
   // Broker bonus: each level above 1 adds 4% to the gain.
-  const brokerBonus = 1 + Math.max(0, bestSkill - 1) * 0.04;
+  // Skill-driven bonus + Charismatic bump (GDD §6.5).
+  const brokerDw = bestBroker !== -1 ? sim.dwarf.get(bestBroker) : undefined;
+  const tradeBonus = brokerDw ? effectsFor(brokerDw.traitIds).tradeBonus : 0;
+  const brokerBonus = (1 + Math.max(0, bestSkill - 1) * 0.04) * (1 + tradeBonus);
   const gain = Math.round(TRADE_BASE_GAIN * brokerBonus);
   sim.stockpile.stone -= TRADE_BASE_COST;
   sim.stockpile[kind] += gain;
@@ -1428,17 +1436,39 @@ function jobAssignmentSystem(sim: SimWorld): void {
   for (let i = 0; i < dwarves.length; i++) {
     const e = dwarves[i];
     // Interrupt: critical need overrides a non-survival job in flight.
+    // Trait-driven scaling — Focused dwarves resist interruption,
+    // Distractible ones flake at the slightest twinge or for no
+    // reason at all (GDD §6.5).
     const job = sim.job.get(e);
     if (job) {
       const needs = sim.needs.get(e);
+      const dw = sim.dwarf.get(e);
+      const eff = dw ? effectsFor(dw.traitIds) : null;
+      const scale = eff?.interruptScale ?? 1;
+      const tHi = INTERRUPT_THIRST * scale;
+      const hHi = INTERRUPT_HUNGER * scale;
       const survivalKind =
         job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter";
+      let interrupt = false;
       if (
         needs &&
         !survivalKind &&
-        ((needs.thirst <= INTERRUPT_THIRST && sim.stockpile.drink > 0) ||
-          (needs.hunger <= INTERRUPT_HUNGER && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)))
+        ((needs.thirst <= tHi && sim.stockpile.drink > 0) ||
+          (needs.hunger <= hHi && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)))
       ) {
+        interrupt = true;
+      }
+      // Distractible: a small chance per tick to abandon a non-
+      // survival job for no need-driven reason. Deterministic via aiRng.
+      if (
+        !interrupt &&
+        !survivalKind &&
+        eff && eff.distractChance > 0 &&
+        sim.aiRng.nextFloat() < eff.distractChance
+      ) {
+        interrupt = true;
+      }
+      if (interrupt) {
         if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
         sim.job.remove(e);
         sim.pathing.remove(e);

@@ -40,6 +40,14 @@ describe("dwarf aging", () => {
         n.sleep = 100;
         n.social = 100;
       }
+      // Also pin HP — over three years, RNG-driven hostile spawns can
+      // catch Borin in a fight regardless of needs. The test is about
+      // calendar-driven aging, not survival.
+      const hp = sim.health.get(e);
+      if (hp) {
+        hp.hp = hp.maxHp;
+        hp.lastAttackTick = 0;
+      }
       tick(sim);
     }
     expect(sim.ageOf(e)).toBe(28);
