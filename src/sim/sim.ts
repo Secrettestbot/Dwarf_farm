@@ -2889,9 +2889,15 @@ function hostileSpawnSystem(sim: SimWorld): void {
 function pickHostileKind(sim: SimWorld, deepestY: number): HostileKind {
   const reachableDepth = deepestY - sim.spawn.y;
   const eligible: HostileKind[] = ["cave_rat"]; // always available
+  if (reachableDepth >= HOSTILE_DEFS.cave_bat.minDepth) eligible.push("cave_bat");
   if (reachableDepth >= HOSTILE_DEFS.cave_spider.minDepth) eligible.push("cave_spider");
   if (reachableDepth >= HOSTILE_DEFS.goblin_scout.minDepth) eligible.push("goblin_scout", "goblin_scout");
+  if (reachableDepth >= HOSTILE_DEFS.cave_bear.minDepth) eligible.push("cave_bear");
   if (reachableDepth >= HOSTILE_DEFS.cave_troll.minDepth) eligible.push("cave_troll");
+  if (reachableDepth >= HOSTILE_DEFS.giant_spider.minDepth) eligible.push("giant_spider");
+  if (reachableDepth >= HOSTILE_DEFS.fire_imp.minDepth) eligible.push("fire_imp");
+  if (reachableDepth >= HOSTILE_DEFS.undead.minDepth) eligible.push("undead");
+  if (reachableDepth >= HOSTILE_DEFS.automaton.minDepth) eligible.push("automaton");
   return eligible[sim.aiRng.nextRange(0, eligible.length)];
 }
 
