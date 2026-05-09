@@ -1069,6 +1069,14 @@ function farmSystem(sim: SimWorld): void {
           sim.spawnItem({ kind: "food", x, y });
         }
       }
+      // Occasional fibre yield: cave plants ribbon the deeper farm
+      // cavities with stringy fungal threads the colony spins into
+      // rope. Goes straight to the stockpile counter — no item entity,
+      // no hauling. Rate is a quarter the food yield so rope stays
+      // scarce relative to ale and meals.
+      if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE * 0.25) {
+        sim.stockpile.rope++;
+      }
     }
   }
 }

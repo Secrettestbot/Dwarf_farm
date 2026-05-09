@@ -53,6 +53,9 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "tannery":
       furnishWorkshop(grid, b, TileType.TannerStation);
       break;
+    case "loom":
+      furnishWorkshop(grid, b, TileType.LoomStation);
+      break;
     case "library":
       furnishLibrary(grid, b);
       break;

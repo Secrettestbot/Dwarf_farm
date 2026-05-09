@@ -140,6 +140,8 @@ export interface SavedStockpile {
   pots?: number;
   hide?: number;
   leather?: number;
+  rope?: number;
+  cloth?: number;
 }
 
 export interface SaveV1 {

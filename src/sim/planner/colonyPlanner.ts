@@ -111,6 +111,9 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   kiln: { w: 3, h: 3, priority: 2 },
   // Tannery: 3×3 workshop. Tier 2 Textile Craft gates it.
   tannery: { w: 3, h: 3, priority: 2 },
+  // Loom: 3×3 workshop. Tier 1 Rope & Fibre gates it; rope accumulates
+  // off the colony's farm cells, cloth comes back out.
+  loom: { w: 3, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -233,6 +236,7 @@ export class ColonyPlanner {
     if (this.needsCarpenter(ctx) && this.placeRoom(ctx, "carpenter")) return true;
     if (this.needsKiln(ctx) && this.placeRoom(ctx, "kiln")) return true;
     if (this.needsTannery(ctx) && this.placeRoom(ctx, "tannery")) return true;
+    if (this.needsLoom(ctx) && this.placeRoom(ctx, "loom")) return true;
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -413,6 +417,15 @@ export class ColonyPlanner {
     if (ctx.population < 8) return false;
     if (!(ctx.research?.completed ?? []).includes("textile_craft")) return false;
     return this.maintainedAndActiveOfKind("tannery", ctx.tick) === 0;
+  }
+
+  private needsLoom(ctx: PlannerContext): boolean {
+    // Loom sits behind Tier 1 Rope & Fibre. Pop ≥ 6 — it's a small
+    // craft, not a heavy industry, so a mid-sized colony can afford
+    // a weaver.
+    if (ctx.population < 6) return false;
+    if (!(ctx.research?.completed ?? []).includes("rope_and_fibre")) return false;
+    return this.maintainedAndActiveOfKind("loom", ctx.tick) === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's

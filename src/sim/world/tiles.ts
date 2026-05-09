@@ -112,6 +112,9 @@ export const enum TileType {
   /** Tanning bench — workstation in a Tannery (GDD §10.2 Tier 2
    * Textile Craft). Soaks raw hides into supple leather. */
   TannerStation = 40,
+  /** Loom — workstation in a Loom Workshop (GDD §10.2 Tier 1 Rope &
+   * Fibre). Spins rope into cloth. */
+  LoomStation = 41,
 }
 
 export interface TileInfo {
@@ -164,6 +167,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.CarpenterStation]: { name: "carpenter's bench", walkable: true, solid: false, color: 0xc08a4a },
   [TileType.KilnStation]: { name: "kiln", walkable: true, solid: false, color: 0xb86040 },
   [TileType.TannerStation]: { name: "tanner's bench", walkable: true, solid: false, color: 0x886040 },
+  [TileType.LoomStation]: { name: "loom", walkable: true, solid: false, color: 0xd0c8b0 },
 };
 
 export function tileIsGem(t: number): boolean {

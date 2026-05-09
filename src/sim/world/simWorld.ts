@@ -67,6 +67,12 @@ export interface Stockpile {
   /** Tanned leather — Tannery output. Future input for armouring and
    * trade goods. */
   leather: number;
+  /** Rope fibre — accumulated by farms as a rare side-yield, future
+   * input for Loom (cloth) and Carpentry: Mechanisms (Tier 2). */
+  rope: number;
+  /** Woven cloth — Loom output. Future input for trade goods, soft
+   * furnishings, and tier-2 medicine bandages. */
+  cloth: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -134,6 +140,8 @@ export class SimWorld {
     pots: 0,
     hide: 0,
     leather: 0,
+    rope: 0,
+    cloth: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-
