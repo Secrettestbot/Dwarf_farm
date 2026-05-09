@@ -17,6 +17,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
   sleep: "sleeping",
   socialise: "talking with another dwarf",
   wander: "wandering",
+  visit_grave: "standing at a grave",
 };
 
 export class DwarfInspector {
@@ -29,7 +30,10 @@ export class DwarfInspector {
     const wrap = document.createElement("div");
     wrap.className = "panel";
     wrap.style.cssText =
-      "position:absolute;top:8px;right:8px;width:300px;max-width:42vw;padding:10px 12px;font-size:12px;color:#ccc;display:none;";
+      // Sit below the slider panel on the right edge so neither hides
+      // the other when both are visible. Z-index above the sliders so
+      // the inspector wins if heights overlap on a short viewport.
+      "position:absolute;top:8px;right:240px;width:300px;max-width:42vw;padding:10px 12px;font-size:12px;color:#ccc;display:none;z-index:5;";
     this.host.appendChild(wrap);
     this.root = wrap;
   }
@@ -67,6 +71,13 @@ export class DwarfInspector {
     const lifeStage = age < 5 ? "child" : age < 18 ? "youth" : age < 80 ? "adult" : "elder";
     const partner = dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId) ? sim.dwarf.get(dw.partnerId) : null;
 
+    // Family tree: parents (status: living / deceased), children
+    // (any living dwarf who lists this dwarf as a parent), and
+    // siblings (any living dwarf who shares both parent names with
+    // this one). Lookups are O(N · siblings) but N is dwarves and
+    // the inspector renders only when open.
+    const family = computeFamily(sim, dw);
+
     const traits = dw.traitIds
       .map((id) => TRAITS_BY_ID[id])
       .filter((t): t is NonNullable<typeof t> => !!t);
@@ -102,9 +113,11 @@ export class DwarfInspector {
       })
       .join("");
 
-    const activity = job
+    const inTantrum = sim.tantrum.has(this.targetId);
+    const baseActivity = job
       ? `${ACTIVITY_LABEL[job.kind] ?? job.kind}${path && path.pathIndex < path.path.length - 1 ? " (en route)" : ""}`
       : "idle";
+    const activity = inTantrum ? `having a breakdown (${baseActivity})` : baseActivity;
 
     const isSoldier = sim.squad.has(this.targetId);
     const equip = sim.equipment.get(this.targetId);
@@ -114,6 +127,16 @@ export class DwarfInspector {
     const armedText = equipped ? ` · armed${wq > 0 ? ` (${QLABELS[wq]}weapon)` : ""}` : " · unarmed";
     const militaryLine = isSoldier
       ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">⚔ Standing guard${armedText}</div>`
+      : "";
+    const mayorLine = sim.mayorName === dw.name
+      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">Mayor of the colony — leadership ${dw.skills.leadership ?? 1}</div>`
+      : "";
+    const kingLine = sim.kingName === dw.name
+      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">King of the Colony — leadership ${dw.skills.leadership ?? 1}, military ${dw.skills.military ?? 1}</div>`
+      : "";
+    const disease = sim.disease.get(this.targetId);
+    const diseaseLine = disease
+      ? `<div style="margin-top:4px;font-size:11px;color:#ff7060;">Ill: ${diseaseLabel(disease.kind)}</div>`
       : "";
 
     const health = sim.health.get(this.targetId);
@@ -136,12 +159,19 @@ export class DwarfInspector {
           ${escapeHtml(dw.name.slice(0, 1))}
         </div>
         <div style="flex:1;min-width:0;">
-          <div style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(dw.name)}</div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(dw.name)}</span>
+            <button id="inspector-rename" class="btn" style="padding:0px 6px;font-size:10px;" title="Rename this dwarf">edit</button>
+          </div>
           <div style="font-size:11px;color:#888;">${escapeHtml(dw.profession)} · ${lifeStage} · age ${age} · @ ${pos.x},${pos.y}</div>
         </div>
         <button id="inspector-close" class="btn" style="padding:2px 8px;font-size:11px;">×</button>
       </div>
       ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
+      ${familyHtml(family)}
+      ${kingLine}
+      ${mayorLine}
+      ${diseaseLine}
       ${militaryLine}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${hpHtml}
@@ -151,7 +181,146 @@ export class DwarfInspector {
     `;
     const closeBtn = this.root.querySelector("#inspector-close") as HTMLButtonElement | null;
     if (closeBtn) closeBtn.onclick = () => this.close();
+    const renameBtn = this.root.querySelector("#inspector-rename") as HTMLButtonElement | null;
+    if (renameBtn) {
+      renameBtn.onclick = () => {
+        if (this.targetId === null) return;
+        const target = sim.dwarf.get(this.targetId);
+        if (!target) return;
+        const next = window.prompt("Rename this dwarf:", target.name);
+        if (!next || !next.trim()) return;
+        const trimmed = next.trim().slice(0, 40);
+        if (trimmed === target.name) return;
+        const oldName = target.name;
+        target.name = trimmed;
+        // Update cached name references so the rename doesn't leave
+        // dangling lookups that would falsely report the mayor /
+        // king dead next tick. Pet ownerName is updated for tame
+        // pets pointing at this dwarf so chronicle lines read with
+        // the new name. Historical records (parentNames, graves,
+        // artifacts, books) intentionally stay locked to who the
+        // dwarf was at the time.
+        if (sim.mayorName === oldName) sim.mayorName = trimmed;
+        if (sim.kingName === oldName) sim.kingName = trimmed;
+        const petEnts = sim.pet.entities;
+        for (let i = 0; i < petEnts.length; i++) {
+          const pet = sim.pet.get(petEnts[i]);
+          if (pet && pet.ownerId === this.targetId) {
+            pet.ownerName = trimmed;
+          }
+        }
+        // Re-render so the new name lands without waiting for the
+        // next per-frame update tick.
+        this.update(sim);
+      };
+    }
   }
+}
+
+/** A small family snapshot for the inspector. Parents are looked up
+ * by name in the living dwarves and the cemetery registry; children
+ * and siblings are derived from any living dwarf whose parentNames
+ * match. */
+interface FamilySnapshot {
+  parents: Array<{ name: string; status: "living" | "deceased" | "unknown" }>;
+  children: string[];
+  siblings: string[];
+}
+
+function computeFamily(sim: SimWorld, dw: import("../sim/ecs/components").Dwarf): FamilySnapshot {
+  const parents: FamilySnapshot["parents"] = [];
+  if (dw.parentNames) {
+    for (const pname of dw.parentNames) {
+      let status: "living" | "deceased" | "unknown" = "unknown";
+      let found = false;
+      sim.forEachDwarf((_id, _pos, other) => {
+        if (other.name === pname) {
+          status = "living";
+          found = true;
+        }
+      });
+      if (!found) {
+        for (const g of sim.graves) {
+          if (g.name === pname) {
+            status = "deceased";
+            found = true;
+            break;
+          }
+        }
+      }
+      parents.push({ name: pname, status });
+    }
+  }
+  const children: string[] = [];
+  const siblings: string[] = [];
+  sim.forEachDwarf((_id, _pos, other) => {
+    if (other.name === dw.name) return;
+    if (other.parentNames) {
+      // Child: any living dwarf who lists this dwarf as a parent.
+      if (other.parentNames[0] === dw.name || other.parentNames[1] === dw.name) {
+        children.push(other.name);
+      }
+      // Sibling: any living dwarf who shares both parent names with
+      // this dwarf. Both must have parentNames recorded — founders /
+      // migrants don't.
+      if (
+        dw.parentNames &&
+        other.parentNames[0] === dw.parentNames[0] &&
+        other.parentNames[1] === dw.parentNames[1]
+      ) {
+        siblings.push(other.name);
+      }
+    }
+  });
+  return { parents, children, siblings };
+}
+
+function familyHtml(family: FamilySnapshot): string {
+  if (
+    family.parents.length === 0 &&
+    family.children.length === 0 &&
+    family.siblings.length === 0
+  ) {
+    return "";
+  }
+  const rows: string[] = [];
+  if (family.parents.length > 0) {
+    const ptext = family.parents
+      .map((p) => {
+        const colour =
+          p.status === "living" ? "#e0c080" :
+          p.status === "deceased" ? "#9a8a72" :
+          "#666";
+        const tail = p.status === "deceased" ? " (deceased)" : "";
+        return `<span style="color:${colour};">${escapeHtml(p.name)}</span>${tail}`;
+      })
+      .join(", ");
+    rows.push(`<div>Parents: ${ptext}</div>`);
+  }
+  if (family.children.length > 0) {
+    const ctext = family.children
+      .slice(0, 4)
+      .map((n) => `<span style="color:#e0c080;">${escapeHtml(n)}</span>`)
+      .join(", ");
+    const more = family.children.length > 4 ? ` (+${family.children.length - 4})` : "";
+    rows.push(`<div>Children: ${ctext}${more}</div>`);
+  }
+  if (family.siblings.length > 0) {
+    const stext = family.siblings
+      .slice(0, 4)
+      .map((n) => `<span style="color:#e0c080;">${escapeHtml(n)}</span>`)
+      .join(", ");
+    const more = family.siblings.length > 4 ? ` (+${family.siblings.length - 4})` : "";
+    rows.push(`<div>Siblings: ${stext}${more}</div>`);
+  }
+  return `<div style="margin-top:6px;font-size:11px;color:#888;line-height:1.5;">${rows.join("")}</div>`;
+}
+
+function diseaseLabel(kind: string): string {
+  if (kind === "cave_cough") return "cave cough";
+  if (kind === "deep_fever") return "deep fever";
+  if (kind === "wound_sickness") return "wound sickness";
+  return kind;
 }
 
 function moraleLabel(v: number): string {

@@ -79,6 +79,10 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
           // Silver pockets — rarer than iron ore. GDD §5.2 places
           // silver / gold / coal seams in this band.
           if (noise2(oreSeed + 67, x * 0.30, y * 0.30) > 0.86) t = TileType.Silver;
+          // Gold pockets — rarer still than silver. GDD §5.2.
+          if (noise2(oreSeed + 79, x * 0.34, y * 0.34) > 0.91) t = TileType.Gold;
+          // Coal seams — banded fuel material.
+          if (noise2(oreSeed + 103, x * 0.18, y * 0.36) > 0.78) t = TileType.Coal;
           // Occasional stone vein for variety.
           if (noise2(oreSeed + 53, x * 0.05, y * 0.05) > 0.55) t = TileType.Stone;
         } else if (y < 1200) {
@@ -126,6 +130,14 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
         // surface and look like swiss cheese.
         if (depth >= 8 && cav > 0.55) {
           t = TileType.CavernFloor;
+          // Cave mushrooms — sparse fungal blooms inside cavern
+          // pockets. Dropped as food when mined; gives a deep colony
+          // a small alternate food source. Edge of the cavern only
+          // (cav near threshold) so the mushrooms don't form solid
+          // walls in the middle of the cavity.
+          if (cav < 0.6 && noise2(cavernSeed + 41, x * 0.5, y * 0.5) > 0.6) {
+            t = TileType.CaveMushroom;
+          }
         }
       }
       grid.setTile(x, y, t);
@@ -138,6 +150,34 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
   // soil before opening into the chamber so the entrance reads as deliberate.
   const spawnX = Math.floor(width / 2);
   const spawnY = surfaceY[spawnX] + 2;
+
+  // Surface clearing around the entrance: a flat shelf of Grass with a
+  // scatter of Tree tiles. Gives the colony a visible source of wood
+  // before the carpenter's workshop comes online. Flatten any terrain
+  // above the spawn-row in this strip so the clearing reads as a
+  // deliberate cleared area rather than a bumpy hillside.
+  const clearY = surfaceY[spawnX];
+  const clearHalf = 12;
+  for (let dx = -clearHalf; dx <= clearHalf; dx++) {
+    const cx = spawnX + dx;
+    if (cx < 0 || cx >= width) continue;
+    for (let y = 0; y < clearY; y++) grid.setTile(cx, y, TileType.Air);
+    grid.setTile(cx, clearY, TileType.Grass);
+  }
+  // Trees: deterministic noise scatters them across the clearing.
+  // Avoid placing one over the entrance shaft itself so dwarves can
+  // descend cleanly without immediately tripping on a tree.
+  const treeSeed = seed ^ 0x71ee_71ee;
+  for (let dx = -clearHalf; dx <= clearHalf; dx++) {
+    const cx = spawnX + dx;
+    if (cx < 0 || cx >= width) continue;
+    if (cx === spawnX || cx === spawnX + 1) continue;
+    const n = noise2(treeSeed, cx * 0.45, 0);
+    if (n > 0.25) {
+      grid.setTile(cx, clearY, TileType.Tree);
+    }
+  }
+
   // Entrance shaft (a 2-wide stair down into the soil cap).
   carveRect(grid, spawnX, surfaceY[spawnX], 2, spawnY - surfaceY[spawnX] + 1, TileType.CorridorFloor);
   // Founders' chamber: 13×4 cavern just below.

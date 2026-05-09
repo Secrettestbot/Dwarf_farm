@@ -1,6 +1,6 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, GameMode } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
@@ -63,6 +63,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     const carrying = sim.carrying.get(id);
     const squad = sim.squad.get(id);
     const equipment = sim.equipment.get(id);
+    const obsession = sim.obsession.get(id);
+    const tantrum = sim.tantrum.get(id);
+    const disease = sim.disease.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -75,6 +78,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       bornInColony: dw.bornInColony,
       partnerIndex,
       lastJobTick: dw.lastJobTick,
+      lostPartnerGrave: dw.lostPartnerGrave ? { ...dw.lostPartnerGrave } : undefined,
+      lastGraveVisitTick: dw.lastGraveVisitTick,
+      parentNames: dw.parentNames ? [dw.parentNames[0], dw.parentNames[1]] : undefined,
       health: h
         ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick, wasSevereWound: h.wasSevereWound }
         : undefined,
@@ -97,6 +103,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       carrying: carrying ? { kind: carrying.kind, quality: carrying.quality } : undefined,
       squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
       equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
+      obsession: obsession ? { skillId: obsession.skillId, endsAtTick: obsession.endsAtTick } : undefined,
+      tantrum: tantrum ? { startedAtTick: tantrum.startedAtTick, endsAtTick: tantrum.endsAtTick } : undefined,
+      disease: disease ? { kind: disease.kind, contractedAtTick: disease.contractedAtTick, treatProgress: disease.treatProgress } : undefined,
     });
   });
 
@@ -161,12 +170,22 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       tools: sim.stockpile.tools,
       gems: sim.stockpile.gems,
       meals: sim.stockpile.meals,
+      blocks: sim.stockpile.blocks,
+      cut_gems: sim.stockpile.cut_gems,
+      wood: sim.stockpile.wood,
+      planks: sim.stockpile.planks,
+      pots: sim.stockpile.pots,
+      hide: sim.stockpile.hide,
+      leather: sim.stockpile.leather,
+      rope: sim.stockpile.rope,
+      cloth: sim.stockpile.cloth,
     },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
     populationMilestones: Array.from(sim.populationMilestones),
     narrativeMilestones: Array.from(sim.narrativeMilestones),
     hostiles: collectHostiles(sim),
+    pets: collectPets(sim, entityToIndex),
     sliders: { ...sim.sliders },
     emergency: { ...sim.emergency },
     items: collectItems(sim),
@@ -181,6 +200,15 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     hollowKingSpawned: sim.hollowKingSpawned,
     voidShadesSlain: sim.voidShadesSlain,
     aquiferBreachTick: sim.aquiferBreachTick,
+    caravan: sim.caravanLeavesTick > 0
+      ? { x: sim.caravanX, y: sim.caravanY, leavesTick: sim.caravanLeavesTick, origin: sim.caravanOrigin }
+      : undefined,
+    graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
+    artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
+    artifactsNextId: sim.artifactsNextId,
+    books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
+    mayorName: sim.mayorName || undefined,
+    kingName: sim.kingName || undefined,
   };
 }
 
@@ -193,6 +221,32 @@ function collectItems(sim: SimWorld): import("./schema").SavedItem[] {
     const p = sim.position.get(e);
     if (!it || !p) continue;
     out.push({ kind: it.kind, x: p.x, y: p.y, quality: it.quality });
+  }
+  return out;
+}
+
+function collectPets(sim: SimWorld, entityToIndex: Map<number, number>): SavedPet[] {
+  const out: SavedPet[] = [];
+  const ents = sim.pet.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const pet = sim.pet.get(e);
+    const p = sim.position.get(e);
+    const hp = sim.health.get(e);
+    if (!pet || !p || !hp) continue;
+    const ownerIndex = pet.ownerId !== -1 ? (entityToIndex.get(pet.ownerId) ?? -1) : -1;
+    out.push({
+      kind: pet.kind,
+      x: p.x,
+      y: p.y,
+      hp: hp.hp,
+      maxHp: hp.maxHp,
+      ownerIndex,
+      ownerName: pet.ownerName,
+      tameProgress: pet.tameProgress,
+      tamedAtTick: pet.tamedAtTick,
+      lastAttackTick: pet.lastAttackTick,
+    });
   }
   return out;
 }
@@ -271,8 +325,12 @@ export function restore(save: SaveV1): SimWorld {
       age: d.age,
       initialNeeds: d.needs,
       bornInColony: d.bornInColony ?? false,
+      parentNames: d.parentNames ? [d.parentNames[0], d.parentNames[1]] : undefined,
     });
-    sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
+    const restoredDw = sim.dwarf.get(e)!;
+    restoredDw.lastJobTick = d.lastJobTick ?? 0;
+    if (d.lostPartnerGrave) restoredDw.lostPartnerGrave = { ...d.lostPartnerGrave };
+    if (d.lastGraveVisitTick !== undefined) restoredDw.lastGraveVisitTick = d.lastGraveVisitTick;
     spawnedEntities.push(e);
   }
   // Re-apply in-flight job + pathing components, plus partnerships, so the
@@ -313,6 +371,19 @@ export function restore(save: SaveV1): SimWorld {
     }
     if (d.equipment) {
       sim.equipment.set(e, { weapon: d.equipment.weapon, weaponQuality: d.equipment.weaponQuality });
+    }
+    if (d.obsession) {
+      sim.obsession.set(e, { skillId: d.obsession.skillId, endsAtTick: d.obsession.endsAtTick });
+    }
+    if (d.tantrum) {
+      sim.tantrum.set(e, { startedAtTick: d.tantrum.startedAtTick, endsAtTick: d.tantrum.endsAtTick });
+    }
+    if (d.disease) {
+      sim.disease.set(e, {
+        kind: d.disease.kind as import("../sim/ecs/components").DiseaseKind,
+        contractedAtTick: d.disease.contractedAtTick,
+        treatProgress: d.disease.treatProgress,
+      });
     }
   }
 
@@ -366,6 +437,15 @@ export function restore(save: SaveV1): SimWorld {
     if (save.stockpile.tools !== undefined) sim.stockpile.tools = save.stockpile.tools;
     if (save.stockpile.gems !== undefined) sim.stockpile.gems = save.stockpile.gems;
     if (save.stockpile.meals !== undefined) sim.stockpile.meals = save.stockpile.meals;
+    if (save.stockpile.blocks !== undefined) sim.stockpile.blocks = save.stockpile.blocks;
+    if (save.stockpile.cut_gems !== undefined) sim.stockpile.cut_gems = save.stockpile.cut_gems;
+    if (save.stockpile.wood !== undefined) sim.stockpile.wood = save.stockpile.wood;
+    if (save.stockpile.planks !== undefined) sim.stockpile.planks = save.stockpile.planks;
+    if (save.stockpile.pots !== undefined) sim.stockpile.pots = save.stockpile.pots;
+    if (save.stockpile.hide !== undefined) sim.stockpile.hide = save.stockpile.hide;
+    if (save.stockpile.leather !== undefined) sim.stockpile.leather = save.stockpile.leather;
+    if (save.stockpile.rope !== undefined) sim.stockpile.rope = save.stockpile.rope;
+    if (save.stockpile.cloth !== undefined) sim.stockpile.cloth = save.stockpile.cloth;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
@@ -397,6 +477,24 @@ export function restore(save: SaveV1): SimWorld {
   if (save.hollowKingSpawned) sim.hollowKingSpawned = true;
   if (save.voidShadesSlain !== undefined) sim.voidShadesSlain = save.voidShadesSlain;
   if (save.aquiferBreachTick !== undefined) sim.aquiferBreachTick = save.aquiferBreachTick;
+  if (save.caravan) {
+    sim.caravanX = save.caravan.x;
+    sim.caravanY = save.caravan.y;
+    sim.caravanLeavesTick = save.caravan.leavesTick;
+    sim.caravanOrigin = save.caravan.origin;
+  }
+  if (save.graves) {
+    for (const g of save.graves) sim.graves.push({ ...g });
+  }
+  if (save.artifacts) {
+    for (const a of save.artifacts) sim.artifacts.push({ ...a });
+  }
+  if (save.artifactsNextId !== undefined) sim.artifactsNextId = save.artifactsNextId;
+  if (save.books) {
+    for (const b of save.books) sim.books.push({ ...b });
+  }
+  if (save.mayorName) sim.mayorName = save.mayorName;
+  if (save.kingName) sim.kingName = save.kingName;
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).
@@ -424,6 +522,25 @@ export function restore(save: SaveV1): SimWorld {
         hp: h.hp,
         lastAttackTick: h.lastAttackTick,
         lastMoveTick: h.lastMoveTick,
+      });
+    }
+  }
+  // Restore pets — wild and tame both. ownerIndex maps back through
+  // the dwarf-restoration array so the owner's entity id is correct
+  // even though the save format doesn't carry raw ids.
+  if (save.pets) {
+    for (const p of save.pets) {
+      const ownerId = p.ownerIndex >= 0 ? spawnedEntities[p.ownerIndex] ?? -1 : -1;
+      sim.spawnPet({
+        kind: p.kind as import("../sim/ecs/components").PetKind,
+        x: p.x,
+        y: p.y,
+        hp: p.hp,
+        maxHp: p.maxHp,
+        ownerId,
+        ownerName: p.ownerName,
+        tameProgress: p.tameProgress,
+        tamedAtTick: p.tamedAtTick,
       });
     }
   }

@@ -92,6 +92,44 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // flooded corridors after an aquifer breach; gated on the Tier 2
   // Hydraulic Basics topic + a breach having actually happened.
   pump_station: { w: 3, h: 3, priority: 2 },
+  // Mason's Workshop: 3×3 with a bench in the centre. Gated on the
+  // Tier 1 Basic Stonecutting topic — the colony has to know how
+  // before it cuts stone.
+  mason: { w: 3, h: 3, priority: 2 },
+  // Jeweller's Workshop: 3×3. Tier 3 Gem Cutting + at least one gem
+  // discovered before the architect bothers laying it out.
+  jeweller: { w: 3, h: 3, priority: 2 },
+  // Carpenter's Workshop: 3×3 with a bench in the centre. Gated on the
+  // Tier 1 Basic Carpentry research; needs surface trees to feed it.
+  carpenter: { w: 3, h: 3, priority: 2 },
+  // Lumberyard: a single-tile commitment to chop one surface tree.
+  // Width/height get adjusted to 1×1 in placeLumberyard; the entry here
+  // is just for table completeness.
+  lumberyard: { w: 1, h: 1, priority: 3 },
+  // Kiln: 3×3 with a fire pit in the centre. Tier 2 Pottery & Kilns
+  // gates it; cheap-to-build but the recipe is slow.
+  kiln: { w: 3, h: 3, priority: 2 },
+  // Tannery: 3×3 workshop. Tier 2 Textile Craft gates it.
+  tannery: { w: 3, h: 3, priority: 2 },
+  // Loom: 3×3 workshop. Tier 1 Rope & Fibre gates it; rope accumulates
+  // off the colony's farm cells, cloth comes back out.
+  loom: { w: 3, h: 3, priority: 2 },
+  // Hospital: 4×3 ward with two cots. Tier 2 Medical Practice gates it;
+  // wounded dwarves heal substantially faster on the cots and the
+  // colony's medic earns medicine XP every tick a wound is tended.
+  hospital: { w: 4, h: 3, priority: 2 },
+  // Tavern: 5×4 social hall. The colony's morale-recovery space.
+  tavern: { w: 5, h: 4, priority: 2 },
+  // Magma Forge: 3×3 workshop. Tier 4 Magma Forge Craft + a Magma
+  // Vent reachable from the colony.
+  magma_forge: { w: 3, h: 3, priority: 1 },
+  // Water Wheel: 2×2 mechanism placed adjacent to Water tiles. No
+  // recipe, just a passive speed bonus to nearby workshops.
+  water_wheel: { w: 2, h: 2, priority: 3 },
+  // Cemetery: 5×5 plot of grave-floor tiles. Buried dwarves get a
+  // headstone slotted into one of the empty plots; the chronicle
+  // records who lies under each.
+  cemetery: { w: 5, h: 5, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -209,6 +247,25 @@ export class ColonyPlanner {
     if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
     if (this.needsThroneRoom(ctx) && this.placeRoom(ctx, "throne_room")) return true;
     if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
+    if (this.needsMason(ctx) && this.placeRoom(ctx, "mason")) return true;
+    if (this.needsJeweller(ctx) && this.placeRoom(ctx, "jeweller")) return true;
+    if (this.needsCarpenter(ctx) && this.placeRoom(ctx, "carpenter")) return true;
+    if (this.needsKiln(ctx) && this.placeRoom(ctx, "kiln")) return true;
+    if (this.needsTannery(ctx) && this.placeRoom(ctx, "tannery")) return true;
+    if (this.needsLoom(ctx) && this.placeRoom(ctx, "loom")) return true;
+    if (this.needsHospital(ctx) && this.placeRoom(ctx, "hospital")) return true;
+    if (this.needsTavern(ctx) && this.placeRoom(ctx, "tavern")) return true;
+    if (this.needsMagmaForge(ctx) && this.placeRoom(ctx, "magma_forge")) return true;
+    if (this.needsWaterWheel(ctx) && this.placeRoom(ctx, "water_wheel")) return true;
+    if (this.needsCemetery(ctx) && this.placeRoom(ctx, "cemetery")) return true;
+
+    // 2.8 Lumberyard — chop a surface tree any time one is sense-able
+    //     and there's no active lumberyard yet. Cheap, single-tile
+    //     blueprints, so the colony harvests wood as the architect
+    //     spots it. Gated only on having a Carpenter's Workshop or
+    //     basic carpentry research — without somewhere to use the wood,
+    //     felling trees is just clearing.
+    if ((active["lumberyard"] ?? 0) === 0 && this.wantsLumberyard(ctx) && this.placeLumberyard(ctx)) return true;
 
     // 2.9 Stairwell — every few completed rooms the architect drops a
     //     vertical 2×6 shaft so the colony actually descends instead of
@@ -262,12 +319,19 @@ export class ColonyPlanner {
   }
 
   private needsKitchen(ctx: PlannerContext): boolean {
+    // Tier 1 Basic Cooking gates the Kitchen — the colony has to know
+    // how to cook before the architect lays out a kitchen. Founders'
+    // starter cache feeds them through the early research window.
     if (ctx.population < 5) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_cooking")) return false;
     return this.maintainedAndActiveOfKind("kitchen", ctx.tick) === 0;
   }
 
   private needsBrewery(ctx: PlannerContext): boolean {
+    // Tier 1 Basic Brewing gates the Brewery. Same reasoning as the
+    // kitchen — the founders' cellar lasts until research lands.
     if (ctx.population < 5) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_brewing")) return false;
     return this.maintainedAndActiveOfKind("brewery", ctx.tick) === 0;
   }
 
@@ -336,6 +400,130 @@ export class ColonyPlanner {
     if (!ctx.aquiferBreached) return false;
     if (!(ctx.research?.completed ?? []).includes("hydraulic_basics")) return false;
     return this.maintainedAndActiveOfKind("pump_station", ctx.tick) === 0;
+  }
+
+  private needsMason(ctx: PlannerContext): boolean {
+    // Mason's Workshop is gated on Basic Stonecutting (Tier 1) — the
+    // first masonry topic the scholars will research. Once they have
+    // it, the architect lays out a workshop so the colony can start
+    // turning rough stone into blocks.
+    if (ctx.population < 6) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_stonecutting")) return false;
+    return this.maintainedAndActiveOfKind("mason", ctx.tick) === 0;
+  }
+
+  private needsJeweller(ctx: PlannerContext): boolean {
+    // Tier 3 Gem Cutting gates the Jeweller. Plus the colony has to
+    // have seen at least one gem — laying out a Jeweller's Workshop
+    // before any gems exist would be ornament for ornament's sake.
+    if (ctx.population < 10) return false;
+    if (!(ctx.research?.completed ?? []).includes("gem_cutting")) return false;
+    return this.maintainedAndActiveOfKind("jeweller", ctx.tick) === 0;
+  }
+
+  private needsCarpenter(ctx: PlannerContext): boolean {
+    // Carpenter's Workshop is gated on Tier 1 Basic Carpentry. Pop ≥ 6
+    // mirrors the Mason gate — the colony needs the bandwidth to spare
+    // a sawyer.
+    if (ctx.population < 6) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_carpentry")) return false;
+    return this.maintainedAndActiveOfKind("carpenter", ctx.tick) === 0;
+  }
+
+  private needsKiln(ctx: PlannerContext): boolean {
+    // Kiln is gated on Tier 2 Pottery & Kilns. Pop ≥ 8 — pottery sits
+    // a notch above the basic stone/wood crafts, so the architect waits
+    // until the colony's a bit larger before laying one out.
+    if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("pottery_and_kilns")) return false;
+    return this.maintainedAndActiveOfKind("kiln", ctx.tick) === 0;
+  }
+
+  private needsTannery(ctx: PlannerContext): boolean {
+    // Tannery sits behind Tier 2 Textile Craft — same topic that
+    // unlocks the future Loom for cloth. Pop ≥ 8 mirrors the kiln.
+    if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("textile_craft")) return false;
+    return this.maintainedAndActiveOfKind("tannery", ctx.tick) === 0;
+  }
+
+  private needsLoom(ctx: PlannerContext): boolean {
+    // Loom sits behind Tier 1 Rope & Fibre. Pop ≥ 6 — it's a small
+    // craft, not a heavy industry, so a mid-sized colony can afford
+    // a weaver.
+    if (ctx.population < 6) return false;
+    if (!(ctx.research?.completed ?? []).includes("rope_and_fibre")) return false;
+    return this.maintainedAndActiveOfKind("loom", ctx.tick) === 0;
+  }
+
+  private needsHospital(ctx: PlannerContext): boolean {
+    // Hospital lands once Tier 2 Medical Practice is researched and the
+    // colony's large enough to spare a medic.
+    if (ctx.population < 10) return false;
+    if (!(ctx.research?.completed ?? []).includes("medical_practice")) return false;
+    return this.maintainedAndActiveOfKind("hospital", ctx.tick) === 0;
+  }
+
+  private needsTavern(ctx: PlannerContext): boolean {
+    // Tavern: a social space. No research gate — the architect drops one
+    // once the colony's big enough to want a centralised hangout.
+    if (ctx.population < 8) return false;
+    return this.maintainedAndActiveOfKind("tavern", ctx.tick) === 0;
+  }
+
+  private needsMagmaForge(ctx: PlannerContext): boolean {
+    // Magma Forge: Tier 4 magma_forge_craft research, plus a Magma
+    // Vent has to be sense-able from the colony's reachable space.
+    // Pop ≥ 12 — the late-game industrial commitment.
+    if (ctx.population < 12) return false;
+    if (!(ctx.research?.completed ?? []).includes("magma_forge_craft")) return false;
+    if (!this.hasReachableTileOfKind(ctx, TileType.MagmaVent, 6)) return false;
+    return this.maintainedAndActiveOfKind("magma_forge", ctx.tick) === 0;
+  }
+
+  /** True iff any tile of `kind` exists within `radius` of a
+   * reachable walkable tile. Used by the magma forge / water wheel
+   * gates to confirm the colony actually has the resource the
+   * architect wants to build for. */
+  private hasReachableTileOfKind(ctx: PlannerContext, kind: TileType, radius: number): boolean {
+    const grid = ctx.grid;
+    for (let y = 0; y < grid.height; y++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (grid.getTile(x, y) !== kind) continue;
+        if (this.tileNearReachable(ctx, x, y, radius)) return true;
+      }
+    }
+    return false;
+  }
+
+  private needsWaterWheel(ctx: PlannerContext): boolean {
+    // Water Wheel: Tier 2 carpentry_mechanisms research + a Water
+    // tile reachable from the colony (typically post-aquifer breach
+    // or a controlled-flood corridor).
+    if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("carpentry_mechanisms")) return false;
+    if (!this.hasReachableTileOfKind(ctx, TileType.Water, 4)) return false;
+    return this.maintainedAndActiveOfKind("water_wheel", ctx.tick) === 0;
+  }
+
+  private needsCemetery(ctx: PlannerContext): boolean {
+    // Cemetery: lands once the colony's stable enough to set ground
+    // aside for the dead. Pop ≥ 6 — small enough to land before the
+    // first old-age deaths, large enough that a one-dwarf founder
+    // colony isn't carving graves first thing. No research gate.
+    if (ctx.population < 6) return false;
+    return this.maintainedAndActiveOfKind("cemetery", ctx.tick) === 0;
+  }
+
+  /** Lumberyards land any time a tree is reachable from the colony's
+   * walkable space. We don't gate on research — chopping wood is just
+   * labour — but if the colony has neither a Carpenter's Workshop nor
+   * the research to build one, suppress new lumberyards so wood
+   * doesn't pile up uselessly. */
+  private wantsLumberyard(ctx: PlannerContext): boolean {
+    const hasCarpenter = this.maintainedAndActiveOfKind("carpenter", ctx.tick) > 0;
+    const willBuildOne = (ctx.research?.completed ?? []).includes("basic_carpentry");
+    return hasCarpenter || willBuildOne;
   }
 
   /**
@@ -728,6 +916,39 @@ export class ColonyPlanner {
       }
     }
     return null;
+  }
+
+  /**
+   * Chop down the nearest reachable tree. The cavity is exactly the
+   * tree tile — no surrounding rock — so the dwarf walks up adjacent,
+   * fells the tree, and the blueprint is done. Closest tree to spawn
+   * wins so the surface clearing doesn't get strip-felled in random
+   * order.
+   */
+  private placeLumberyard(ctx: PlannerContext): Blueprint | null {
+    const { grid } = ctx;
+    let bestTree: { x: number; y: number; score: number } | null = null;
+    for (let y = 0; y < grid.height; y++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (grid.getTile(x, y) !== TileType.Tree) continue;
+        if (this.isClaimed(grid, x, y)) continue;
+        if (!this.tileNearReachable(ctx, x, y, 2)) continue;
+        const dx = x - ctx.spawn.x;
+        const dy = y - ctx.spawn.y;
+        const score = -(dx * dx + dy * dy);
+        if (
+          !bestTree ||
+          score > bestTree.score ||
+          (score === bestTree.score && (y < bestTree.y || (y === bestTree.y && x < bestTree.x)))
+        ) {
+          bestTree = { x, y, score };
+        }
+      }
+    }
+    if (!bestTree) return null;
+    const cavity = new Int32Array(1);
+    cavity[0] = (bestTree.y << 16) | bestTree.x;
+    return this.commitBlueprint(ctx, "lumberyard", bestTree.x, bestTree.y, 1, 1, cavity);
   }
 
   /** True if there's a reachable walkable tile within `radius` of (x, y). */

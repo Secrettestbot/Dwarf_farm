@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -75,6 +75,79 @@ export const RECIPES: Partial<Record<BlueprintKind, Recipe>> = {
     ticks: 90,
     skill: "smithing",
     station: TileType.ForgeStation,
+  },
+  mason: {
+    verb: "cuts stone blocks",
+    inputKind: "stone",
+    inputQty: 1,
+    outputKind: "blocks",
+    outputQty: 2, // a single rough stone yields two square blocks
+    ticks: 70,
+    skill: "masonry",
+    station: TileType.MasonStation,
+  },
+  jeweller: {
+    verb: "cuts gems",
+    inputKind: "gems",
+    inputQty: 1,
+    outputKind: "cut_gems",
+    outputQty: 1,
+    ticks: 110,
+    skill: "jewelling",
+    station: TileType.JewellerStation,
+  },
+  carpenter: {
+    verb: "saws planks",
+    inputKind: "wood",
+    inputQty: 1,
+    outputKind: "planks",
+    outputQty: 2, // a single log saws into two planks
+    ticks: 70,
+    skill: "carpentry",
+    station: TileType.CarpenterStation,
+  },
+  kiln: {
+    verb: "fires pottery",
+    inputKind: "dirt",
+    inputQty: 2, // wedge two scoops of clay-rich earth into a single pot
+    outputKind: "pots",
+    outputQty: 1,
+    ticks: 100,
+    skill: "masonry",
+    station: TileType.KilnStation,
+  },
+  tannery: {
+    verb: "tans leather",
+    inputKind: "hide",
+    inputQty: 1,
+    outputKind: "leather",
+    outputQty: 1,
+    ticks: 90,
+    skill: "loom_tanning",
+    station: TileType.TannerStation,
+  },
+  loom: {
+    verb: "spins cloth",
+    inputKind: "rope",
+    inputQty: 1,
+    outputKind: "cloth",
+    outputQty: 1,
+    ticks: 80,
+    skill: "loom_tanning",
+    station: TileType.LoomStation,
+  },
+  magma_forge: {
+    // Magma Forge: same input/output as a regular Forge but the magma
+    // heat lets the smith work substantially faster. Quality bonus is
+    // wired separately in progressCraft (researchBias for forges).
+    verb: "forges tools at the magma",
+    inputKind: "bars",
+    inputQty: 1,
+    outputKind: "tools",
+    outputQty: 1,
+    ticks: 50, // vs 90 for a coal forge
+    skill: "smithing",
+    station: TileType.MagmaForgeStation,
   },
 };
 

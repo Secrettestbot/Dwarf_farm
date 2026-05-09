@@ -89,6 +89,11 @@ describe("hauling", () => {
     // Drop a loose stone next to the dwarf.
     sim.spawnItem({ kind: "stone", x: sx + 1, y: sy });
     sim.spawnDwarf({ name: "B", x: sx, y: sy, age: 30 });
+    // Disable excavation so the planner's bedroom blueprint doesn't pull
+    // the dwarf away into a mine-and-haul cycle that drowns out the test
+    // signal — we want exactly one stone routed cleanly into the
+    // stockpile, not "some stones eventually delivered."
+    sim.sliders.excavation = 0;
     const e = sim.dwarf.entities[0];
     const n = sim.needs.get(e)!;
     const before = sim.stockpile.stone;

@@ -10,9 +10,16 @@
 
 import { TileGrid } from "../world/grid";
 import { TileType } from "../world/tiles";
-import { Blueprint } from "./blueprint";
+import { Blueprint, isMaintainable } from "./blueprint";
 
 export function furnishRoom(grid: TileGrid, b: Blueprint): void {
+  // Enclosed rooms get a door at their entrance cell. Passage kinds
+  // (corridor, mine, lumberyard, stairwell) skip — they're not real
+  // rooms with thresholds. The lockdown emergency turns each Door to
+  // DoorBarred so the colony can actually seal itself when threatened.
+  if (isMaintainable(b.kind)) {
+    placeDoorAtEntrance(grid, b);
+  }
   switch (b.kind) {
     case "bedroom":
       furnishBedroom(grid, b);
@@ -37,6 +44,39 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
       break;
     case "forge":
       furnishWorkshop(grid, b, TileType.ForgeStation);
+      break;
+    case "mason":
+      furnishWorkshop(grid, b, TileType.MasonStation);
+      break;
+    case "jeweller":
+      furnishWorkshop(grid, b, TileType.JewellerStation);
+      break;
+    case "carpenter":
+      furnishWorkshop(grid, b, TileType.CarpenterStation);
+      break;
+    case "kiln":
+      furnishWorkshop(grid, b, TileType.KilnStation);
+      break;
+    case "tannery":
+      furnishWorkshop(grid, b, TileType.TannerStation);
+      break;
+    case "loom":
+      furnishWorkshop(grid, b, TileType.LoomStation);
+      break;
+    case "hospital":
+      furnishHospital(grid, b);
+      break;
+    case "tavern":
+      furnishTavern(grid, b);
+      break;
+    case "magma_forge":
+      furnishWorkshop(grid, b, TileType.MagmaForgeStation);
+      break;
+    case "water_wheel":
+      furnishWaterWheel(grid, b);
+      break;
+    case "cemetery":
+      furnishCemetery(grid, b);
       break;
     case "library":
       furnishLibrary(grid, b);
@@ -114,6 +154,54 @@ function furnishFarm(grid: TileGrid, b: Blueprint): void {
   b.cellTendedAt = new Int32Array(b.cavity.length).fill(-1);
 }
 
+/** Cemetery: every cavity cell becomes an empty grave plot. When a
+ * dwarf dies and a Cemetery exists, killDwarf swaps the next free
+ * plot to a Headstone and registers the dead dwarf in sim.graves. */
+function furnishCemetery(grid: TileGrid, b: Blueprint): void {
+  for (let i = 0; i < b.cavity.length; i++) {
+    const c = b.cavity[i];
+    const x = c & 0xffff;
+    const y = (c >>> 16) & 0xffff;
+    grid.setTile(x, y, TileType.Grave);
+  }
+}
+
+/** Water Wheel: the cavity itself becomes WaterWheel tiles. There's
+ * no station/barkeep — the wheel runs on its own, and the speed
+ * bonus is applied passively in workSystem to nearby workshops. */
+function furnishWaterWheel(grid: TileGrid, b: Blueprint): void {
+  for (let i = 0; i < b.cavity.length; i++) {
+    const c = b.cavity[i];
+    const x = c & 0xffff;
+    const y = (c >>> 16) & 0xffff;
+    grid.setTile(x, y, TileType.WaterWheel);
+  }
+}
+
+/** Tavern: a counter dead-centre for the barkeep, plus a row of
+ * tables so the room reads as a hangout, not just a bar. */
+function furnishTavern(grid: TileGrid, b: Blueprint): void {
+  const cx = b.originX + Math.floor(b.width / 2);
+  const cy = b.originY + Math.floor(b.height / 2);
+  if (cavityContains(b, cx, cy)) grid.setTile(cx, cy, TileType.TavernCounter);
+  // Tables flanking the counter for visiting dwarves to sit at.
+  const tx1 = b.originX + 1;
+  const tx2 = b.originX + b.width - 2;
+  const ty = b.originY + b.height - 1;
+  if (tx1 !== cx && cavityContains(b, tx1, ty)) grid.setTile(tx1, ty, TileType.Table);
+  if (tx2 !== cx && tx2 !== tx1 && cavityContains(b, tx2, ty)) grid.setTile(tx2, ty, TileType.Table);
+}
+
+/** Hospital: two cots along the back wall so two wounded dwarves can
+ * be treated at once without colliding. */
+function furnishHospital(grid: TileGrid, b: Blueprint): void {
+  const y = b.originY;
+  const x1 = b.originX + 1;
+  const x2 = b.originX + b.width - 2;
+  if (cavityContains(b, x1, y)) grid.setTile(x1, y, TileType.HospitalBed);
+  if (x2 !== x1 && cavityContains(b, x2, y)) grid.setTile(x2, y, TileType.HospitalBed);
+}
+
 /** Bedroom: one bed, tucked into the upper-left corner of the cavity. */
 function furnishBedroom(grid: TileGrid, b: Blueprint): void {
   // Place the bed at the most-walled corner so it doesn't block the doorway.
@@ -161,4 +249,38 @@ function cavityContains(b: Blueprint, x: number, y: number): boolean {
     if (b.cavity[i] === target) return true;
   }
   return false;
+}
+
+/** Place a Door tile at the cavity cell that has the most walkable
+ * non-cavity neighbours — that's the doorway between the room and the
+ * rest of the colony. If no cell has any external walkable neighbours
+ * (an isolated cavity), no door is placed. Skips cells that already
+ * carry furniture so we don't clobber a station or bed. */
+function placeDoorAtEntrance(grid: TileGrid, b: Blueprint): void {
+  let bestX = -1;
+  let bestY = -1;
+  let bestScore = 0;
+  for (let i = 0; i < b.cavity.length; i++) {
+    const c = b.cavity[i];
+    const x = c & 0xffff;
+    const y = (c >>> 16) & 0xffff;
+    let score = 0;
+    const neighbours = [
+      [x + 1, y],
+      [x - 1, y],
+      [x, y + 1],
+      [x, y - 1],
+    ];
+    for (const [nx, ny] of neighbours) {
+      if (cavityContains(b, nx, ny)) continue;
+      if (grid.isWalkable(nx, ny)) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestX = x;
+      bestY = y;
+    }
+  }
+  if (bestX === -1) return;
+  grid.setTile(bestX, bestY, TileType.Door);
 }

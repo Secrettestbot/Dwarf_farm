@@ -20,7 +20,7 @@ describe("endgame content", () => {
       "basic_cooking", "basic_brewing", "rope_and_fibre",
       "masonry_and_mortaring", "carpentry_mechanisms", "steel_alloying",
       "armoury_basics", "medical_practice", "textile_craft",
-      "underground_agriculture", "minecart_tracks",
+      "underground_agriculture", "minecart_tracks", "pottery_and_kilns",
     ];
     const t = nextTopic(r);
     expect(t).not.toBeNull();

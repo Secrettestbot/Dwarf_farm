@@ -1,8 +1,19 @@
 import { Camera } from "./camera";
 import { SimWorld } from "../sim/world/simWorld";
 import { TileType } from "../sim/world/tiles";
-import { getDwarfSprite, getHostileSprite, getTileSpriteAtLayer, layerOf, SPRITE_TILE_SIZE } from "./sprites";
+import { getDwarfSprite, getHostileSprite, getPetSprite, getTileSpriteAtLayer, layerOf, SPRITE_TILE_SIZE } from "./sprites";
 import { BlueprintKind } from "../sim/planner/blueprint";
+import { seasonOf } from "../sim/time";
+
+/** Per-season RGBA overlay applied to surface tiles (Grass, Tree).
+ * Spring is baseline (no overlay); summer adds a warm gold cast;
+ * autumn paints orange-red; winter washes everything white-grey. */
+const SEASON_TINTS: Record<"spring" | "summer" | "autumn" | "winter", string | null> = {
+  spring: null,
+  summer: "rgba(240, 200, 80, 0.18)",
+  autumn: "rgba(220, 110, 40, 0.25)",
+  winter: "rgba(220, 230, 255, 0.45)",
+};
 
 const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> = {
   bedroom: { fill: "rgba(220, 180, 90, 0.10)", stroke: "rgba(220, 180, 90, 0.55)" },
@@ -21,6 +32,18 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   armoury: { fill: "rgba(180, 180, 220, 0.10)", stroke: "rgba(200, 200, 240, 0.65)" },
   throne_room: { fill: "rgba(160, 100, 200, 0.12)", stroke: "rgba(180, 120, 230, 0.7)" },
   pump_station: { fill: "rgba(60, 130, 170, 0.12)", stroke: "rgba(90, 160, 200, 0.65)" },
+  mason: { fill: "rgba(140, 140, 160, 0.12)", stroke: "rgba(170, 170, 190, 0.65)" },
+  jeweller: { fill: "rgba(180, 130, 220, 0.12)", stroke: "rgba(200, 160, 240, 0.7)" },
+  carpenter: { fill: "rgba(180, 130, 70, 0.12)", stroke: "rgba(200, 150, 90, 0.7)" },
+  lumberyard: { fill: "rgba(90, 160, 70, 0.18)", stroke: "rgba(120, 200, 100, 0.75)" },
+  kiln: { fill: "rgba(200, 110, 70, 0.14)", stroke: "rgba(220, 130, 80, 0.7)" },
+  tannery: { fill: "rgba(140, 100, 60, 0.14)", stroke: "rgba(170, 130, 80, 0.7)" },
+  loom: { fill: "rgba(200, 190, 170, 0.14)", stroke: "rgba(220, 210, 190, 0.7)" },
+  hospital: { fill: "rgba(220, 200, 200, 0.12)", stroke: "rgba(240, 220, 220, 0.7)" },
+  tavern: { fill: "rgba(200, 160, 100, 0.14)", stroke: "rgba(220, 180, 110, 0.7)" },
+  magma_forge: { fill: "rgba(220, 80, 40, 0.18)", stroke: "rgba(240, 110, 60, 0.8)" },
+  water_wheel: { fill: "rgba(80, 110, 160, 0.16)", stroke: "rgba(100, 140, 200, 0.75)" },
+  cemetery: { fill: "rgba(120, 110, 100, 0.16)", stroke: "rgba(160, 150, 140, 0.7)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -36,6 +59,7 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   engage: { glyph: "⚔", color: "#e0c080" },
   research: { glyph: "📖", color: "#8aa9ff" },
   pump: { glyph: "≈", color: "#80b0d0" },
+  visit_grave: { glyph: "†", color: "#9a8a72" },
 };
 
 export function renderWorld(
@@ -76,6 +100,17 @@ export function renderWorld(
       if (t === TileType.Air) continue;
       const sprite = getTileSpriteAtLayer(t as TileType, layer);
       ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
+      // Seasonal overlay on surface tiles (Grass + Tree). Other
+      // tiles stay constant — the deep mountain doesn't have
+      // seasons. Overlay alpha is small for spring/summer, large for
+      // winter so snow reads at a glance.
+      if (t === TileType.Grass || t === TileType.Tree) {
+        const tint = SEASON_TINTS[seasonOf(sim.tick)];
+        if (tint) {
+          ctx.fillStyle = tint;
+          ctx.fillRect(sx, sy, pt, pt);
+        }
+      }
     }
   }
 
@@ -129,12 +164,110 @@ export function renderWorld(
       it.kind === "food" ? "#9ad3a3" :
       it.kind === "drink" ? "#8aa9ff" :
       it.kind === "meal" ? "#e0c080" :
+      it.kind === "wood" ? "#a87838" :
+      it.kind === "hide" ? "#8a5a3a" :
       "#8a6a4a";
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);
     ctx.strokeStyle = "rgba(0,0,0,0.6)";
     ctx.lineWidth = 1;
     ctx.strokeRect(sx + m + 0.5, sy + pt - m * 1.5 + 0.5, pt - m * 2 - 1, m - 1);
+    // Quality glint: items above baseline get a small bright pip on
+    // the corner so masterworks read at a glance. Tier 0 (basic) →
+    // nothing; Fine/Superior/Exceptional/Masterwork get progressively
+    // brighter golden pips. GDD §6.3 quality tiers.
+    const q = it.quality ?? 0;
+    if (q > 0 && pt >= 8) {
+      const pipColors = ["", "#d8b870", "#e6c878", "#f0d880", "#ffe890"];
+      ctx.fillStyle = pipColors[Math.min(4, q)];
+      const ps = Math.max(2, Math.floor(pt * 0.18));
+      ctx.fillRect(sx + pt - ps - 1, sy + 1, ps, ps);
+    }
+  }
+
+  // Caravan trader pip. Drawn before hostiles + dwarves so anyone
+  // standing on the depot tile renders over the trader. Caravan
+  // presence is indicated by sim.caravanLeavesTick > 0; the pip is a
+  // small wagon-coloured square plus a label so the player can pick
+  // out a visiting kingdom at a glance.
+  if (sim.caravanLeavesTick > 0 && grid.isSeen(sim.caravanX, sim.caravanY)) {
+    const cx = (sim.caravanX - camera.x) * pt + viewW / 2;
+    const cy = (sim.caravanY - camera.y) * pt + viewH / 2;
+    ctx.fillStyle = "#c89060";
+    const m = Math.max(2, Math.floor(pt * 0.25));
+    ctx.fillRect(cx + m, cy + m, pt - m * 2, pt - m * 2);
+    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx + m + 0.5, cy + m + 0.5, pt - m * 2 - 1, pt - m * 2 - 1);
+    if (pt >= 10) {
+      ctx.fillStyle = "#e8c0a0";
+      ctx.font = "9px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("caravan", cx + pt / 2, cy - 2);
+      ctx.textAlign = "start";
+    }
+  }
+
+  // Throne room artifact display: when artifacts exist and a throne
+  // room is built, paint the most recent artifact's name above the
+  // throne tile so the colony's history is visible at a glance.
+  if (sim.artifacts.length > 0 && pt >= 8) {
+    let throneX = -1;
+    let throneY = -1;
+    outer: for (const b of sim.planner.blueprints) {
+      if (b.kind !== "throne_room" || b.status !== "complete") continue;
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        const x = c & 0xffff;
+        const y = (c >>> 16) & 0xffff;
+        if (grid.getTile(x, y) === TileType.Throne) {
+          throneX = x;
+          throneY = y;
+          break outer;
+        }
+      }
+    }
+    if (throneX >= 0 && grid.isSeen(throneX, throneY)) {
+      const tx = (throneX - camera.x) * pt + viewW / 2;
+      const ty = (throneY - camera.y) * pt + viewH / 2;
+      const recent = sim.artifacts[sim.artifacts.length - 1];
+      ctx.fillStyle = "#e0c080";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(recent.name, tx + pt / 2, ty - 4);
+      ctx.textAlign = "start";
+    }
+  }
+
+  // Pets — drawn between hostiles and dwarves so a tamed dog
+  // standing next to its owner renders behind the dwarf. Wild pets
+  // get a small "?" tag, tame pets a coloured collar pip.
+  const petEnts = sim.pet.entities;
+  for (let i = 0; i < petEnts.length; i++) {
+    const id = petEnts[i];
+    const p = sim.position.get(id);
+    const pet = sim.pet.get(id);
+    if (!p || !pet) continue;
+    if (!grid.isSeen(p.x, p.y)) continue;
+    const sprite = getPetSprite(pet.kind);
+    const sx = (p.x - camera.x) * pt + viewW / 2;
+    const sy = (p.y - camera.y) * pt + viewH / 2;
+    ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
+    if (pt >= 8) {
+      if (pet.tamedAtTick < 0) {
+        // Wild pet — white "wild" tag above.
+        ctx.fillStyle = "#cccccc";
+        ctx.font = "9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("wild", sx + pt / 2, sy - 2);
+        ctx.textAlign = "start";
+      } else {
+        // Tame pet — small green collar pip in the corner.
+        ctx.fillStyle = "#a8e090";
+        const ps = Math.max(2, Math.floor(pt * 0.18));
+        ctx.fillRect(sx + pt - ps - 1, sy + 1, ps, ps);
+      }
+    }
   }
 
   // Hostiles below dwarves so dwarves draw over them in melee.
@@ -193,5 +326,17 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "armoury": return "armoury";
     case "throne_room": return "throne";
     case "pump_station": return "pump";
+    case "mason": return "mason";
+    case "jeweller": return "jeweller";
+    case "carpenter": return "carpenter";
+    case "lumberyard": return "tree";
+    case "kiln": return "kiln";
+    case "tannery": return "tannery";
+    case "loom": return "loom";
+    case "hospital": return "hospital";
+    case "tavern": return "tavern";
+    case "magma_forge": return "magma forge";
+    case "water_wheel": return "wheel";
+    case "cemetery": return "cemetery";
   }
 }

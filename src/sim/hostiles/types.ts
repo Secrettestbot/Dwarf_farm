@@ -5,7 +5,19 @@
 // to bring the combat / hp / death-from-violence loop online; deeper kinds
 // drop in as a data-only addition once the rest is solid.
 
-export type HostileKind = "cave_rat" | "cave_spider" | "goblin_scout" | "cave_troll" | "void_shade" | "hollow_king";
+export type HostileKind =
+  | "cave_rat"
+  | "cave_bat"
+  | "cave_spider"
+  | "giant_spider"
+  | "cave_bear"
+  | "goblin_scout"
+  | "cave_troll"
+  | "undead"
+  | "fire_imp"
+  | "automaton"
+  | "void_shade"
+  | "hollow_king";
 
 export interface HostileDef {
   id: HostileKind;
@@ -25,6 +37,10 @@ export interface HostileDef {
   minDepth: number;
   /** Pursuit range in tiles. */
   pursueRange: number;
+  /** True if killing this kind drops a hide item the colony can tan
+   * into leather. Smaller pests (cave rats) and incorporeal threats
+   * (void shades, the Hollow King) leave nothing useful behind. */
+  dropsHide?: boolean;
 }
 
 export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
@@ -52,6 +68,47 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 18,
     minDepth: 60,
     pursueRange: 14,
+    dropsHide: true,
+  },
+  // Bats — fast, low HP, low damage. Annoyance more than threat,
+  // but they swarm in the Skin / Shallow Earth bands.
+  cave_bat: {
+    id: "cave_bat",
+    name: "cave bat",
+    spawnArticle: "a cave bat",
+    maxHp: 15,
+    damage: 3,
+    attackCooldown: 45,
+    moveCooldown: 14,
+    minDepth: 40,
+    pursueRange: 10,
+  },
+  // Giant spider — Deep Rock variant. Considerably more dangerous
+  // than the cave spider; a small colony loses dwarves to one.
+  giant_spider: {
+    id: "giant_spider",
+    name: "giant spider",
+    spawnArticle: "a giant spider",
+    maxHp: 75,
+    damage: 11,
+    attackCooldown: 65,
+    moveCooldown: 20,
+    minDepth: 250,
+    pursueRange: 18,
+    dropsHide: true,
+  },
+  // Bears — surface / Skin layer apex predator. Slow but punishing.
+  cave_bear: {
+    id: "cave_bear",
+    name: "cave bear",
+    spawnArticle: "a cave bear",
+    maxHp: 110,
+    damage: 13,
+    attackCooldown: 75,
+    moveCooldown: 28,
+    minDepth: 100,
+    pursueRange: 14,
+    dropsHide: true,
   },
   // First proper opponent: a goblin patrol scout. Faster, harder hitter,
   // appears as the colony pushes deeper. The full siege flow lands with
@@ -66,6 +123,7 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 22,
     minDepth: 80,
     pursueRange: 18,
+    dropsHide: true,
   },
   // Deep Rock (§5.2): cave troll. Slow, brutal, hard to kill — the kind
   // of threat that justifies a permanent military.
@@ -79,6 +137,49 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 35,
     minDepth: 200,
     pursueRange: 16,
+    dropsHide: true,
+  },
+  // Undead — restless dwarves of older fortresses, the Ancient Dark
+  // (§5.2). Don't tire and don't fear, but they hit no harder than
+  // a goblin would.
+  undead: {
+    id: "undead",
+    name: "undead",
+    spawnArticle: "an undead",
+    maxHp: 60,
+    damage: 9,
+    attackCooldown: 65,
+    moveCooldown: 24,
+    minDepth: 800,
+    pursueRange: 22,
+  },
+  // Fire imp — Gem Seam (§5.2) creature. Light, fast, and burns
+  // anything close enough to hit. Fire-themed but mechanically just
+  // a high-damage low-HP attacker.
+  fire_imp: {
+    id: "fire_imp",
+    name: "fire imp",
+    spawnArticle: "a fire imp",
+    maxHp: 40,
+    damage: 16,
+    attackCooldown: 50,
+    moveCooldown: 16,
+    minDepth: 700,
+    pursueRange: 20,
+  },
+  // Automaton — Tier-5 ancient construct, the kind of thing left
+  // behind by older civilisations. Slow, very high HP. Drops nothing
+  // (it's stone and metal, not flesh).
+  automaton: {
+    id: "automaton",
+    name: "automaton",
+    spawnArticle: "an automaton",
+    maxHp: 200,
+    damage: 18,
+    attackCooldown: 90,
+    moveCooldown: 40,
+    minDepth: 1200,
+    pursueRange: 18,
   },
   // Underworld (§9.4 The Hollow King): a void shade. Spawned only by
   // the Hollow King once they've awakened — never by the regular

@@ -30,6 +30,27 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   mine: "mine",
   farm: "farm",
   stairwell: "stairwell",
+  kitchen: "kitchen",
+  brewery: "brewery",
+  smelter: "smelter",
+  forge: "forge",
+  trade_depot: "trade depot",
+  library: "library",
+  armoury: "armoury",
+  throne_room: "throne room",
+  pump_station: "pump station",
+  mason: "mason's workshop",
+  jeweller: "jeweller's workshop",
+  carpenter: "carpenter's workshop",
+  lumberyard: "lumberyard",
+  kiln: "kiln",
+  tannery: "tannery",
+  loom: "loom",
+  hospital: "hospital",
+  tavern: "tavern",
+  magma_forge: "magma forge",
+  water_wheel: "water wheel",
+  cemetery: "cemetery",
 };
 
 export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): string {
@@ -89,6 +110,30 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A throne room is sketched ${where}. The colony plans for ceremony.`;
     case "pump_station":
       return `A pump station is sketched ${where}. The flood has somewhere to go.`;
+    case "mason":
+      return `A mason's workshop is mapped out ${where}. Rough stone will become block.`;
+    case "jeweller":
+      return `A jeweller's workshop is sketched ${where}. Rough stones will catch the light.`;
+    case "carpenter":
+      return `A carpenter's workshop is laid out ${where}. The first logs are already on the way.`;
+    case "lumberyard":
+      return `The colony marks a tree for felling on the surface.`;
+    case "kiln":
+      return `A kiln is sketched ${where}. The fire pit waits for clay.`;
+    case "tannery":
+      return `A tannery is laid out ${where}. Hides will become leather.`;
+    case "loom":
+      return `A loom is set up ${where}. Fibre will become cloth.`;
+    case "hospital":
+      return `A hospital is laid out ${where}. The wounded will have somewhere to recover.`;
+    case "tavern":
+      return `A tavern is laid out ${where}. The colony's centre of gravity shifts a little.`;
+    case "magma_forge":
+      return `A magma forge is sketched ${where}. The colony has tapped the deep heat.`;
+    case "water_wheel":
+      return `A water wheel is laid out ${where}. The river will turn the workshops.`;
+    case "cemetery":
+      return `A cemetery is laid out ${where}. The colony makes room for its dead.`;
   }
 }
 
@@ -145,6 +190,30 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The throne room stands finished ${where}. The hall awaits its first procession.`;
     case "pump_station":
       return `The pump station is built ${where}. The flood begins to recede.`;
+    case "mason":
+      return `The mason's workshop opens ${where}. The first block is cut.`;
+    case "jeweller":
+      return `The jeweller's workshop opens ${where}. The first cut gem catches the light.`;
+    case "carpenter":
+      return `The carpenter's workshop opens ${where}. The first plank is sawn from a log.`;
+    case "lumberyard":
+      return `A tree falls on the surface. The colony has wood.`;
+    case "kiln":
+      return `The kiln is fired ${where}. The first pot leaves the wheel.`;
+    case "tannery":
+      return `The tannery opens ${where}. The first cured leather hangs on the rack.`;
+    case "loom":
+      return `The loom clatters to life ${where}. The first bolt of cloth comes off the warp.`;
+    case "hospital":
+      return `The hospital opens ${where}. The first cot is made up.`;
+    case "tavern":
+      return `The tavern opens its doors. The first toast is raised.`;
+    case "magma_forge":
+      return `The magma forge roars to life ${where}. The first masterwork tool comes off the anvil.`;
+    case "water_wheel":
+      return `The water wheel begins to turn. The workshops nearby pick up speed.`;
+    case "cemetery":
+      return `The cemetery is finished ${where}. The first plots wait, quiet.`;
   }
 }
 

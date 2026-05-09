@@ -1,9 +1,12 @@
-import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY } from "../sim/time";
+import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY, seasonOf } from "../sim/time";
 import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
+import { isMuted, setMuted } from "../audio/sound";
 
 export interface HudHandlers {
-  fortressName: string;
+  /** Reads the current fortress name; called on each render so the
+   * label updates when the player renames the fortress. */
+  fortressName(): string;
   mode: GameMode;
   onSpeedChange(s: SpeedLevel): void;
   onSave(): void;
@@ -11,6 +14,13 @@ export interface HudHandlers {
    * read it lazily — the live SimWorld instance can be replaced by
    * save/restore between HUD construction and the click. */
   worldSeed(): number;
+  /** Re-open the tutorial overlay. */
+  onShowTutorial(): void;
+  /** Open the history panel — artifacts, books, graves. */
+  onShowHistory(): void;
+  /** Player wants to rename the fortress; the host pops a prompt
+   * and, on a non-empty answer, calls `setFortressName`. */
+  onRenameFortress(): void;
 }
 
 export class Hud {
@@ -20,8 +30,11 @@ export class Hud {
   private dwarfLabel: HTMLDivElement;
   private plannerLabel: HTMLDivElement;
   private stockpileLabel!: HTMLDivElement;
+  private nameLabel!: HTMLDivElement;
+  private handlers: HudHandlers;
 
   constructor(host: HTMLElement, handlers: HudHandlers) {
+    this.handlers = handlers;
     const top = document.createElement("div");
     top.className = "panel";
     top.style.cssText =
@@ -32,8 +45,14 @@ export class Hud {
         : `<span style="color:#789;font-size:9px;letter-spacing:2px;">LEGACY</span>`;
     top.innerHTML = `
       <div style="color:#888;font-size:10px;letter-spacing:3px;">⛏ DWARVEN DEEP</div>
-      <div style="color:#e0c080;font-size:14px;line-height:1.2;">${escapeHtml(handlers.fortressName)} ${modeBadge}</div>
+      <div id="hud-fortress-name" style="color:#e0c080;font-size:14px;line-height:1.2;cursor:pointer;" title="Click to rename"></div>
     `;
+    this.nameLabel = top.querySelector("#hud-fortress-name") as HTMLDivElement;
+    this.refreshFortressName(modeBadge);
+    this.nameLabel.addEventListener("click", () => {
+      handlers.onRenameFortress();
+      this.refreshFortressName(modeBadge);
+    });
 
     this.clockLabel = document.createElement("div");
     this.clockLabel.style.fontSize = "11px";
@@ -99,6 +118,39 @@ export class Hud {
       window.setTimeout(() => { seedButton.textContent = "Share seed"; }, 1800);
     });
     tools.appendChild(seedButton);
+
+    // Mute toggle — Web Audio is the colony's only sound output, so
+    // a single button is enough. Persists in localStorage.
+    const muteButton = document.createElement("button");
+    muteButton.className = "btn";
+    muteButton.title = "Toggle sound";
+    const refreshMute = () => {
+      muteButton.textContent = isMuted() ? "Sound: off" : "Sound: on";
+    };
+    refreshMute();
+    muteButton.addEventListener("click", () => {
+      setMuted(!isMuted());
+      refreshMute();
+    });
+    tools.appendChild(muteButton);
+
+    // History — opens a browseable panel of artifacts / books /
+    // graves so the player doesn't have to scroll the chronicle.
+    const historyButton = document.createElement("button");
+    historyButton.className = "btn";
+    historyButton.textContent = "History";
+    historyButton.title = "Browse the colony's artifacts, books, and graves";
+    historyButton.addEventListener("click", () => handlers.onShowHistory());
+    tools.appendChild(historyButton);
+
+    // Tutorial replay — opens the new-player overlay any time.
+    const helpButton = document.createElement("button");
+    helpButton.className = "btn";
+    helpButton.textContent = "?";
+    helpButton.title = "Show tutorial";
+    helpButton.addEventListener("click", () => handlers.onShowTutorial());
+    tools.appendChild(helpButton);
+
     top.appendChild(tools);
 
     const help = document.createElement("div");
@@ -116,7 +168,9 @@ export class Hud {
     const day = Math.floor(tick / TICKS_PER_DAY) + 1;
     const hour = Math.floor((tick % TICKS_PER_DAY) / TICKS_PER_HOUR);
     const min = tick % TICKS_PER_HOUR;
-    this.clockLabel.textContent = `Day ${day} · ${pad(hour)}:${pad(min)}  (tick ${tick})`;
+    const season = seasonOf(tick);
+    const seasonLabel = season.charAt(0).toUpperCase() + season.slice(1);
+    this.clockLabel.textContent = `Day ${day} · ${pad(hour)}:${pad(min)} · ${seasonLabel}  (tick ${tick})`;
     const dwarfCount = sim.dwarf.size();
     this.dwarfLabel.textContent = `${dwarfCount} dwarf${dwarfCount === 1 ? "" : "ves"}`;
     const active = sim.planner.activeCount();
@@ -128,9 +182,18 @@ export class Hud {
       `<span style="color:#8aa9ff;">Drink ${sp.drink}</span> · ` +
       (sp.meals > 0 ? `<span style="color:#e0c080;">Meals ${sp.meals}</span> · ` : "") +
       `Ore ${sp.ore} · Stone ${sp.stone}` +
+      (sp.blocks > 0 ? ` · <span style="color:#b8b8c8;">Blocks ${sp.blocks}</span>` : "") +
       (sp.bars > 0 ? ` · <span style="color:#e0a070;">Bars ${sp.bars}</span>` : "") +
       (sp.tools > 0 ? ` · <span style="color:#e0c080;">Tools ${sp.tools}</span>` : "") +
-      (sp.gems > 0 ? ` · <span style="color:#a8d8e0;">Gems ${sp.gems}</span>` : "");
+      (sp.gems > 0 ? ` · <span style="color:#a8d8e0;">Gems ${sp.gems}</span>` : "") +
+      (sp.cut_gems > 0 ? ` · <span style="color:#d8a8f0;">Cut Gems ${sp.cut_gems}</span>` : "") +
+      (sp.wood > 0 ? ` · <span style="color:#a87838;">Wood ${sp.wood}</span>` : "") +
+      (sp.planks > 0 ? ` · <span style="color:#c8a070;">Planks ${sp.planks}</span>` : "") +
+      (sp.pots > 0 ? ` · <span style="color:#c8b090;">Pots ${sp.pots}</span>` : "") +
+      (sp.hide > 0 ? ` · <span style="color:#a07050;">Hides ${sp.hide}</span>` : "") +
+      (sp.leather > 0 ? ` · <span style="color:#c08858;">Leather ${sp.leather}</span>` : "") +
+      (sp.rope > 0 ? ` · <span style="color:#c8b888;">Rope ${sp.rope}</span>` : "") +
+      (sp.cloth > 0 ? ` · <span style="color:#e0d0b0;">Cloth ${sp.cloth}</span>` : "");
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }
@@ -138,6 +201,10 @@ export class Hud {
 
   destroy(): void {
     this.root.remove();
+  }
+
+  private refreshFortressName(modeBadge: string): void {
+    this.nameLabel.innerHTML = `${escapeHtml(this.handlers.fortressName())} ${modeBadge}`;
   }
 }
 

@@ -22,6 +22,13 @@ export interface TraitDef {
   description: string;
   /** Traits sharing a non-empty conflictGroup are mutually exclusive. */
   conflictGroup?: string;
+  /** False for traits that have no mechanical effect today (per the
+   * GDD, e.g. Colourblind: "no other negative effect"). rollTraits
+   * skips them so every dwarf is guaranteed to land the same count
+   * of game-affecting traits. The trait is still listed in the
+   * registry — it can show up in the founders-screen swap UI or be
+   * granted by hand for narrative reasons. */
+  mechanical?: boolean;
 }
 
 const RARITY_WEIGHT: Record<TraitRarity, number> = {
@@ -106,7 +113,8 @@ export const TRAITS: TraitDef[] = [
   { id: "eagle_eyed", name: "Eagle-Eyed", category: "physical", rarity: "uncommon",
     description: "Spots threats and structural weaknesses early." },
   { id: "colourblind", name: "Colourblind", category: "physical", rarity: "uncommon",
-    description: "Can't distinguish gem types by sight. No other penalty." },
+    description: "Can't distinguish gem types by sight. No other penalty.",
+    mechanical: false },
   { id: "ambidextrous", name: "Ambidextrous", category: "physical", rarity: "rare",
     description: "Wields two weapons. Consistent fine craft." },
   { id: "dwarf_touched", name: "Dwarf-Touched", category: "physical", rarity: "rare",
@@ -138,6 +146,8 @@ export const TRAITS_BY_ID: Record<string, TraitDef> = (() => {
  *   - rarity weights (common 8, uncommon 3, rare 1, special 0.5)
  *   - conflict groups (no two from the same group)
  *   - category caps (max 1 special)
+ *   - skip flavour-only traits so every dwarf is guaranteed N
+ *     mechanical traits — fairness across the founders.
  * Deterministic given the rng.
  */
 export function rollTraits(rng: Rng, count: number): TraitDef[] {
@@ -145,8 +155,9 @@ export function rollTraits(rng: Rng, count: number): TraitDef[] {
   const usedGroups = new Set<string>();
   let specials = 0;
 
-  // Build a working pool we can sample without replacement.
-  const pool = TRAITS.slice();
+  // Build a working pool we can sample without replacement. Drop
+  // flavour-only traits up front — see TraitDef.mechanical.
+  const pool = TRAITS.filter((t) => t.mechanical !== false);
 
   for (let i = 0; i < count && pool.length > 0; i++) {
     // Filter to currently-eligible candidates.

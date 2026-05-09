@@ -1,8 +1,20 @@
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../sim/time";
 
+/** A single chronicle entry surfaced in the post-catch-up digest. */
+export interface DigestEntry {
+  tick: number;
+  category: string;
+  text: string;
+}
+
 export interface ReturnScreenHandle {
   setProgress(done: number, total: number): void;
   setStatus(line: string): void;
+  /** Replace the progress UI with a categorised digest of events from
+   * the catch-up window (GDD §3.2). Returns a Promise that resolves
+   * once the player clicks Continue. If onResume isn't provided, the
+   * caller is expected to call close() manually. */
+  showDigest(events: DigestEntry[], onResume: () => void): void;
   close(): void;
 }
 
@@ -44,10 +56,114 @@ export function showReturnScreen(host: HTMLElement, elapsedMs: number, ticksToRu
     setStatus(line) {
       status.textContent = line;
     },
+    showDigest(events, onResume) {
+      // Build the GDD §3.2 digest: deaths & injuries, births &
+      // arrivals, discoveries, constructions, crises, milestones.
+      // The categories on EventLog already line up with the GDD's
+      // "social / discovery / construction / milestone / crisis"
+      // taxonomy with one twist — births and deaths both live in
+      // 'social', so we tag them by the verb that fires the event.
+      const buckets: Record<string, DigestEntry[]> = {
+        deaths: [],
+        births: [],
+        discoveries: [],
+        constructions: [],
+        crises: [],
+        milestones: [],
+      };
+      for (const e of events) {
+        if (e.category === "social" && /\b(died|dead|passed|did not wake|slain by|grieves|bereaved)\b/i.test(e.text)) {
+          buckets.deaths.push(e);
+        } else if (e.category === "social" && /\b(born|gave birth|first child|arrived at the gate|joined the fortress|walks out of the dust)\b/i.test(e.text)) {
+          buckets.births.push(e);
+        } else if (e.category === "social") {
+          // Pairings, drafts, etc. — group under arrivals/social.
+          buckets.births.push(e);
+        } else if (e.category === "discovery") {
+          buckets.discoveries.push(e);
+        } else if (e.category === "construction") {
+          buckets.constructions.push(e);
+        } else if (e.category === "crisis") {
+          buckets.crises.push(e);
+        } else if (e.category === "milestone") {
+          buckets.milestones.push(e);
+        }
+      }
+
+      const labels: Array<[keyof typeof buckets, string, string]> = [
+        ["milestones", "Milestones", "#ff9aa2"],
+        ["deaths", "Deaths & Injuries", "#ff7060"],
+        ["births", "Births, Arrivals & Bonds", "#9ad3a3"],
+        ["discoveries", "Discoveries", "#ffd070"],
+        ["constructions", "Constructions", "#a8c8e8"],
+        ["crises", "Crises", "#ff7060"],
+      ];
+
+      const sections = labels
+        .map(([key, label, color]) => {
+          const entries = buckets[key];
+          if (entries.length === 0) return "";
+          // Cap each section so the digest doesn't scroll forever
+          // — show the first few in each, with a "+N more" note.
+          const MAX = 8;
+          const shown = entries.slice(0, MAX);
+          const extra = entries.length - shown.length;
+          const items = shown
+            .map((e) => {
+              const day = Math.floor(e.tick / TICKS_PER_DAY) + 1;
+              return `<div style="display:flex;gap:10px;align-items:flex-start;font-size:11px;line-height:1.5;color:#aaa;margin:2px 0;">
+                <span style="color:#666;flex:0 0 auto;font-variant-numeric:tabular-nums;">d${day}</span>
+                <span style="color:${color};">${escapeHtml(e.text)}</span>
+              </div>`;
+            })
+            .join("");
+          const footer = extra > 0
+            ? `<div style="font-size:10px;color:#666;margin-top:4px;">… ${extra} more in the chronicle.</div>`
+            : "";
+          return `
+            <div style="margin-top:14px;">
+              <div style="font-size:10px;letter-spacing:2px;color:${color};text-transform:uppercase;margin-bottom:4px;">${label}</div>
+              ${items}${footer}
+            </div>`;
+        })
+        .filter((s) => s.length > 0)
+        .join("");
+
+      const empty = sections === "" ? `
+        <div style="margin-top:24px;font-size:12px;color:#888;line-height:1.6;">
+          The mountain was quiet while you were away. Nothing of note made it into the chronicle.
+        </div>` : "";
+
+      // Replace the card's progress UI with the digest + a Continue
+      // button. Reuse the existing card so the framing — "you were
+      // away for X" header — stays in place.
+      card.innerHTML = `
+        <div style="font-size:14px;letter-spacing:6px;color:#888;margin-bottom:8px;">⛏  WHILE YOU WERE AWAY</div>
+        <h1 style="font-size:24px;margin:0 0 4px;color:#e0c080;">The mountain went on without you.</h1>
+        <div style="color:#aaa;margin-bottom:8px;font-size:12px;">
+          <strong style="color:#e0c080;">${realLabel}</strong> real ·
+          <strong style="color:#e0c080;">${igLabel}</strong> in the mountain
+        </div>
+        <div style="text-align:left;max-height:60vh;overflow-y:auto;padding:0 8px;">
+          ${sections}${empty}
+        </div>
+        <div style="margin-top:18px;">
+          <button id="rs-continue" class="btn" style="padding:6px 18px;font-size:12px;">Continue</button>
+        </div>
+      `;
+      const cont = card.querySelector("#rs-continue") as HTMLButtonElement | null;
+      cont?.addEventListener("click", onResume);
+    },
     close() {
       root.remove();
     },
   };
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
+  );
 }
 
 function formatRealElapsed(sec: number): string {

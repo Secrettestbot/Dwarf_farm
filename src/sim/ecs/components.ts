@@ -36,6 +36,24 @@ export interface Dwarf {
    * fortress. Optional in saved data: older saves treat everyone as
    * not-born-in-colony, which is the conservative default. */
   bornInColony: boolean;
+  /** Grave coordinates of a former partner, or null. Set in killDwarf
+   * when the partner is buried in a Cemetery; consulted in chooseTask
+   * so the survivor pays their respects when morale dips. Cleared
+   * when the survivor pairs with someone new (their grief has eased
+   * enough to bond again). */
+  lostPartnerGrave?: { x: number; y: number };
+  /** Tick of the last grave visit. Cooldown so the survivor doesn't
+   * stand at the headstone every hour — once per in-game season is
+   * the natural rhythm. */
+  lastGraveVisitTick?: number;
+  /** Names of this dwarf's mother and father. Set by birthDwarf for
+   * colony-born children; undefined for founders + migrants whose
+   * lineage isn't recorded. Names (not entity ids) because parents
+   * may die and entity ids get reused, while names are stable
+   * within a colony's run. The dwarf inspector uses this to render
+   * a small family tree (parents alive / deceased, plus siblings
+   * computed by matching parentNames). */
+  parentNames?: [string, string];
 }
 
 export interface Pathing {
@@ -45,6 +63,12 @@ export interface Pathing {
   // Final destination (the tile we want to be adjacent to, e.g. the rock to mine).
   goalX: number;
   goalY: number;
+  /** Sub-tick movement budget (Agile/Slow). Each tick, the dwarf's
+   * traitMoveSpeed is added; once the accumulator crosses 1, a step
+   * is taken and 1 is subtracted. Defaults to 0 — base-speed dwarves
+   * step exactly once per tick (1.0 + 0 = 1.0). Optional in saved
+   * data; missing means 0. */
+  moveAccum?: number;
 }
 
 /**
@@ -83,7 +107,7 @@ export interface Needs {
  * to hauling jobs. The kind matches the stockpile counter that the item
  * eventually credits when a hauler delivers it. Items are entities so
  * pathfinding and the renderer can locate them by Position. */
-export type ItemKind = "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal";
+export type ItemKind = "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide";
 
 export interface Item {
   kind: ItemKind;
@@ -147,7 +171,89 @@ export interface Fury {
   used: boolean;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump";
+/** Obsessive (GDD §6.5 rare trait): the dwarf periodically fixates on
+ * a single skill, grinding it at 2× XP for an in-game week, then
+ * returns to normal. The component lives on the dwarf only while the
+ * grind is active; it's removed when the timer elapses. */
+export interface Obsession {
+  /** Skill being obsessed over. awardSkillXp doubles XP when the
+   * incoming skill matches. */
+  skillId: string;
+  /** Tick at which the obsession ends and the component is removed. */
+  endsAtTick: number;
+}
+
+/** Tantrum (GDD §6.4 broken-morale state): a dwarf with sustained
+ * very-low morale snaps and refuses productive work for several
+ * in-game days. While set, chooseTask skips the work branches —
+ * they can still eat, drink, sleep, and wander — and the chronicle
+ * notes the breakdown. The component clears once morale rises back
+ * above a recovery threshold or the timer elapses. */
+export interface Tantrum {
+  /** Tick at which the tantrum began. Used to enforce a minimum
+   * duration so a one-tick morale spike doesn't immediately undo
+   * the breakdown. */
+  startedAtTick: number;
+  /** Tick at which the tantrum naturally ends regardless of morale. */
+  endsAtTick: number;
+}
+
+/** Domesticated or domesticatable creature — pets the colony has
+ * adopted (or is in the process of adopting). A wild Pet has no
+ * owner and accumulates tameProgress when a dwarf with sufficient
+ * farming skill stands adjacent. Once tamed, the pet follows its
+ * owner around and helps the colony — cave dogs hunt small
+ * hostiles (rats, spiders, bats) so the miners don't have to.
+ *
+ * Rarity is enforced at the spawn site: wild pets only appear
+ * roughly once per in-game year. The colony will rarely have more
+ * than two or three at a time. */
+export interface Pet {
+  kind: PetKind;
+  /** Owner dwarf entity id once tamed, else -1 for a wild pet. */
+  ownerId: number;
+  /** Owner's name — preserved when the entity reference dies so
+   * the chronicle still reads correctly when the owner passes. */
+  ownerName?: string;
+  /** Cumulative ticks of taming progress. Once it crosses
+   * PET_TAME_THRESHOLD the pet flips from wild to tame. */
+  tameProgress: number;
+  /** Tick at which the pet was tamed, or -1 if still wild. */
+  tamedAtTick: number;
+  /** Tick of the last attack this pet made. Used as a per-pet
+   * cooldown so they don't tear through hostiles every tick. */
+  lastAttackTick: number;
+}
+
+export type PetKind = "cave_dog" | "cave_bat" | "cave_falcon";
+
+/** Active illness on a dwarf. Diseases tick HP down slowly while
+ * set; recovery comes either from time spent in a Hospital cot with
+ * a competent medic on duty, or from sufficient idle / healing
+ * time at higher Iron Constitution. The chronicle records each
+ * contraction and recovery. */
+export interface Disease {
+  kind: DiseaseKind;
+  /** Tick at which the dwarf first fell ill. Used for the recovery
+   * narrative line ("X has recovered after N days") and for
+   * difficulty scaling on long illnesses. */
+  contractedAtTick: number;
+  /** Cumulative ticks of medic-supervised treatment. Once this
+   * crosses DISEASE_CURE_THRESHOLD the disease clears. */
+  treatProgress: number;
+}
+
+export type DiseaseKind =
+  /** Mild cave-air illness — light HP drain, easy to shake. */
+  | "cave_cough"
+  /** Deep Rock fever from prolonged depth exposure — moderate
+   * drain, harder to recover from without a hospital. */
+  | "deep_fever"
+  /** Wound infection — sets in after a severe injury. Fast HP
+   * drain; the colony's most lethal disease without medicine. */
+  | "wound_sickness";
+
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
 
 export interface JobAssignment {
   kind: JobKind;

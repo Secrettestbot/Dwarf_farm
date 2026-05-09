@@ -5,7 +5,7 @@ import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
 import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival } from "./events/narrator";
-import { TICKS_PER_YEAR, TICKS_PER_DAY } from "./time";
+import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, seasonOf, Season } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
 import { levelFromXp } from "./dwarves/skillProgress";
@@ -20,7 +20,39 @@ import { nextTopic, TOPICS_BY_ID } from "./research";
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
 export const MOVE_TICKS = 1;
+/** Base ticks to mine a generic rock tile. Material-specific hardness
+ * scales this up; mining-skill and pickaxe-quality scale it down. */
 export const MINE_TICKS = 6;
+/** Per-material hardness multiplier applied to MINE_TICKS. Surface
+ * dirt is fast; granite is harder than stone; gem-seam crystals are
+ * tough; the deep-rock metals (adamantite, void-ore) are the
+ * fortress's grindstone — without a forged pickaxe they're nearly
+ * untouchable. */
+const MATERIAL_HARDNESS: Record<number, number> = {
+  // Surface and skin layer.
+  [TileType.Dirt]: 0.5,
+  [TileType.Sand]: 0.5,
+  [TileType.Tree]: 1.0,
+  // Shallow earth.
+  [TileType.Stone]: 1.0,
+  [TileType.Aquifer]: 1.5,
+  // Deep rock.
+  [TileType.Granite]: 1.5,
+  [TileType.Ore]: 1.6,
+  [TileType.Coal]: 1.2,
+  [TileType.Silver]: 1.7,
+  [TileType.Gold]: 1.8,
+  // Gem seam.
+  [TileType.RawEmerald]: 2.0,
+  [TileType.RawRuby]: 2.2,
+  [TileType.RawDiamond]: 2.5,
+  // Ancient dark / underworld.
+  [TileType.Adamantite]: 3.5,
+  [TileType.VoidOre]: 4.5,
+  [TileType.SoulCrystal]: 3.0,
+  // Cave mushroom is soft — it's a mushroom.
+  [TileType.CaveMushroom]: 0.4,
+};
 export const SLEEP_TICKS = 240; // 4 in-game hours of rest restores 80 sleep
 export const SOCIALISE_TICKS = 30; // half an in-game hour of conversation
 export const WANDER_LINGER_TICKS = 12; // after arrival, pause briefly before next task
@@ -57,6 +89,7 @@ export function tick(sim: SimWorld): void {
     aquiferBreached: sim.aquiferBreachTick >= 0,
   });
   yearRolloverSystem(sim);
+  seasonRolloverSystem(sim);
   emergencySystem(sim);
   researchPickSystem(sim);
   draftSystem(sim);
@@ -74,11 +107,22 @@ export function tick(sim: SimWorld): void {
   combatSystem(sim);
   healingSystem(sim);
   farmSystem(sim);
+  tavernSystem(sim);
+  legendarySpecialtiesSystem(sim);
   tradeSystem(sim);
   hollowKingSystem(sim);
   hollowKingManifestSystem(sim);
   specialTraitSystem(sim);
+  passiveTraitSystem(sim);
   furyEndSystem(sim);
+  tantrumSystem(sim);
+  petSpawnSystem(sim);
+  petSystem(sim);
+  mayorSystem(sim);
+  kingSystem(sim);
+  festivalSystem(sim);
+  diseaseSystem(sim);
+  argumentSystem(sim);
   engravingSystem(sim);
   floodSystem(sim);
   depthMilestoneSystem(sim);
@@ -99,9 +143,62 @@ export function tick(sim: SimWorld): void {
 const STONE_SPEAKER_INTERVAL = TICKS_PER_DAY * 6; // once per season
 const ANCESTOR_VOICE_INTERVAL = TICKS_PER_DAY * 7; // once per in-game week
 const STONE_SPEAKER_RANGE = 200;
+/** Per-day chance for an Obsessive dwarf without an active obsession
+ * to fall into one. Tuned so most Obsessive dwarves fixate a few
+ * times per in-game year — frequent enough that a fortress with one
+ * actually feels their presence. */
+const OBSESSION_DAILY_CHANCE = 0.02;
+const OBSESSION_DURATION_TICKS = TICKS_PER_DAY * 7;
+/** Skill ids the Obsessive trait can fixate on. Subset of the GDD's
+ * full skill list — only the ones a dwarf actually trains in
+ * gameplay today. */
+const OBSESSION_SKILLS = [
+  "mining",
+  "smithing",
+  "cooking",
+  "brewing",
+  "scholarship",
+  "military",
+  "artistry",
+  "trading",
+] as const;
 
 function specialTraitSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
+  // Obsession lifecycle (GDD §6.5 Obsessive): expire any active
+  // obsessions whose timer has elapsed, then roll once per in-game
+  // day for new ones on the dwarves who carry the trait.
+  const obsEnts = sim.obsession.entities.slice();
+  for (const id of obsEnts) {
+    const ob = sim.obsession.get(id);
+    if (!ob) continue;
+    if (sim.tick >= ob.endsAtTick) {
+      const dw = sim.dwarf.get(id);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} loses their grip on the obsession with ${ob.skillId}. They look around as if waking up.`,
+        );
+      }
+      sim.obsession.remove(id);
+    }
+  }
+  if (sim.tick % TICKS_PER_DAY === 0) {
+    for (const id of sim.dwarf.entities) {
+      const dw = sim.dwarf.get(id);
+      if (!dw || !dw.traitIds.includes("obsessive")) continue;
+      if (sim.obsession.has(id)) continue;
+      if (sim.aiRng.nextFloat() >= OBSESSION_DAILY_CHANCE) continue;
+      const skillId = OBSESSION_SKILLS[sim.aiRng.nextRange(0, OBSESSION_SKILLS.length)];
+      sim.obsession.set(id, { skillId, endsAtTick: sim.tick + OBSESSION_DURATION_TICKS });
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} has fallen into a deep fixation with ${skillId}. They are not to be reasoned with for a week.`,
+      );
+    }
+  }
   if (sim.tick % STONE_SPEAKER_INTERVAL === 0) {
     // For each Stone-Speaker, find the nearest still-unseen valuable
     // tile within range and write a vision line in their voice.
@@ -220,6 +317,960 @@ function furyEndSystem(sim: SimWorld): void {
   }
 }
 
+// ---- Tantrums (GDD §6.4 broken state) --------------------------------
+//
+// A dwarf whose morale stays at the bottom of the gauge eventually
+// breaks: they stop taking productive work, wander aimlessly, and
+// grieve openly. Sleep, eat, drink, and shelter override (survival
+// can't be skipped) but mining, hauling, crafting, etc., are gated
+// out by the chooseTask check on sim.tantrum. The breakdown lasts
+// at least TANTRUM_MIN_DURATION; recovery requires morale climbing
+// back above TANTRUM_RECOVERY_MORALE.
+
+/** Below this morale value, the daily roll has a chance of starting
+ * a tantrum. */
+const TANTRUM_TRIGGER_MORALE = 8;
+/** Daily probability per qualifying dwarf. Tuned so a colony in
+ * sustained crisis sees frequent breakdowns; one bad day rarely
+ * triggers. */
+const TANTRUM_DAILY_CHANCE = 0.25;
+/** Minimum tantrum duration in ticks. Even if morale spikes, the
+ * dwarf needs this long to settle. */
+const TANTRUM_MIN_DURATION = TICKS_PER_DAY;
+/** Maximum tantrum duration. After this they snap out regardless. */
+const TANTRUM_MAX_DURATION = TICKS_PER_DAY * 4;
+/** Once the dwarf's morale is back above this, they recover (after
+ * the minimum duration has elapsed). */
+const TANTRUM_RECOVERY_MORALE = 40;
+/** Ticks between potential smash attempts. */
+const TANTRUM_SMASH_INTERVAL = 120; // every two in-game hours
+
+/** Find a furniture tile adjacent to a tantruming dwarf and smash
+ * it back to CorridorFloor. Beds / tables / bins are fair game;
+ * Memorial / Headstone / Grave / FarmTile are not — even broken
+ * dwarves don't deface graves or trample the crops. Chronicle
+ * records each smash. */
+function smashAdjacentFurniture(sim: SimWorld, dw: import("./ecs/components").Dwarf, pos: { x: number; y: number }): void {
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    const x = pos.x + dx;
+    const y = pos.y + dy;
+    const t = sim.grid.getTile(x, y);
+    let label = "";
+    if (t === TileType.Bed) label = "bed";
+    else if (t === TileType.Table) label = "table";
+    else if (t === TileType.Bin) label = "bin";
+    else continue;
+    sim.grid.setTile(x, y, TileType.CorridorFloor);
+    sim.regions.invalidate();
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      `${dw.name} smashes a ${label} in their grief. Splinters fly.`,
+    );
+    return;
+  }
+}
+
+function tantrumSystem(sim: SimWorld): void {
+  // Recovery / expiration loop — runs every tick.
+  const onTantrum = sim.tantrum.entities.slice();
+  for (const id of onTantrum) {
+    const t = sim.tantrum.get(id);
+    if (!t) continue;
+    const minMet = sim.tick - t.startedAtTick >= TANTRUM_MIN_DURATION;
+    const maxMet = sim.tick >= t.endsAtTick;
+    const needs = sim.needs.get(id);
+    const recovered = minMet && needs && needs.morale >= TANTRUM_RECOVERY_MORALE;
+    if (maxMet || recovered) {
+      const dw = sim.dwarf.get(id);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} comes back to themselves. The breakdown has passed.`,
+        );
+      }
+      sim.tantrum.remove(id);
+      continue;
+    }
+    // Tantrum smashing: every TANTRUM_SMASH_INTERVAL ticks the
+    // dwarf takes a swing at adjacent furniture — a Bed, Table, or
+    // Bin reverts to CorridorFloor, the chronicle records the
+    // damage. Hospital cots and headstones are untouchable (the
+    // dwarf has some grief left in them).
+    if ((sim.tick - t.startedAtTick) % TANTRUM_SMASH_INTERVAL === 0) {
+      const pos = sim.position.get(id);
+      const dw = sim.dwarf.get(id);
+      if (pos && dw) {
+        smashAdjacentFurniture(sim, dw, pos);
+      }
+    }
+  }
+  // Trigger roll — once per in-game day.
+  if (sim.tick === 0 || sim.tick % TICKS_PER_DAY !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    if (sim.tantrum.has(id)) continue;
+    const needs = sim.needs.get(id);
+    if (!needs) continue;
+    if (needs.morale > TANTRUM_TRIGGER_MORALE) continue;
+    if (sim.aiRng.nextFloat() >= TANTRUM_DAILY_CHANCE) continue;
+    sim.tantrum.set(id, {
+      startedAtTick: sim.tick,
+      endsAtTick: sim.tick + TANTRUM_MIN_DURATION + sim.aiRng.nextRange(0, TANTRUM_MAX_DURATION - TANTRUM_MIN_DURATION + 1),
+    });
+    const dw = sim.dwarf.get(id);
+    if (dw) {
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `${dw.name} has broken. They wander the halls muttering, refusing all work.`,
+      );
+    }
+  }
+}
+
+// ---- Pets and domestication ----------------------------------------
+//
+// Once per in-game year a wild cave dog roams onto the colony's
+// surface clearing. Without intervention it just wanders peacefully;
+// any dwarf with farming skill ≥ PET_TAME_MIN_SKILL who stands
+// adjacent accumulates tameProgress on the pet. Once it crosses the
+// threshold the pet flips from wild to tame, the dwarf becomes its
+// owner, and the chronicle records the bond.
+//
+// Tame pets follow their owner around within a small radius and
+// attack adjacent low-tier hostiles (cave rats, bats, spiders) —
+// the colony's first line of pest control. Pets can be killed in
+// combat; if their owner dies, they go feral (stay tame but no
+// owner is named — they wander the colony and still hunt pests).
+
+const PET_SPAWN_INTERVAL = TICKS_PER_YEAR;
+/** Probability of a wild pet appearing on each yearly tick. The
+ * "rare" knob — turn this down for fewer pets across a fortress's
+ * lifetime. 0.6 means most years see one show up. */
+const PET_SPAWN_CHANCE = 0.6;
+const PET_TAME_MIN_SKILL = 5; // Adequate Farming
+const PET_TAME_THRESHOLD = 90; // ~1.5 in-game hours of contact
+const PET_TAME_PROGRESS_PER_TICK = 1;
+/** A tame pet stays within this radius of its owner. */
+const PET_FOLLOW_RADIUS = 6;
+/** Hostile kinds a tame pet will engage. Cave dogs aren't going
+ * to take on a troll — pest tier only. */
+const PET_TARGET_KINDS: ReadonlyArray<HostileKind> = ["cave_rat", "cave_bat", "cave_spider"];
+
+interface PetDef {
+  kind: import("./ecs/components").PetKind;
+  /** Display label for chronicle lines. */
+  label: string;
+  /** Article for "a/an X" — keeps narration grammatical without
+   * a vowel-detection loop. */
+  spawnArticle: string;
+  /** Spawn weight — falcons are rarer than dogs, bats sit between. */
+  spawnWeight: number;
+  attackDamage: number;
+  attackCooldown: number;
+  /** Tile radius the pet checks for adjacent pests. Falcons get
+   * a 2-tile range (a quick stoop) instead of dogs' 1-tile. */
+  attackRadius: number;
+  /** Visibility bonus the pet grants its owner — extra reveal-tiles
+   * around the dwarf each tick. The cave bat's echolocation. */
+  visionRadius: number;
+  /** Max HP. Falcons are fragile; bats fragiler still. */
+  maxHp: number;
+}
+
+const PET_DEFS: Record<import("./ecs/components").PetKind, PetDef> = {
+  cave_dog: {
+    kind: "cave_dog",
+    label: "cave dog",
+    spawnArticle: "a cave dog",
+    spawnWeight: 60,
+    attackDamage: 8,
+    attackCooldown: 60,
+    attackRadius: 1,
+    visionRadius: 0,
+    maxHp: 35,
+  },
+  cave_bat: {
+    kind: "cave_bat",
+    label: "cave bat",
+    spawnArticle: "a cave bat",
+    spawnWeight: 25,
+    // The bat doesn't fight directly — its passive vision bonus is
+    // its job. Tiny attack stats just so a cornered bat does
+    // something rather than nothing.
+    attackDamage: 2,
+    attackCooldown: 120,
+    attackRadius: 1,
+    visionRadius: 4,
+    maxHp: 12,
+  },
+  cave_falcon: {
+    kind: "cave_falcon",
+    label: "cave falcon",
+    spawnArticle: "a cave falcon",
+    spawnWeight: 15,
+    attackDamage: 6,
+    attackCooldown: 45,
+    // Stoop range — a falcon swoops from a few tiles out.
+    attackRadius: 2,
+    visionRadius: 0,
+    maxHp: 18,
+  },
+};
+
+function pickPetKind(rng: import("./rng").Rng): import("./ecs/components").PetKind {
+  const totalWeight = PET_DEFS.cave_dog.spawnWeight + PET_DEFS.cave_bat.spawnWeight + PET_DEFS.cave_falcon.spawnWeight;
+  const r = rng.nextFloat() * totalWeight;
+  let acc = 0;
+  for (const def of [PET_DEFS.cave_dog, PET_DEFS.cave_bat, PET_DEFS.cave_falcon]) {
+    acc += def.spawnWeight;
+    if (r < acc) return def.kind;
+  }
+  return "cave_dog";
+}
+
+function petSpawnSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % PET_SPAWN_INTERVAL !== 0) return;
+  if (sim.aiRng.nextFloat() >= PET_SPAWN_CHANCE) return;
+  // Spawn near the surface clearing — the entrance shaft top is the
+  // simplest reliable walkable surface tile. Wander a few tiles
+  // laterally so successive years don't all drop pets on the same
+  // square.
+  const centreX = sim.spawn.x + sim.aiRng.nextRange(-6, 7);
+  const centreY = Math.max(0, sim.spawn.y - 8);
+  // Find the first walkable tile at or below this column.
+  let sx = centreX;
+  let sy = centreY;
+  for (let probe = 0; probe < 12; probe++) {
+    if (sim.grid.isWalkable(sx, sy)) break;
+    sy++;
+  }
+  if (!sim.grid.isWalkable(sx, sy)) return;
+  const kind = pickPetKind(sim.aiRng);
+  const def = PET_DEFS[kind];
+  sim.spawnPet({ kind, x: sx, y: sy, maxHp: def.maxHp });
+  sim.events.add(
+    sim.tick,
+    "discovery",
+    `${def.spawnArticle.charAt(0).toUpperCase() + def.spawnArticle.slice(1)} has wandered up to the entrance. It eyes the gate without hostility.`,
+  );
+}
+
+/** Per-tick pet behaviour: wild pets accumulate tame progress
+ * adjacent to a skilled dwarf; tame pets follow their owner and
+ * attack adjacent pests. Combat damage is uniform; the pet is
+ * itself targetable in combat (the existing combatSystem treats it
+ * as a non-hostile and skips it, so we let pests bite them only
+ * when they bite first). */
+function petSystem(sim: SimWorld): void {
+  const ents = sim.pet.entities.slice();
+  for (const id of ents) {
+    const pet = sim.pet.get(id);
+    const pos = sim.position.get(id);
+    const hp = sim.health.get(id);
+    if (!pet || !pos || !hp) continue;
+    const def = PET_DEFS[pet.kind];
+    if (hp.hp <= 0) {
+      // Dead pet: chronicle line, then despawn.
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        pet.tamedAtTick > 0
+          ? `The colony's ${def.label} has been killed in the tunnels.`
+          : `The wild ${def.label} dies of its wounds.`,
+      );
+      sim.destroyPet(id);
+      continue;
+    }
+    if (pet.tamedAtTick < 0) {
+      // Wild: see if any farmer is adjacent to tame us.
+      let tamer = -1;
+      sim.forEachDwarf((dwId, dpos, dw) => {
+        if (tamer !== -1) return;
+        if ((dw.skills.farming ?? 1) < PET_TAME_MIN_SKILL) return;
+        const dx = Math.abs(dpos.x - pos.x);
+        const dy = Math.abs(dpos.y - pos.y);
+        if (dx <= 1 && dy <= 1) tamer = dwId;
+      });
+      if (tamer !== -1) {
+        pet.tameProgress += PET_TAME_PROGRESS_PER_TICK;
+        if (pet.tameProgress >= PET_TAME_THRESHOLD) {
+          const tamerDw = sim.dwarf.get(tamer);
+          pet.tamedAtTick = sim.tick;
+          pet.ownerId = tamer;
+          pet.ownerName = tamerDw?.name;
+          if (tamerDw) {
+            // Award farming XP for the successful tame — the work
+            // counts toward the skill.
+            awardSkillXp(sim, tamer, "farming", 5);
+            sim.events.add(
+              sim.tick,
+              "social",
+              `${tamerDw.name} tames the ${def.label}. It will follow them now.`,
+            );
+          }
+        }
+      }
+      // Wild pets just stand still — no movement system for them.
+      continue;
+    }
+    // Tame: combat first (pests within range), then follow.
+    if (sim.tick - pet.lastAttackTick >= def.attackCooldown) {
+      const target = findPetTarget(sim, pos.x, pos.y, def.attackRadius);
+      if (target !== -1) {
+        const tHp = sim.health.get(target);
+        if (tHp) {
+          tHp.hp -= def.attackDamage;
+          pet.lastAttackTick = sim.tick;
+          if (tHp.hp <= 0) {
+            const hostile = sim.hostile.get(target);
+            const hDef = hostile ? HOSTILE_DEFS[hostile.kind] : null;
+            const ownerName = pet.ownerName ?? `the ${def.label}`;
+            if (hDef) {
+              sim.events.add(
+                sim.tick,
+                "discovery",
+                `${ownerName}'s ${def.label} brings down a ${hDef.name}.`,
+              );
+            }
+            sim.ecs.destroy(target, [sim.position, sim.hostile, sim.health]);
+          }
+          continue;
+        }
+      }
+    }
+    // Vision bonus — cave bats reveal a small radius around the
+    // owner's tile every tick. The vision radius is added to the
+    // owner's normal sight via the existing fog-of-war reveal hooks
+    // — visibilitySystem reads pet.kind to apply the bump.
+    // (Implemented in visibilitySystem itself for proximity to the
+    // existing radius logic.)
+    void def.visionRadius;
+    // Follow the owner — if they're alive, drift one tile toward
+    // them whenever we exceed the follow radius. Cheap step rather
+    // than full A*.
+    let owner = pet.ownerId;
+    if (owner !== -1 && !sim.ecs.isAlive(owner)) {
+      // Owner died: pet stays tame but loses its named owner. They
+      // continue to hunt pests around the colony.
+      pet.ownerId = -1;
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${pet.ownerName ?? "Someone"}'s ${def.label} wanders the halls alone now.`,
+      );
+      owner = -1;
+    }
+    if (owner !== -1) {
+      const opos = sim.position.get(owner);
+      if (opos) {
+        const dx = opos.x - pos.x;
+        const dy = opos.y - pos.y;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 > PET_FOLLOW_RADIUS * PET_FOLLOW_RADIUS && sim.tick % 4 === 0) {
+          const stepX = dx === 0 ? 0 : dx > 0 ? 1 : -1;
+          const stepY = dy === 0 ? 0 : dy > 0 ? 1 : -1;
+          const nx = pos.x + stepX;
+          const ny = pos.y + stepY;
+          if (sim.grid.isWalkable(nx, ny)) {
+            pos.x = nx;
+            pos.y = ny;
+          }
+        }
+      }
+    }
+  }
+}
+
+function findPetTarget(sim: SimWorld, sx: number, sy: number, radius: number): number {
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const h = sim.hostile.get(id);
+    const p = sim.position.get(id);
+    if (!h || !p) continue;
+    if (!PET_TARGET_KINDS.includes(h.kind)) continue;
+    const dx = Math.abs(p.x - sx);
+    const dy = Math.abs(p.y - sy);
+    if (dx <= radius && dy <= radius) return id;
+  }
+  return -1;
+}
+
+// ---- Mayor + festival -------------------------------------------------
+//
+// Once per in-game year the colony elects (informally — Dwarven
+// tradition is rough about it) a Mayor: the dwarf with the highest
+// leadership skill, provided they meet the minimum threshold. Their
+// presence in any tile gives the fortress a small morale aura via
+// the existing passive-trait sweep, just like a Natural Leader. The
+// chronicle records each new term:
+//
+//   "The colony recognises Borin as its new Mayor. The leadership
+//    skill: Skilled."
+//
+// Festivals fire once per in-game season when the colony's median
+// morale is high — a quiet affirmation of good times. Bumps every
+// dwarf's morale by FESTIVAL_MORALE_BUMP and writes a celebratory
+// line to the chronicle.
+
+const MAYOR_MIN_SKILL = 5; // Adequate Leadership
+const FESTIVAL_INTERVAL = TICKS_PER_SEASON;
+const FESTIVAL_MIN_MEDIAN_MORALE = 75;
+const FESTIVAL_MORALE_BUMP = 5;
+const FESTIVAL_LINES: ReadonlyArray<string> = [
+  "The colony holds a small festival in the dining hall. Songs are sung; old grievances are laughed off.",
+  "The colony toasts a quiet good year. Even the gloomiest dwarves crack a smile.",
+  "A festival is held — no particular reason, only that the mood is good and the larder is full.",
+];
+
+function mayorSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  let best: { id: EntityId; skill: number } | null = null;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    const skill = dw.skills.leadership ?? 1;
+    if (skill < MAYOR_MIN_SKILL) continue;
+    if (sim.ageOf(id) < 18) continue;
+    if (!best || skill > best.skill || (skill === best.skill && id < best.id)) {
+      best = { id, skill };
+    }
+  }
+  if (!best) {
+    sim.mayorName = "";
+    return;
+  }
+  const dw = sim.dwarf.get(best.id);
+  if (!dw) return;
+  if (dw.name === sim.mayorName) return; // re-elected, no event
+  sim.mayorName = dw.name;
+  sim.events.add(
+    sim.tick,
+    "social",
+    `The colony recognises ${dw.name} as its new Mayor. Their leadership: ${skillTierLabel(best.skill)}.`,
+  );
+}
+
+/** Population at which the colony stops being a Mayor's town and
+ * starts wanting a King. Tuned so a small fortress doesn't crown
+ * itself the moment a throne room finishes. */
+const KING_POPULATION_THRESHOLD = 50;
+/** Skill threshold a dwarf has to clear in BOTH leadership and
+ * military to be eligible for kingship. The colony's leader has
+ * to be both respected and dangerous. */
+const KING_MIN_SKILL = 9; // Skilled
+
+function kingSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  // Throne room must exist and be complete.
+  let hasThroneRoom = false;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind === "throne_room" && b.status === "complete") {
+      hasThroneRoom = true;
+      break;
+    }
+  }
+  if (!hasThroneRoom) {
+    if (sim.kingName) {
+      // Throne room destroyed somehow? Strip royalty.
+      sim.kingName = "";
+    }
+    return;
+  }
+  if (sim.dwarf.size() < KING_POPULATION_THRESHOLD) return;
+  // Find the most-respected combatant: highest combined leadership +
+  // military skill among adults meeting both thresholds.
+  let best: { id: EntityId; score: number } | null = null;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    if (sim.ageOf(id) < 25) continue;
+    const lead = dw.skills.leadership ?? 1;
+    const mil = dw.skills.military ?? 1;
+    if (lead < KING_MIN_SKILL || mil < KING_MIN_SKILL) continue;
+    const score = lead + mil;
+    if (!best || score > best.score || (score === best.score && id < best.id)) {
+      best = { id, score };
+    }
+  }
+  if (!best) {
+    // No qualifying dwarf yet — the throne sits empty until one
+    // emerges. The chronicle has noted the throne room before;
+    // this is just a quiet pass.
+    return;
+  }
+  const dw = sim.dwarf.get(best.id);
+  if (!dw) return;
+  if (dw.name === sim.kingName) return; // re-coronation, no event
+  const previous = sim.kingName;
+  sim.kingName = dw.name;
+  if (previous) {
+    sim.events.add(
+      sim.tick,
+      "milestone",
+      `${dw.name} is crowned the new King. ${previous} steps down with their honour intact.`,
+    );
+  } else {
+    sim.events.add(
+      sim.tick,
+      "milestone",
+      `${dw.name} is crowned the colony's first King. The throne room is no longer empty.`,
+    );
+    fireMilestone(
+      sim,
+      "the_first_king",
+      `The First King. ${dw.name} sits the throne, by virtue of leadership and arms both.`,
+    );
+  }
+}
+
+// ---- Diseases / plague ------------------------------------------------
+//
+// Three illnesses can take a dwarf — cave cough (mild), deep fever
+// (Gem Seam+ exposure), and wound sickness (post-severe-injury
+// infection). The diseaseSystem rolls per-day for new contractions,
+// drains HP on a slower per-hour cadence, and grants a recovery
+// chance when the patient is resting in a Hospital cot under a
+// competent medic.
+
+interface DiseaseDef {
+  kind: import("./ecs/components").DiseaseKind;
+  label: string;
+  /** HP drained per disease-tick. */
+  drain: number;
+  /** Ticks of medic-supervised treatment to reach a cure. */
+  cureTicks: number;
+}
+
+const DISEASE_DEFS: Record<import("./ecs/components").DiseaseKind, DiseaseDef> = {
+  cave_cough: { kind: "cave_cough", label: "cave cough", drain: 1, cureTicks: 200 },
+  deep_fever: { kind: "deep_fever", label: "deep fever", drain: 2, cureTicks: 400 },
+  wound_sickness: { kind: "wound_sickness", label: "wound sickness", drain: 3, cureTicks: 500 },
+};
+
+const DISEASE_TICK_INTERVAL = 60; // once per in-game hour
+const DISEASE_DAILY_CHECK = TICKS_PER_DAY;
+/** Per-day contraction probabilities. */
+const COVE_COUGH_BASE_CHANCE = 0.012; // ~5% per in-game year baseline
+const DEEP_FEVER_DEPTH = 700; // Gem Seam threshold
+const DEEP_FEVER_BASE_CHANCE = 0.020;
+const WOUND_SICKNESS_HP_RATIO = 0.30; // below 30% HP, susceptible
+const WOUND_SICKNESS_BASE_CHANCE = 0.04;
+
+function diseaseSystem(sim: SimWorld): void {
+  // Per-hour drain + medic recovery pass.
+  if (sim.tick % DISEASE_TICK_INTERVAL === 0 && sim.tick > 0) {
+    const sick = sim.disease.entities.slice();
+    for (const id of sick) {
+      const d = sim.disease.get(id);
+      const hp = sim.health.get(id);
+      if (!d || !hp) continue;
+      const def = DISEASE_DEFS[d.kind];
+      // Iron Constitution cuts the drain by half — the trait that
+      // already softens needs decay shaves the disease too.
+      const dw = sim.dwarf.get(id);
+      const eff = dw ? effectsFor(dw.traitIds) : null;
+      const drain = Math.max(1, Math.round(def.drain * (eff && eff.needDecay > 1 ? 0.5 : 1)));
+      hp.hp = Math.max(0, hp.hp - drain);
+      // If the disease drove HP to zero, the dwarf dies of it. The
+      // chronicle gets a specific cause line; killDwarf handles
+      // burial + memorial as usual.
+      if (hp.hp <= 0) {
+        killDwarf(sim, id, def.label);
+        continue;
+      }
+      // Recovery: if the dwarf is on a Hospital cot (the room marker
+      // for medical care) and not actively walking somewhere else,
+      // they are considered "in treatment" — a medic on duty applies
+      // their skill toward the cure. Sleeping in a regular bed gives
+      // a small recovery bonus too.
+      const pos = sim.position.get(id);
+      const job = sim.job.get(id);
+      const path = sim.pathing.get(id);
+      const onCot = pos ? sim.grid.getTile(pos.x, pos.y) === TileType.HospitalBed : false;
+      const sleeping = job?.kind === "sleep";
+      const stationary = !path || path.pathIndex >= path.path.length - 1;
+      let progress = 0;
+      if (onCot && stationary) {
+        const medic = findBestMedic(sim);
+        if (medic !== -1 && medic !== id) {
+          const medDw = sim.dwarf.get(medic);
+          const medSkill = medDw?.skills.medicine ?? 1;
+          // Skilled medic: 1 progress/hour. Higher skills speed up.
+          progress = 1 + Math.floor((medSkill - 1) / 4);
+          // Award medicine XP for active treatment.
+          awardSkillXp(sim, medic, "medicine", 1);
+        } else {
+          // Lying on the cot without a medic is still better than nothing.
+          progress = 1;
+        }
+      } else if (sleeping) {
+        // A bed (any kind) helps a little even without a medic.
+        progress = 1;
+      }
+      d.treatProgress += progress;
+      if (d.treatProgress >= def.cureTicks) {
+        const days = Math.max(1, Math.floor((sim.tick - d.contractedAtTick) / TICKS_PER_DAY));
+        if (dw) {
+          sim.events.add(
+            sim.tick,
+            "social",
+            `${dw.name} has recovered from ${def.label} after ${days} day${days === 1 ? "" : "s"}.`,
+          );
+        }
+        sim.disease.remove(id);
+      }
+    }
+  }
+  // Per-day contraction roll.
+  if (sim.tick === 0 || sim.tick % DISEASE_DAILY_CHECK !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    if (sim.disease.has(id)) continue;
+    const dw = sim.dwarf.get(id);
+    const hp = sim.health.get(id);
+    const pos = sim.position.get(id);
+    if (!dw || !hp || !pos) continue;
+    const eff = effectsFor(dw.traitIds);
+    // Iron Constitution roughly halves contraction probability;
+    // Sickly traits raise it. Use the existing needDecay multiplier
+    // as a stand-in (>1 = sturdy, <1 = fragile).
+    const susceptScale = 1 / Math.max(0.5, eff.needDecay);
+    // 1. Wound sickness — most likely when already badly wounded.
+    if (hp.hp < hp.maxHp * WOUND_SICKNESS_HP_RATIO) {
+      if (sim.aiRng.nextFloat() < WOUND_SICKNESS_BASE_CHANCE * susceptScale) {
+        contractDisease(sim, id, "wound_sickness");
+        continue;
+      }
+    }
+    // 2. Deep fever — only at Gem Seam depth or below.
+    const depth = pos.y - sim.spawn.y;
+    if (depth >= DEEP_FEVER_DEPTH) {
+      if (sim.aiRng.nextFloat() < DEEP_FEVER_BASE_CHANCE * susceptScale) {
+        contractDisease(sim, id, "deep_fever");
+        continue;
+      }
+    }
+    // 3. Cave cough — the always-on mild illness, picked up from
+    // dust and damp.
+    if (sim.aiRng.nextFloat() < COVE_COUGH_BASE_CHANCE * susceptScale) {
+      contractDisease(sim, id, "cave_cough");
+    }
+  }
+}
+
+function contractDisease(sim: SimWorld, e: EntityId, kind: import("./ecs/components").DiseaseKind): void {
+  const def = DISEASE_DEFS[kind];
+  sim.disease.set(e, { kind, contractedAtTick: sim.tick, treatProgress: 0 });
+  const dw = sim.dwarf.get(e);
+  if (dw) {
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      `${dw.name} has come down with ${def.label}.`,
+    );
+  }
+}
+
+// ---- Arguments + brawls ----------------------------------------------
+//
+// Once per in-game day the colony's social tensions get a single
+// roll: every adjacent pair with at least one Antagonistic dwarf
+// has a chance of arguing (small morale hit on both, chronicle
+// line); a tantruming dwarf has a higher chance of throwing a
+// punch (small HP hit on the neighbour, larger morale hit on both).
+// The brawl roll is the only way the colony's internal social
+// stress translates to physical injury.
+
+const ARGUMENT_DAILY_CHANCE = 0.4;
+const ARGUMENT_MORALE_HIT = 5;
+const BRAWL_TANTRUM_CHANCE = 0.5;
+const BRAWL_DAMAGE = 4;
+const BRAWL_MORALE_HIT = 10;
+
+function argumentSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_DAY !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  if (dwarves.length < 2) return;
+  // Pre-build a position lookup so we can find adjacent pairs in
+  // O(N) instead of O(N²). Key: packed (y << 16 | x).
+  const tileToDwarf = new Map<number, EntityId>();
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    const p = sim.position.get(id);
+    if (!p) continue;
+    tileToDwarf.set((p.y << 16) | p.x, id);
+  }
+  // Iterate dwarves; for each, check the four cardinal neighbours
+  // for another dwarf. Sort the pair by id so we don't fire twice.
+  const seenPairs = new Set<string>();
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    const p = sim.position.get(id);
+    const dw = sim.dwarf.get(id);
+    if (!p || !dw) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const other = tileToDwarf.get(((p.y + dy) << 16) | (p.x + dx));
+      if (other === undefined || other === id) continue;
+      const pairKey = id < other ? `${id}:${other}` : `${other}:${id}`;
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      const otherDw = sim.dwarf.get(other);
+      if (!otherDw) continue;
+      const aAntag = dw.traitIds.includes("antagonistic");
+      const bAntag = otherDw.traitIds.includes("antagonistic");
+      const inTantrumA = sim.tantrum.has(id);
+      const inTantrumB = sim.tantrum.has(other);
+      // Tantrum brawl: one of the pair is broken and lashes out.
+      if (inTantrumA || inTantrumB) {
+        if (sim.aiRng.nextFloat() < BRAWL_TANTRUM_CHANCE) {
+          const aggressor = inTantrumA ? id : other;
+          const victim = inTantrumA ? other : id;
+          const aDw = sim.dwarf.get(aggressor)!;
+          const vDw = sim.dwarf.get(victim)!;
+          const vHp = sim.health.get(victim);
+          if (vHp) vHp.hp = Math.max(0, vHp.hp - BRAWL_DAMAGE);
+          const aN = sim.needs.get(aggressor);
+          const vN = sim.needs.get(victim);
+          if (aN) aN.morale = Math.max(0, aN.morale - BRAWL_MORALE_HIT);
+          if (vN) vN.morale = Math.max(0, vN.morale - BRAWL_MORALE_HIT);
+          sim.events.add(
+            sim.tick,
+            "crisis",
+            `${aDw.name} strikes ${vDw.name} in their fury. The colony watches in silence.`,
+          );
+          // If the victim dropped to zero HP, the brawl killed them.
+          // killDwarf records it with a specific cause so the
+          // chronicle reads as homicide rather than vague death.
+          if (vHp && vHp.hp <= 0) {
+            killDwarf(sim, victim, `struck dead by ${aDw.name}`);
+          }
+        }
+        continue;
+      }
+      // Argument: at least one Antagonistic, regular morale hit.
+      if (aAntag || bAntag) {
+        if (sim.aiRng.nextFloat() < ARGUMENT_DAILY_CHANCE) {
+          const aN = sim.needs.get(id);
+          const bN = sim.needs.get(other);
+          if (aN) aN.morale = Math.max(0, aN.morale - ARGUMENT_MORALE_HIT);
+          if (bN) bN.morale = Math.max(0, bN.morale - ARGUMENT_MORALE_HIT);
+          sim.events.add(
+            sim.tick,
+            "social",
+            `${dw.name} and ${otherDw.name} argue heatedly. Old grievances surface.`,
+          );
+        }
+      }
+    }
+  }
+}
+
+function festivalSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % FESTIVAL_INTERVAL !== 0) return;
+  if (sim.emergency.mode !== "none") return;
+  const ents = sim.dwarf.entities;
+  if (ents.length < 4) return;
+  // Median morale — a festival happens when the colony's mood is
+  // broadly good, not when one cheerful elder pulls the average up.
+  const morales: number[] = [];
+  for (let i = 0; i < ents.length; i++) {
+    const n = sim.needs.get(ents[i]);
+    if (n) morales.push(n.morale);
+  }
+  if (morales.length === 0) return;
+  morales.sort((a, b) => a - b);
+  const median = morales[Math.floor(morales.length / 2)];
+  if (median < FESTIVAL_MIN_MEDIAN_MORALE) return;
+  // Bump everyone's morale a touch.
+  for (let i = 0; i < ents.length; i++) {
+    const n = sim.needs.get(ents[i]);
+    if (!n) continue;
+    n.morale = Math.min(100, n.morale + FESTIVAL_MORALE_BUMP);
+  }
+  const line = FESTIVAL_LINES[sim.aiRng.nextRange(0, FESTIVAL_LINES.length)];
+  sim.events.add(sim.tick, "social", line);
+}
+
+// ---- Passive trait auras (GDD §6.5) ----------------------------------
+//
+// Some traits influence the dwarves around them rather than
+// themselves. Once per in-game hour we sweep the population:
+// - Natural Leaders give a small morale bump to every dwarf within
+//   8 tiles, themselves included.
+// - Phobia: Deep Rock dwarves working below depth 300 lose morale
+//   instead of gaining it (their own personal Esteem need bites).
+
+const PASSIVE_TRAIT_INTERVAL = 60; // once per in-game hour
+const LEADER_AURA_RADIUS = 8;
+
+function passiveTraitSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % PASSIVE_TRAIT_INTERVAL !== 0) return;
+  const ents = sim.dwarf.entities;
+  // Aura pass — Natural Leader (+1) and Antagonistic (-1) both run
+  // through the same shape: walk every dwarf within LEADER_AURA_RADIUS
+  // and apply auraMorale. The Mayor adds another +1 fortress-wide
+  // (no radius) — the colony's general sense of "being led".
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    const aura = effectsFor(dw.traitIds).auraMorale;
+    if (aura === 0) continue;
+    const pos = sim.position.get(id);
+    if (!pos) continue;
+    for (const other of ents) {
+      const op = sim.position.get(other);
+      if (!op) continue;
+      const dx = op.x - pos.x;
+      const dy = op.y - pos.y;
+      if (dx * dx + dy * dy > LEADER_AURA_RADIUS * LEADER_AURA_RADIUS) continue;
+      const n = sim.needs.get(other);
+      if (!n) continue;
+      n.morale = Math.max(0, Math.min(100, n.morale + aura));
+    }
+  }
+  // Mayor aura: a small fortress-wide morale bump. The mayor name
+  // is set yearly by mayorSystem; we re-resolve their entity here.
+  if (sim.mayorName) {
+    let mayorAlive = false;
+    for (const id of ents) {
+      const dw = sim.dwarf.get(id);
+      if (dw && dw.name === sim.mayorName) {
+        mayorAlive = true;
+        break;
+      }
+    }
+    if (mayorAlive) {
+      for (const other of ents) {
+        const n = sim.needs.get(other);
+        if (!n) continue;
+        n.morale = Math.min(100, n.morale + 1);
+      }
+    } else {
+      // Mayor passed away. Strip the title with a chronicle line; the
+      // next yearly tick of mayorSystem picks a successor.
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${sim.mayorName} is dead. The Mayor's seat is empty until the next year's recognition.`,
+      );
+      sim.mayorName = "";
+    }
+  }
+  // King aura: a stronger fortress-wide bump than the mayor. The
+  // King's presence is the colony's pride.
+  if (sim.kingName) {
+    let kingAlive = false;
+    for (const id of ents) {
+      const dw = sim.dwarf.get(id);
+      if (dw && dw.name === sim.kingName) {
+        kingAlive = true;
+        break;
+      }
+    }
+    if (kingAlive) {
+      for (const other of ents) {
+        const n = sim.needs.get(other);
+        if (!n) continue;
+        n.morale = Math.min(100, n.morale + 2);
+      }
+    } else if (sim.kingName) {
+      // King died or was lost. Strip the title; the next yearly
+      // tick of kingSystem will pick a successor.
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `The King is dead. The throne sits empty, awaiting a worthy successor.`,
+      );
+      sim.kingName = "";
+    }
+  }
+  // Phobia: Deep Rock pass.
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw || !dw.traitIds.includes("phobia_deep")) continue;
+    const pos = sim.position.get(id);
+    if (!pos) continue;
+    if (pos.y - sim.spawn.y < 300) continue;
+    const n = sim.needs.get(id);
+    if (n) n.morale = Math.max(0, n.morale - 2);
+  }
+  // Phobia: Open Spaces pass — being in a room larger than ~10×10
+  // tiles costs morale (GDD §6.5). Counts cavity area, not bounding
+  // rect, so a long thin corridor doesn't trigger.
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw || !effectsFor(dw.traitIds).phobiaOpen) continue;
+    const pos = sim.position.get(id);
+    if (!pos) continue;
+    let inLargeRoom = false;
+    for (const b of sim.planner.blueprints) {
+      if (b.status !== "complete") continue;
+      if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+      if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+      if (b.cavity.length > 100) inLargeRoom = true;
+      break;
+    }
+    if (!inLargeRoom) continue;
+    const n = sim.needs.get(id);
+    if (n) n.morale = Math.max(0, n.morale - 2);
+  }
+  // Empathetic pass — morale drifts toward the average of nearby
+  // dwarves' moods. Single-pass: read everyone's current morale,
+  // compute deltas, then write. (Snapshotting first keeps the math
+  // order-independent so it's deterministic.)
+  const empaths: EntityId[] = [];
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw || !effectsFor(dw.traitIds).empathetic) continue;
+    empaths.push(id);
+  }
+  if (empaths.length > 0) {
+    const moraleSnapshot = new Map<EntityId, number>();
+    for (const id of ents) {
+      const n = sim.needs.get(id);
+      if (n) moraleSnapshot.set(id, n.morale);
+    }
+    for (const id of empaths) {
+      const pos = sim.position.get(id);
+      if (!pos) continue;
+      let sum = 0; let count = 0;
+      for (const other of ents) {
+        if (other === id) continue;
+        const op = sim.position.get(other);
+        if (!op) continue;
+        const dx = op.x - pos.x;
+        const dy = op.y - pos.y;
+        if (dx * dx + dy * dy > LEADER_AURA_RADIUS * LEADER_AURA_RADIUS) continue;
+        const m = moraleSnapshot.get(other);
+        if (m === undefined) continue;
+        sum += m; count++;
+      }
+      if (count === 0) continue;
+      const avg = sum / count;
+      const my = moraleSnapshot.get(id) ?? 50;
+      const drift = Math.sign(avg - my);
+      const n = sim.needs.get(id);
+      if (n) n.morale = Math.max(0, Math.min(100, n.morale + drift));
+    }
+  }
+}
+
 // ---- Engravings (GDD §7.2, §6.3 Artistry) ---------------------------
 //
 // "Dwarves will continue to improve rooms long after they are
@@ -320,6 +1371,7 @@ function floodSystem(sim: SimWorld): void {
     if (!grid.inBounds(nx, ny)) continue;
     if (!grid.isWalkable(nx, ny)) continue;
     grid.setTile(nx, ny, TileType.Water);
+    sim.regions.invalidate();
     return;
   }
   // Source had no spread targets — happens if the breach tile is
@@ -536,28 +1588,125 @@ function depthPhraseFor(y: number, surfaceY: number): string {
 // bonus to the deal.
 
 const TRADE_INTERVAL_TICKS = TICKS_PER_DAY * 6; // four caravans per in-game year
-const TRADE_BASE_COST = 30;
 const TRADE_BASE_GAIN = 50;
 
+/** Names the caravan-origin kingdoms cycle through. The chronicle
+ * pulls from this pool deterministically per call so a player who
+ * watches their event log over years sees recurring trade partners
+ * rather than an interchangeable parade of "a caravan". */
+const CARAVAN_KINGDOMS: ReadonlyArray<string> = [
+  "the western kingdoms",
+  "the Iron Vaults of Karnesh",
+  "the Hold of Stoneholm",
+  "the Bronze Reach",
+  "Old Drumheim",
+  "the Free Mountain Confederacy",
+  "the Wandering Hammers guild",
+  "the Black Coal Cantons",
+];
+
+/** Goods the colony can offer to a visiting caravan, ordered by
+ * preference: surplus accumulators first, raw resources last.
+ * Caravans accept whichever offered good the colony has the most of
+ * (above a minimum), so a fortress with a Mason's Workshop trades
+ * blocks instead of stone. */
+type TradeOffer = { resource: keyof import("./world/simWorld").Stockpile; price: number; min: number };
+const TRADE_OFFERS: TradeOffer[] = [
+  { resource: "cut_gems", price: 8, min: 3 },   // most valuable per unit
+  { resource: "blocks", price: 4, min: 8 },
+  { resource: "bars", price: 5, min: 6 },
+  { resource: "tools", price: 7, min: 4 },
+  { resource: "leather", price: 3, min: 8 },
+  { resource: "cloth", price: 3, min: 8 },
+  { resource: "pots", price: 2, min: 8 },
+  { resource: "planks", price: 2, min: 12 },
+  { resource: "gems", price: 4, min: 4 },
+  { resource: "ore", price: 2, min: 15 },
+  { resource: "stone", price: 1, min: 30 }, // legacy fallback
+];
+
+/** Goods caravans bring in exchange. Picked by what the colony is
+ * lowest on. */
+type TradeImport = "food" | "drink" | "tools" | "rope";
+
+/** How long a caravan lingers at the depot once it arrives. The
+ * trade transaction resolves on arrival; the visual trader stays for
+ * a day's worth of in-game wandering so the player can actually see
+ * the caravan in the world. */
+const CARAVAN_STAY_TICKS = TICKS_PER_DAY;
+
 function tradeSystem(sim: SimWorld): void {
+  // Despawn any caravan whose stay has elapsed and write a sendoff
+  // line to the chronicle so the player can see the visit end as
+  // well as begin.
+  if (sim.caravanLeavesTick > 0 && sim.tick >= sim.caravanLeavesTick) {
+    if (sim.caravanOrigin) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `The caravan from ${sim.caravanOrigin} packs its wagons and rolls back out the gate.`,
+      );
+    }
+    sim.caravanLeavesTick = -1;
+    sim.caravanOrigin = "";
+  }
   if (sim.tick === 0) return;
   if (sim.tick % TRADE_INTERVAL_TICKS !== 0) return;
   if (sim.emergency.mode === "lockdown") return;
-  // Need an active Trade Depot.
-  let hasDepot = false;
+  // Seasonal arrival roll: winter cancels most caravans (snowed in),
+  // summer brings extras, spring/autumn baseline.
+  const season = seasonOf(sim.tick);
+  const arrivalChance =
+    season === "winter" ? 0.3 :
+    season === "summer" ? 1.0 :
+    0.85;
+  if (sim.aiRng.nextFloat() >= arrivalChance) {
+    if (season === "winter") {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `Heavy snow on the slopes — no caravan reaches the gate this season.`,
+      );
+    }
+    return;
+  }
+  // Need an active Trade Depot. Find its centre while we're at it so
+  // the visible trader can park there.
+  let depot: { cx: number; cy: number } | null = null;
   for (const b of sim.planner.blueprints) {
     if (b.kind === "trade_depot" && b.status === "complete") {
-      hasDepot = true;
+      depot = {
+        cx: b.originX + Math.floor(b.width / 2),
+        cy: b.originY + Math.floor(b.height / 2),
+      };
       break;
     }
   }
-  if (!hasDepot) return;
-  // Need stone to trade.
-  if (sim.stockpile.stone < TRADE_BASE_COST) {
+  if (!depot) return;
+  // Pick a kingdom of origin deterministically — the aiRng's next
+  // draw rotates the pool so a watcher sees variety.
+  const kingdom = CARAVAN_KINGDOMS[sim.aiRng.nextRange(0, CARAVAN_KINGDOMS.length)];
+  // Park the caravan at the depot's centre. The renderer reads this
+  // and draws a trader pip there until caravanLeavesTick elapses.
+  sim.caravanX = depot.cx;
+  sim.caravanY = depot.cy;
+  sim.caravanLeavesTick = sim.tick + CARAVAN_STAY_TICKS;
+  sim.caravanOrigin = kingdom;
+  // Pick the offered good: the highest-stocked one above its
+  // minimum threshold. Falls back to stone when nothing else
+  // qualifies — that's the early-game caravan.
+  let offer: TradeOffer | null = null;
+  for (const o of TRADE_OFFERS) {
+    if ((sim.stockpile[o.resource] ?? 0) >= o.min) {
+      offer = o;
+      break;
+    }
+  }
+  if (!offer) {
     sim.events.add(
       sim.tick,
       "social",
-      "A caravan arrives, but the colony has no stone to trade. They depart empty-handed.",
+      `A caravan from ${kingdom} arrives, but the colony has nothing worth trading. They depart empty-handed.`,
     );
     return;
   }
@@ -573,25 +1722,37 @@ function tradeSystem(sim: SimWorld): void {
       bestSkill = skill;
     }
   }
-  // Decide the deal based on the colony's lowest-stocked food / drink.
+  // Pick what to import: the colony's lowest-stocked staple. Rope is
+  // a rare delivery — only when food/drink are amply stocked AND the
+  // colony has researched textile work (otherwise rope is useless to
+  // them).
   const foodLow = sim.stockpile.food < 200;
   const drinkLow = sim.stockpile.drink < 200;
-  let kind: "food" | "drink" | "tools";
-  if (foodLow && (!drinkLow || sim.stockpile.food <= sim.stockpile.drink)) kind = "food";
-  else if (drinkLow) kind = "drink";
-  else kind = "tools";
+  let importKind: TradeImport;
+  if (foodLow && (!drinkLow || sim.stockpile.food <= sim.stockpile.drink)) importKind = "food";
+  else if (drinkLow) importKind = "drink";
+  else if (sim.research.completed.includes("rope_and_fibre") && sim.stockpile.rope < 20) importKind = "rope";
+  else importKind = "tools";
   // Broker bonus: each level above 1 adds 4% to the gain.
-  const brokerBonus = 1 + Math.max(0, bestSkill - 1) * 0.04;
-  const gain = Math.round(TRADE_BASE_GAIN * brokerBonus);
-  sim.stockpile.stone -= TRADE_BASE_COST;
-  sim.stockpile[kind] += gain;
+  const brokerDw = bestBroker !== -1 ? sim.dwarf.get(bestBroker) : undefined;
+  const tradeBonus = brokerDw ? effectsFor(brokerDw.traitIds).tradeBonus : 0;
+  const brokerBonus = (1 + Math.max(0, bestSkill - 1) * 0.04) * (1 + tradeBonus);
+  // The deal. Spend `min` units of the offered good at price-per-unit
+  // for `min * price * brokerBonus` worth of imports — scaled to
+  // TRADE_BASE_GAIN's tuning so an early stone caravan still feels
+  // like a meaningful exchange.
+  const cost = offer.min;
+  const grossValue = cost * offer.price;
+  const gain = Math.round(grossValue * brokerBonus * (TRADE_BASE_GAIN / 30));
+  sim.stockpile[offer.resource] -= cost;
+  sim.stockpile[importKind] += gain;
   // Award XP to the broker.
   if (bestBroker !== -1) awardSkillXp(sim, bestBroker, "trading", 1);
   const brokerName = bestBroker !== -1 ? sim.dwarf.get(bestBroker)?.name ?? "the broker" : "the broker";
   sim.events.add(
     sim.tick,
     "social",
-    `A caravan from the western kingdoms arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${kind} for ${TRADE_BASE_COST} stone.`,
+    `A caravan from ${kingdom} arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${importKind} for ${cost} ${offer.resource}.`,
   );
 }
 
@@ -760,6 +1921,31 @@ function emergencySystem(sim: SimWorld): void {
     e.alarmCooldownUntil = sim.tick + ALARM_COOLDOWN_TICKS;
     sim.events.add(sim.tick, "crisis", "The alarm has been lifted. The fortress returns to its work.");
   }
+  // Door bar/unbar transitions: when we enter lockdown, every Door
+  // becomes a DoorBarred (non-walkable); when we leave, the reverse.
+  // doorsBarred tracks the last applied state so we only sweep the
+  // grid on transitions.
+  const wantBarred = e.mode === "lockdown";
+  if ((sim as { _doorsBarred?: boolean })._doorsBarred !== wantBarred) {
+    (sim as { _doorsBarred?: boolean })._doorsBarred = wantBarred;
+    sweepDoors(sim, wantBarred);
+  }
+}
+
+function sweepDoors(sim: SimWorld, barred: boolean): void {
+  const from = barred ? TileType.Door : TileType.DoorBarred;
+  const to = barred ? TileType.DoorBarred : TileType.Door;
+  const grid = sim.grid;
+  let changed = false;
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      if (grid.getTile(x, y) === from) {
+        grid.setTile(x, y, to);
+        changed = true;
+      }
+    }
+  }
+  if (changed) sim.regions.invalidate();
 }
 
 // ---- Narrative milestones (GDD §10.2) ---------------------------------
@@ -829,10 +2015,27 @@ const VISIBILITY_RADIUS = 5;
 function visibilitySystem(sim: SimWorld): void {
   const grid = sim.grid;
   const dwarves = sim.dwarf.entities;
+  // Pre-compute per-owner pet vision bonuses (cave bats grant a
+  // visionRadius bump to whoever owns them). One pass over the pet
+  // store builds an owner→bonus map; the dwarf loop then folds it
+  // into each dwarf's reveal radius.
+  const ownerBonus = new Map<number, number>();
+  const petEnts = sim.pet.entities;
+  for (let i = 0; i < petEnts.length; i++) {
+    const pet = sim.pet.get(petEnts[i]);
+    if (!pet || pet.tamedAtTick < 0 || pet.ownerId === -1) continue;
+    const def = PET_DEFS[pet.kind];
+    if (def.visionRadius === 0) continue;
+    ownerBonus.set(pet.ownerId, (ownerBonus.get(pet.ownerId) ?? 0) + def.visionRadius);
+  }
   for (let i = 0; i < dwarves.length; i++) {
-    const pos = sim.position.get(dwarves[i]);
+    const id = dwarves[i];
+    const pos = sim.position.get(id);
     if (!pos) continue;
-    const r = VISIBILITY_RADIUS;
+    // Eagle-Eyed dwarves see further into the fog (GDD §6.5).
+    const dw = sim.dwarf.get(id);
+    const traitR = dw ? effectsFor(dw.traitIds).visibilityRadius : VISIBILITY_RADIUS;
+    const r = traitR + (ownerBonus.get(id) ?? 0);
     const x0 = Math.max(0, pos.x - r);
     const y0 = Math.max(0, pos.y - r);
     const x1 = Math.min(grid.width - 1, pos.x + r);
@@ -877,8 +2080,136 @@ function countItemsAt(sim: SimWorld, x: number, y: number, kind: import("./ecs/c
   return n;
 }
 
+/** Tavern visits: once per in-game day, every dwarf below MORALE_HIGH
+ * picks up a small morale boost from time spent at the colony's
+ * tavern. Skipped while shelter modes are active — nobody drinks
+ * during an alarm. */
+const TAVERN_TICK_INTERVAL = TICKS_PER_DAY;
+const TAVERN_VISIT_BUMP = 5;
+const TAVERN_VISIT_CAP = 90;
+function tavernSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TAVERN_TICK_INTERVAL !== 0) return;
+  // Leadership XP: once per in-game day, the dwarf with the highest
+  // leadership skill earns one practice-tick. The skill represents the
+  // colony's informal captaincy — quartermaster, foreman, the dwarf
+  // whose word carries weight at the dining hall — so it grows with
+  // time spent leading. This fires regardless of whether a tavern
+  // exists; even shelter modes don't suspend it.
+  let bestLeader: EntityId = -1;
+  let bestLeaderSkill = 0;
+  const dEnts = sim.dwarf.entities;
+  for (let i = 0; i < dEnts.length; i++) {
+    const id = dEnts[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    const skill = dw.skills.leadership ?? 1;
+    if (bestLeader === -1 || skill > bestLeaderSkill || (skill === bestLeaderSkill && id < bestLeader)) {
+      bestLeader = id;
+      bestLeaderSkill = skill;
+    }
+  }
+  if (bestLeader !== -1) awardSkillXp(sim, bestLeader, "leadership", 1);
+
+  if (sim.emergency.mode === "alarm" || sim.emergency.mode === "evacuate") return;
+  let hasTavern = false;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind === "tavern" && b.status === "complete") {
+      hasTavern = true;
+      break;
+    }
+  }
+  if (!hasTavern) return;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const n = sim.needs.get(e);
+    if (!n) continue;
+    if (n.morale >= TAVERN_VISIT_CAP) continue;
+    n.morale = Math.min(TAVERN_VISIT_CAP, n.morale + TAVERN_VISIT_BUMP);
+  }
+}
+
+/** Legendary brewer + Legendary artist specialties (GDD §6.3): once
+ * per in-game season the colony fires a Reserve Ale event if a
+ * Legendary brewer is on staff with a brewery, or a Magnum Opus event
+ * if a Legendary artist is in the fortress. Cooldown is per-event so
+ * both can fire in the same season. */
+const LEGENDARY_SPECIALTY_INTERVAL = TICKS_PER_DAY * 30; // a season = 30 in-game days
+const LEGENDARY_THRESHOLD = 17;
+function legendarySpecialtiesSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % LEGENDARY_SPECIALTY_INTERVAL !== 0) return;
+  // Reserve Ale: Legendary brewer + complete brewery → fortress-wide
+  // morale bump and a chronicle entry. The colony's drink stockpile
+  // also gets a sizeable cask delivery.
+  const reserveBrewer = findLegendaryDwarf(sim, "brewing");
+  const hasBrewery = sim.planner.blueprints.some((b) => b.kind === "brewery" && b.status === "complete");
+  if (reserveBrewer !== -1 && hasBrewery) {
+    const dw = sim.dwarf.get(reserveBrewer);
+    sim.stockpile.drink += 50;
+    bumpAllMorale(sim, 8);
+    if (dw) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} pulls a Reserve Ale from the cellar. The colony toasts a barrel that has been waiting all season.`,
+      );
+    }
+  }
+  // Magnum Opus: Legendary artist anywhere in the fortress → a
+  // morale-defining work of art lands in the chronicle.
+  const magnumArtist = findLegendaryDwarf(sim, "artistry");
+  if (magnumArtist !== -1) {
+    const dw = sim.dwarf.get(magnumArtist);
+    bumpAllMorale(sim, 12);
+    if (dw) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} unveils a Magnum Opus — a work of art the colony will speak of for generations.`,
+      );
+    }
+  }
+}
+
+function findLegendaryDwarf(sim: SimWorld, skill: SkillId): EntityId {
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const dw = sim.dwarf.get(e);
+    if (!dw) continue;
+    if ((dw.skills[skill] ?? 1) >= LEGENDARY_THRESHOLD) return e;
+  }
+  return -1;
+}
+
+function bumpAllMorale(sim: SimWorld, amount: number): void {
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const n = sim.needs.get(ents[i]);
+    if (!n) continue;
+    n.morale = Math.min(100, n.morale + amount);
+  }
+}
+
 function farmSystem(sim: SimWorld): void {
   if (sim.tick % FARM_TICK_INTERVAL !== 0) return;
+  // Underground Agriculture (Tier 2): once researched, the farm yield
+  // chance climbs 50%. The same untended-cell rule still applies, so
+  // the boost only lands where the colony's actually doing the work.
+  const undergroundAg = sim.research.completed.includes("underground_agriculture");
+  // Seasonal yield modifier: even underground farms feel the year
+  // through warmth, daylight bleeding through the entrance shaft,
+  // and the colony's own rhythms. Spring/summer above 1.0×, winter
+  // well below.
+  const season = seasonOf(sim.tick);
+  const seasonScale =
+    season === "spring" ? 1.1 :
+    season === "summer" ? 1.2 :
+    season === "autumn" ? 0.9 :
+    0.5; // winter
+  const yieldChance = FARM_YIELD_CHANCE * (undergroundAg ? 1.5 : 1) * seasonScale;
   for (const b of sim.planner.blueprints) {
     if (b.kind !== "farm") continue;
     if (b.status !== "complete") continue;
@@ -892,7 +2223,7 @@ function farmSystem(sim: SimWorld): void {
       // dwarf returns to work them.
       const tendedAt = b.cellTendedAt[i];
       if (tendedAt < 0 || sim.tick - tendedAt > FARM_TEND_VALIDITY_TICKS) continue;
-      if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE) {
+      if (sim.aiRng.nextFloat() < yieldChance) {
         // Drop a raw food item on the cell. A hauler routes it to a
         // kitchen (cooked meals), brewery (ale), or stockpile in
         // priority order. Cap stacking on a single cell so an
@@ -900,6 +2231,14 @@ function farmSystem(sim: SimWorld): void {
         if (countItemsAt(sim, x, y, "food") < 4) {
           sim.spawnItem({ kind: "food", x, y });
         }
+      }
+      // Occasional fibre yield: cave plants ribbon the deeper farm
+      // cavities with stringy fungal threads the colony spins into
+      // rope. Goes straight to the stockpile counter — no item entity,
+      // no hauling. Rate is a quarter the food yield so rope stays
+      // scarce relative to ale and meals.
+      if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE * 0.25) {
+        sim.stockpile.rope++;
       }
     }
   }
@@ -979,6 +2318,12 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.grid.setTile(pos.x, pos.y, TileType.Memorial);
   }
   sim.events.add(sim.tick, "social", narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause));
+  // Burial: if a Cemetery exists with an empty Grave plot, mark a
+  // Headstone there and register the dead dwarf in the colony's
+  // gravestones registry. The Memorial tile on the spot they fell
+  // still stays (the place they fell is its own kind of marker), but
+  // the cemetery is where survivors visit.
+  buryDwarf(sim, dw, age, cause);
   // If this dwarf had a partner, clear the survivor's partnerId and log a
   // bereavement event. The relationship's length is approximated as
   // min(both ages) - 18 (i.e. years they could have been bonded as adults),
@@ -993,6 +2338,14 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
         "social",
         narrateBereavement(sim.aiRng, partner.name, dw.name, yearsTogether),
       );
+      // Bereavement morale hit, scaled by traits — Loyal grieves
+      // hard, Fickle barely notices (GDD §6.5).
+      const partnerNeeds = sim.needs.get(dw.partnerId);
+      if (partnerNeeds) {
+        const scale = effectsFor(partner.traitIds).bereavementScale;
+        const hit = Math.round(15 * scale);
+        partnerNeeds.morale = Math.max(0, partnerNeeds.morale - hit);
+      }
       partner.partnerId = null;
     }
   }
@@ -1004,7 +2357,55 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession, sim.tantrum, sim.disease]);
+}
+
+/** Find an empty Grave plot in any complete Cemetery and turn it
+ * into a Headstone holding this dwarf's record. The colony's
+ * `graves` registry stores the deceased's details so the chronicle
+ * + future visit-grave job can reference them. Falls through quietly
+ * if no cemetery exists or every plot is already filled — the
+ * Memorial tile on the death spot is still there as a fallback. */
+function buryDwarf(sim: SimWorld, dw: import("./ecs/components").Dwarf, age: number, cause: string): void {
+  let plot: { x: number; y: number } | null = null;
+  outer: for (const b of sim.planner.blueprints) {
+    if (b.kind !== "cemetery" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === TileType.Grave) {
+        plot = { x, y };
+        break outer;
+      }
+    }
+  }
+  if (!plot) return;
+  sim.grid.setTile(plot.x, plot.y, TileType.Headstone);
+  sim.graves.push({
+    x: plot.x,
+    y: plot.y,
+    name: dw.name,
+    profession: dw.profession,
+    ageAtDeath: age,
+    deathTick: sim.tick,
+    cause,
+  });
+  // If this dwarf had a partner who's still alive, record the grave
+  // location on the survivor so chooseTask can route them to pay
+  // respects when their morale dips. The partnerId reference is
+  // already cleared by the bereavement branch above; we passed `dw`
+  // (the deceased's component) into this helper so the partnerId
+  // there is the survivor's id.
+  if (dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId)) {
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (partner) partner.lostPartnerGrave = { x: plot.x, y: plot.y };
+  }
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${dw.name} is laid to rest in the cemetery. Aged ${age} years.`,
+  );
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -1095,6 +2496,17 @@ function reproductionSystem(sim: SimWorld): void {
 function awardSkillXp(sim: SimWorld, e: EntityId, skill: SkillId, amount: number): void {
   const dw = sim.dwarf.get(e);
   if (!dw) return;
+  // Obsessive: 2× XP gain on the fixation skill (GDD §6.5).
+  const ob = sim.obsession.get(e);
+  if (ob && ob.skillId === skill) amount *= 2;
+  // Mentoring (GDD §6.1 elder phase): a young dwarf earning XP in a
+  // skill gets a small boost when an elder in the same skill is in
+  // the colony. Caps at 1.25× so the elders matter without trivialising
+  // the grind.
+  const learnerAge = sim.ageOf(e);
+  if (learnerAge < 30 && (dw.skills[skill] ?? 1) < 13) {
+    if (hasElderMentor(sim, skill)) amount *= 1.25;
+  }
   const oldXp = dw.skillXp[skill] ?? 0;
   const newXp = oldXp + amount;
   dw.skillXp[skill] = newXp;
@@ -1196,6 +2608,7 @@ function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void
     profession: "Child",
     age: 0,
     bornInColony: true,
+    parentNames: [mother.name, father.name],
   });
   void childId;
   sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));
@@ -1258,6 +2671,24 @@ function yearRolloverSystem(sim: SimWorld): void {
       sim.events.add(sim.tick, "milestone", `Year ${year + 1} begins in the mountain.`);
     }
   }
+}
+
+const SEASON_NARRATION: Record<Season, string> = {
+  spring: "Spring returns to the mountain. Surface meltwater drips from the entrance shaft.",
+  summer: "Summer sets in. The surface clearing turns gold; caravans roll more often.",
+  autumn: "Autumn comes to the slopes. The surface trees redden; the harvest is brought in.",
+  winter: "Winter sets in. Snow buries the surface; few caravans reach the gate.",
+};
+
+/** Quarterly season-rollover beat: when the tick crosses a season
+ * boundary, log the seasonal arrival. The active season is otherwise
+ * derived from sim.tick via seasonOf — no per-frame state to keep in
+ * sync — so this system only fires the chronicle line. */
+function seasonRolloverSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_SEASON !== 0) return;
+  const s = seasonOf(sim.tick);
+  sim.events.add(sim.tick, "milestone", SEASON_NARRATION[s]);
 }
 
 /**
@@ -1372,17 +2803,39 @@ function jobAssignmentSystem(sim: SimWorld): void {
   for (let i = 0; i < dwarves.length; i++) {
     const e = dwarves[i];
     // Interrupt: critical need overrides a non-survival job in flight.
+    // Trait-driven scaling — Focused dwarves resist interruption,
+    // Distractible ones flake at the slightest twinge or for no
+    // reason at all (GDD §6.5).
     const job = sim.job.get(e);
     if (job) {
       const needs = sim.needs.get(e);
+      const dw = sim.dwarf.get(e);
+      const eff = dw ? effectsFor(dw.traitIds) : null;
+      const scale = eff?.interruptScale ?? 1;
+      const tHi = INTERRUPT_THIRST * scale;
+      const hHi = INTERRUPT_HUNGER * scale;
       const survivalKind =
         job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter";
+      let interrupt = false;
       if (
         needs &&
         !survivalKind &&
-        ((needs.thirst <= INTERRUPT_THIRST && sim.stockpile.drink > 0) ||
-          (needs.hunger <= INTERRUPT_HUNGER && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)))
+        ((needs.thirst <= tHi && sim.stockpile.drink > 0) ||
+          (needs.hunger <= hHi && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)))
       ) {
+        interrupt = true;
+      }
+      // Distractible: a small chance per tick to abandon a non-
+      // survival job for no need-driven reason. Deterministic via aiRng.
+      if (
+        !interrupt &&
+        !survivalKind &&
+        eff && eff.distractChance > 0 &&
+        sim.aiRng.nextFloat() < eff.distractChance
+      ) {
+        interrupt = true;
+      }
+      if (interrupt) {
         if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
         sim.job.remove(e);
         sim.pathing.remove(e);
@@ -1448,6 +2901,17 @@ function movementSystem(sim: SimWorld): void {
       continue;
     }
 
+    // Sub-tick movement budget (GDD §6.5 Agile / Slow). Default
+    // moveSpeed=1 means a step every tick exactly. Agile (1.2)
+    // squeezes in an extra step every 5 ticks; Slow (0.8) skips one.
+    const dw = sim.dwarf.get(e);
+    const moveSpeed = dw ? effectsFor(dw.traitIds).moveSpeed : 1;
+    const accum = (path.moveAccum ?? 0) + moveSpeed;
+    if (accum < 1) {
+      path.moveAccum = accum;
+      continue;
+    }
+    path.moveAccum = accum - 1;
     path.pathIndex++;
     pos.x = nextCell.x;
     pos.y = nextCell.y;
@@ -1510,7 +2974,64 @@ function workSystem(sim: SimWorld): void {
       case "pump":
         progressPump(sim, e, job, pos);
         break;
+      case "visit_grave":
+        progressVisitGrave(sim, e, job, pos);
+        break;
     }
+  }
+}
+
+/** Stand at a buried partner's headstone for a measured moment of
+ * mourning. Morale ticks up a small amount — grief processed in
+ * proximity to the dead — and the chronicle records the visit on
+ * arrival. The dwarf moves on after the visit completes. */
+const VISIT_GRAVE_TICKS = 60; // one in-game hour
+const VISIT_GRAVE_MORALE_BUMP = 8;
+function progressVisitGrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  const dx = Math.abs(pos.x - job.targetX);
+  const dy = Math.abs(pos.y - job.targetY);
+  if (dx > 1 || dy > 1) {
+    // Not yet adjacent — pathing system is still walking us. Wait.
+    return;
+  }
+  const tile = sim.grid.getTile(job.targetX, job.targetY);
+  if (tile !== TileType.Headstone) {
+    // Grave got dug up or the cemetery was destroyed somehow. Bail.
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  if (job.progress === 0) {
+    // First tick — log the visit. Look up the buried name from the
+    // colony registry so the line reads as personal rather than
+    // generic.
+    const dw = sim.dwarf.get(e);
+    let buriedName: string | null = null;
+    for (const g of sim.graves) {
+      if (g.x === job.targetX && g.y === job.targetY) {
+        buriedName = g.name;
+        break;
+      }
+    }
+    if (dw && buriedName) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} stands at ${buriedName}'s grave for a long while. The mountain is quiet.`,
+      );
+    }
+  }
+  job.progress++;
+  if (job.progress >= VISIT_GRAVE_TICKS) {
+    const needs = sim.needs.get(e);
+    if (needs) {
+      needs.morale = Math.min(100, needs.morale + VISIT_GRAVE_MORALE_BUMP);
+    }
+    const dw = sim.dwarf.get(e);
+    if (dw) dw.lastGraveVisitTick = sim.tick;
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
   }
 }
 
@@ -1550,7 +3071,13 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   if (best) {
     sim.grid.setTile(best.x, best.y, TileType.CorridorFloor);
+    sim.regions.invalidate();
   }
+  // Operating the pump is engineering work — credit the skill so a
+  // dedicated pump-jockey actually levels up over months of flood
+  // duty. Pumps are the only engineering job for now; future
+  // mechanisms (drawbridges, traps) wire in here too.
+  awardSkillXp(sim, e, "engineering", 1);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
   sim.pathing.remove(e);
@@ -1575,8 +3102,11 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
   const dw = sim.dwarf.get(e);
   const skill = dw?.skills.scholarship ?? 1;
   const traitBonus = dw ? effectsFor(dw.traitIds).scholarshipBonus : 0;
-  // 1 base + 0.04 per effective level above novice.
-  const ticksThisStep = 1 + Math.max(0, skill + traitBonus - 1) * 0.04;
+  // 1 base + 0.04 per effective level above novice. Plus 1% per
+  // book on the library's shelves — the colony's accumulated
+  // tradition speeds each new study slightly.
+  const libraryBonus = 1 + sim.books.length * 0.01;
+  const ticksThisStep = (1 + Math.max(0, skill + traitBonus - 1) * 0.04) * libraryBonus;
   sim.research.progress += ticksThisStep;
   awardSkillXp(sim, e, "scholarship", 1);
   const topic = TOPICS_BY_ID[sim.research.current];
@@ -1589,10 +3119,47 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
       "milestone",
       `Research complete: ${topic.name}. The colony's understanding deepens.`,
     );
+    // Book: the scholar who finished the topic writes a treatise on
+    // it. The library accumulates these volumes; future research
+    // gets a small speed bonus per book on the shelves.
+    if (dw) {
+      const title = coinBookTitle(sim, topic.name);
+      sim.books.push({
+        title,
+        topicId: topic.id,
+        authorName: dw.name,
+        writtenAtTick: sim.tick,
+      });
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} writes ${title}, a treatise on ${topic.name.toLowerCase()}. The library has ${sim.books.length} ${sim.books.length === 1 ? "volume" : "volumes"} now.`,
+      );
+    }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
   }
+}
+
+/** Generate a book title for a completed research topic. Pattern is
+ * adjective + topic-derived noun ("On the Foundations of Iron",
+ * "The Quiet Cuts", "Notes on the Deep Hammer"). */
+const BOOK_TITLE_PREFIXES = [
+  "On the", "The", "Notes on", "Treatise on", "Of the", "A Study of",
+];
+const BOOK_TITLE_ADJECTIVES = [
+  "Quiet", "Deep", "First", "Last", "Old", "Bright", "Sharp",
+  "Patient", "Careful", "Hidden", "Plain",
+];
+function coinBookTitle(sim: SimWorld, topicName: string): string {
+  const prefix = BOOK_TITLE_PREFIXES[sim.aiRng.nextRange(0, BOOK_TITLE_PREFIXES.length)];
+  const adj = BOOK_TITLE_ADJECTIVES[sim.aiRng.nextRange(0, BOOK_TITLE_ADJECTIVES.length)];
+  // Pull the topic's last meaningful word (e.g. "Stonecutting" from
+  // "Basic Stonecutting") to use as the noun.
+  const words = topicName.split(/[\s:&]+/).filter(Boolean);
+  const noun = words[words.length - 1] ?? "Craft";
+  return `${prefix} ${adj} ${noun}`;
 }
 
 /** Soldier engagement: stand adjacent to the target hostile tick after
@@ -1716,7 +3283,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     }
   }
   const dw = sim.dwarf.get(e);
-  const traitSpeed = dw ? effectsFor(dw.traitIds).workSpeed : 1;
+  const traitSpeed = effectiveWorkSpeed(sim, e);
   job.progress += traitSpeed;
   // Skill scales work speed: each level above Novice shaves 4% off ticks.
   const skillLevel = dw?.skills[recipe.skill] ?? 1;
@@ -1727,19 +3294,50 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     // forge stocks the armoury). Otherwise credit the global counter
     // — food, drink, and other counter-only resources still flow that
     // way until they earn their own ItemKinds.
+    // Steel Alloying (Tier 2) lifts the smelter's bar yield from 1 to
+    // 2 per ore — the colony has learned to fold its bars properly.
+    let outputQty = recipe.outputQty;
+    if (blueprintKind === "smelter" && sim.research.completed.includes("steel_alloying")) {
+      outputQty *= 2;
+    }
     const outAsItem = outputAsItemKind(recipe.outputKind);
     if (outAsItem) {
       // Roll output quality from the crafter's skill — Skilled+ smiths
       // produce Fine bars, Legendary smiths produce Masterworks (GDD §6.3).
       // A Perfectionist's roll lands one tier higher.
       const traitBias = dw ? effectsFor(dw.traitIds).qualityBias : 0;
+      // Elders craft to a higher tier — the slower-but-wiser side of
+      // the GDD §6.1 lifecycle. +1 quality on every output.
+      const elderBias = isElder(sim, e) ? 1 : 0;
+      // Research-driven quality bonuses: Tier-3 Weaponsmithing lifts
+      // forge output by a full tier, Tier-4 Advanced Metallurgy adds
+      // another to smelter and forge bars. Stacking is intentional —
+      // a dwarf at the legendary forge with both topics complete
+      // produces masterworks the same way an elder does.
+      let researchBias = 0;
+      const completed = sim.research.completed;
+      if ((blueprintKind === "forge" || blueprintKind === "magma_forge") && completed.includes("weaponsmithing")) researchBias++;
+      if ((blueprintKind === "forge" || blueprintKind === "magma_forge" || blueprintKind === "smelter") && completed.includes("advanced_metallurgy")) researchBias++;
+      // Magma Forge by definition stamps an extra quality tier on
+      // every output — that's the "magma forge craft" of the GDD's
+      // Tier 4 research arc, the metallurgical jump that makes the
+      // Hollow King ultimately killable.
+      if (blueprintKind === "magma_forge") researchBias++;
       const baseQuality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
-      const quality = Math.max(0, Math.min(4, baseQuality + traitBias));
-      for (let i = 0; i < recipe.outputQty; i++) {
+      const quality = Math.max(0, Math.min(4, baseQuality + traitBias + elderBias + researchBias));
+      for (let i = 0; i < outputQty; i++) {
         sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y, quality });
       }
+      // Notable artifact roll: a Legendary maker (skill ≥ 17) producing
+      // a Masterwork (q=4) names the result with some probability. The
+      // chronicle records it; the colony's history collects it.
+      if (quality === 4 && dw && (dw.skills[recipe.skill] ?? 1) >= LEGENDARY_THRESHOLD) {
+        if (sim.aiRng.nextFloat() < ARTIFACT_NAMING_CHANCE) {
+          coinArtifact(sim, dw, outAsItem, recipe.skill);
+        }
+      }
     } else {
-      sim.stockpile[recipe.outputKind] += recipe.outputQty;
+      sim.stockpile[recipe.outputKind] += outputQty;
     }
     awardSkillXp(sim, e, recipe.skill, 1);
     // Workshop-firsts as named GDD milestones — Iron Mountain (first
@@ -1765,6 +3363,91 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   }
 }
 
+/** Artifact naming: how often a Masterwork from a Legendary maker
+ * gets named. Lower than 1.0 so most Masterworks pass without fanfare
+ * and the named ones feel like rare events worth bragging about. */
+const ARTIFACT_NAMING_CHANCE = 0.4;
+
+/** Adjective + noun pools for the artifact name generator. The maker
+ * picks a name that fits the item kind, then a fortress-affiliated
+ * tail when the colony has the surplus to spare. */
+const ARTIFACT_ADJECTIVES: ReadonlyArray<string> = [
+  "Storm", "Iron", "Deep", "Hollow", "Crown", "First", "Last", "Eternal",
+  "Forge", "Stone", "Frost", "Sun", "Moon", "Dawn", "Dusk", "Far",
+  "Old", "Bright", "Quiet", "Sharp", "Silent", "Burning", "Singing",
+];
+const ARTIFACT_NOUNS_TOOL: ReadonlyArray<string> = [
+  "Breaker", "Hammer", "Pick", "Splitter", "Edge", "Bite", "Tooth", "Fang",
+  "Cleaver", "Maul",
+];
+const ARTIFACT_NOUNS_BAR: ReadonlyArray<string> = [
+  "Ingot", "Crown", "Gleam", "Shine", "Heart",
+];
+const ARTIFACT_NOUNS_GEM: ReadonlyArray<string> = [
+  "Star", "Tear", "Eye", "Heart", "Light", "Dream",
+];
+const ARTIFACT_NOUNS_BLOCK: ReadonlyArray<string> = [
+  "Cornerstone", "Foundation", "Standard", "Hold", "Anchor",
+];
+const ARTIFACT_NOUNS_PLANK: ReadonlyArray<string> = [
+  "Stave", "Beam", "Bone", "Mast", "Spar",
+];
+const ARTIFACT_NOUNS_FALLBACK: ReadonlyArray<string> = [
+  "Mark", "Token", "Sign", "Pride",
+];
+
+const ARTIFACT_KIND_LABELS: Record<string, string> = {
+  tools: "tool",
+  bars: "bar",
+  cut_gems: "cut gem",
+  gem: "rough gem",
+  blocks: "stone block",
+  planks: "plank",
+  wood: "log",
+  meal: "ceremonial dish",
+  drink: "vintage cask",
+  hide: "tanned hide",
+  ore: "ore vein-piece",
+  stone: "stoneworking",
+  dirt: "earthwork",
+  food: "preserve",
+};
+
+function pickArtifactNoun(rng: import("./rng").Rng, itemKind: string): string {
+  let pool = ARTIFACT_NOUNS_FALLBACK;
+  if (itemKind === "tools") pool = ARTIFACT_NOUNS_TOOL;
+  else if (itemKind === "bars") pool = ARTIFACT_NOUNS_BAR;
+  else if (itemKind === "gem" || itemKind === "cut_gems") pool = ARTIFACT_NOUNS_GEM;
+  else if (itemKind === "blocks") pool = ARTIFACT_NOUNS_BLOCK;
+  else if (itemKind === "planks" || itemKind === "wood") pool = ARTIFACT_NOUNS_PLANK;
+  return pool[rng.nextRange(0, pool.length)];
+}
+
+/** Coin a name for the Masterwork the dwarf just produced and add
+ * an entry to the colony's artifact registry. The chronicle gets a
+ * one-line announcement; future displays (throne room, inspector)
+ * read from sim.artifacts. */
+function coinArtifact(sim: SimWorld, dw: import("./ecs/components").Dwarf, itemKind: string, skill: import("./dwarves/skills").SkillId): void {
+  const adj = ARTIFACT_ADJECTIVES[sim.aiRng.nextRange(0, ARTIFACT_ADJECTIVES.length)];
+  const noun = pickArtifactNoun(sim.aiRng, itemKind);
+  const name = `${adj}${noun}`;
+  const kindLabel = ARTIFACT_KIND_LABELS[itemKind] ?? "artifact";
+  const id = sim.artifactsNextId++;
+  sim.artifacts.push({
+    id,
+    name,
+    kindLabel,
+    makerName: dw.name,
+    makerProfession: dw.profession,
+    createdTick: sim.tick,
+  });
+  sim.events.add(
+    sim.tick,
+    "milestone",
+    `${dw.name} the ${dw.profession} forges ${name}, a ${kindLabel} of legendary ${skill}.`,
+  );
+}
+
 /** Map a recipe's output resource to an ItemKind if one exists, so the
  * workshop can drop the output as a haulable entity instead of crediting
  * the global counter. Returns null for resources that stay counter-only
@@ -1775,7 +3458,106 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "tools") return "tools";
   if (resource === "drink") return "drink";
   if (resource === "meals") return "meal";
+  if (resource === "wood") return "wood";
+  if (resource === "hide") return "hide";
   return null;
+}
+
+/** Age (in years) at which a dwarf enters the Elder phase — slower
+ * but wiser per GDD §6.1. Elders craft to a higher tier on average
+ * but lose a notch of work speed. */
+const ELDER_AGE = 90;
+
+function isElder(sim: SimWorld, e: EntityId): boolean {
+  return sim.ageOf(e) >= ELDER_AGE;
+}
+
+/** True iff there's a living Elder in the colony at Skilled+ in the
+ * given skill. Mentoring boost in awardSkillXp gates on this so the
+ * elder phase actually transmits expertise to the next generation. */
+function hasElderMentor(sim: SimWorld, skill: SkillId): boolean {
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    if (sim.ageOf(id) < ELDER_AGE) continue;
+    if ((dw.skills[skill] ?? 1) >= 9) return true; // Skilled or higher
+  }
+  return false;
+}
+
+/** Trait-modulated work speed at the current in-game hour. Folds in
+ * the static trait workSpeed plus any time-of-day flags (Night Owl
+ * gets full speed at night, 0.8× during the day per GDD §6.5), the
+ * elder slowdown, and a power-driven boost from a nearby water wheel. */
+function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
+  const dw = sim.dwarf.get(dwarfId);
+  if (!dw) return 1;
+  const eff = effectsFor(dw.traitIds);
+  let speed = eff.workSpeed;
+  if (eff.nightOwl) {
+    const hour = (sim.tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
+    const isNight = hour < 6 || hour >= 22;
+    speed *= isNight ? 1.0 : 0.8;
+  }
+  if (isElder(sim, dwarfId)) {
+    speed *= 0.85;
+  }
+  // Water Wheel aura: a wheel within 8 tiles of the worker adds 30%
+  // to the effective work speed. The GDD's "mechanical power" without
+  // a full power-grid system. Multiple wheels don't stack — one is
+  // enough, the colony's wired up.
+  const pos = sim.position.get(dwarfId);
+  if (pos && hasNearbyWaterWheel(sim, pos.x, pos.y)) speed *= 1.3;
+  return speed;
+}
+
+/** Best available pickaxe quality in the colony (0 = basic, 4 =
+ * Masterwork). The miner uses whichever forged tool is highest-tier
+ * — they share a tool pool informally, no per-dwarf equipment.
+ * Falls back to 0 (a stone pick) when no metal tools have been
+ * forged yet. Mid-tick scan is fast: typical fortresses carry only
+ * a handful of tool items at once. */
+function colonyToolQuality(sim: SimWorld): number {
+  let best = 0;
+  // Scan tool items in the world (on the floor, on armoury racks,
+  // or being carried mid-haul).
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const it = sim.item.get(ents[i]);
+    if (!it || it.kind !== "tools") continue;
+    const q = it.quality ?? 0;
+    if (q > best) best = q;
+  }
+  // A dwarf carrying a tool counts too — they'll let a miner borrow it.
+  const carryEnts = sim.carrying.entities;
+  for (let i = 0; i < carryEnts.length; i++) {
+    const c = sim.carrying.get(carryEnts[i]);
+    if (!c || c.kind !== "tools") continue;
+    const q = c.quality ?? 0;
+    if (q > best) best = q;
+  }
+  // Equipped soldiers: their weapon is a forged tool too.
+  const eqEnts = sim.equipment.entities;
+  for (let i = 0; i < eqEnts.length; i++) {
+    const eq = sim.equipment.get(eqEnts[i]);
+    if (!eq || !eq.weapon) continue;
+    const q = eq.weaponQuality ?? 0;
+    if (q > best) best = q;
+  }
+  return best;
+}
+
+const WATER_WHEEL_AURA = 8;
+function hasNearbyWaterWheel(sim: SimWorld, sx: number, sy: number): boolean {
+  for (let dy = -WATER_WHEEL_AURA; dy <= WATER_WHEEL_AURA; dy++) {
+    for (let dx = -WATER_WHEEL_AURA; dx <= WATER_WHEEL_AURA; dx++) {
+      if (dx * dx + dy * dy > WATER_WHEEL_AURA * WATER_WHEEL_AURA) continue;
+      if (sim.grid.getTile(sx + dx, sy + dy) === TileType.WaterWheel) return true;
+    }
+  }
+  return false;
 }
 
 /** Roll a quality tier (0..4: basic / Fine / Superior / Exceptional /
@@ -1883,8 +3665,14 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     else if (carrying.kind === "food") sim.stockpile.food++;
     else if (carrying.kind === "drink") sim.stockpile.drink++;
     else if (carrying.kind === "meal") sim.stockpile.meals++;
+    else if (carrying.kind === "wood") sim.stockpile.wood++;
+    else if (carrying.kind === "hide") sim.stockpile.hide++;
   }
   sim.carrying.remove(e);
+  // Hauling earns hauling XP — every successful delivery counts as
+  // practice. The Strong-Backed and Patient traits already factor into
+  // movement and persistence; here we let the skill itself climb.
+  awardSkillXp(sim, e, "hauling", 1);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
   sim.pathing.remove(e);
@@ -1920,10 +3708,22 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   // Trait-driven work pace — Diligent / Lazy / Efficient / Perfectionist
   // scale how fast progress accrues per tick.
-  const dwM = sim.dwarf.get(e);
-  const mineSpeed = dwM ? effectsFor(dwM.traitIds).workSpeed : 1;
+  const mineSpeed = effectiveWorkSpeed(sim, e);
   job.progress += mineSpeed;
-  if (job.progress >= MINE_TICKS) {
+  // Material hardness + skill + pickaxe quality determine how many
+  // ticks of progress are needed. Hardness is per-tile; skill scales
+  // ticks down ~3% per level above novice; tool quality scales ticks
+  // down 8% per quality tier so a Masterwork pickaxe roughly halves
+  // the dig time on hard rock.
+  const targetTile = sim.grid.getTile(job.targetX, job.targetY);
+  const hardness = MATERIAL_HARDNESS[targetTile] ?? 1.0;
+  const dw = sim.dwarf.get(e);
+  const miningSkill = dw?.skills.mining ?? 1;
+  const skillScale = Math.max(0.4, 1 - (miningSkill - 1) * 0.03);
+  const toolQuality = colonyToolQuality(sim);
+  const toolScale = Math.max(0.4, 1 - toolQuality * 0.08);
+  const ticksNeeded = Math.max(2, Math.round(MINE_TICKS * hardness * skillScale * toolScale));
+  if (job.progress >= ticksNeeded) {
     // What was the rock made of? Determines stockpile credit.
     const tileType = sim.grid.getTile(job.targetX, job.targetY);
     // Aquifer breach: replace with water rather than corridor floor,
@@ -1946,18 +3746,31 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       sim.pathing.remove(e);
       return;
     }
-    sim.grid.setTile(job.targetX, job.targetY, TileType.CorridorFloor);
+    // Trees leave Grass behind (the surface stays surface), every other
+    // mineable tile becomes a CorridorFloor. Logging awards carpentry XP
+    // since the cut is the carpenter's craft, not a miner's. The wood
+    // log drops as a haulable item the same way ore does.
+    const postMineTile =
+      tileType === TileType.Tree ? TileType.Grass : TileType.CorridorFloor;
+    sim.grid.setTile(job.targetX, job.targetY, postMineTile);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
+    sim.regions.invalidate();
     sim.releaseMineTarget(job.targetX, job.targetY);
-    // Grant mining XP and announce tier crossings ("become a Skilled Miner").
-    awardSkillXp(sim, e, "mining", 1);
+    if (tileType === TileType.Tree) {
+      awardSkillXp(sim, e, "carpentry", 1);
+    } else {
+      // Grant mining XP and announce tier crossings ("become a Skilled Miner").
+      awardSkillXp(sim, e, "mining", 1);
+    }
 
     // Drop the rock as a haulable item on the freshly-excavated tile.
     // A separate hauler job picks it up later and carries it to the
     // stockpile. The first-strike narration still fires the moment the
     // ore is broken.
     let itemKind: import("./ecs/components").ItemKind | null = null;
-    if (tileType === TileType.Ore) {
+    if (tileType === TileType.Tree) {
+      itemKind = "wood";
+    } else if (tileType === TileType.Ore) {
       itemKind = "ore";
       if (!sim.oreEverStruck) {
         sim.oreEverStruck = true;
@@ -2019,6 +3832,27 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         "the_silver_halls",
         `The Silver Halls. ${dw.name} has cut silver from the deep rock.`,
       );
+    } else if (tileType === TileType.Gold) {
+      itemKind = "ore";
+      const dw = sim.dwarf.get(e)!;
+      sim.events.add(
+        sim.tick,
+        "discovery",
+        `${dw.name} strikes gold, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
+      );
+      fireMilestone(
+        sim,
+        "the_gilded_halls",
+        `The Gilded Halls. ${dw.name} has cut gold from the deep rock.`,
+      );
+    } else if (tileType === TileType.Coal) {
+      // Coal drops as ore for now; future smelter / forge tiers will
+      // route it as fuel separately.
+      itemKind = "ore";
+    } else if (tileType === TileType.CaveMushroom) {
+      // Mushroom drops as food. The colony has another mouth to feed
+      // and the mountain quietly answers.
+      itemKind = "food";
     } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
       itemKind = "stone";
     } else if (tileType === TileType.Dirt || tileType === TileType.Sand) {
@@ -2059,7 +3893,9 @@ function progressSleep(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     if (pos) {
       const q = roomQualityAt(sim, pos.x, pos.y, "bedroom");
       if (q > QUALITY_BASE) {
-        const bump = Math.floor((q - QUALITY_BASE) / 10);
+        const dw = sim.dwarf.get(e);
+        const scale = dw ? effectsFor(dw.traitIds).roomQualityScale : 1;
+        const bump = Math.floor((q - QUALITY_BASE) / 10 * scale);
         needs.morale = Math.min(100, needs.morale + bump);
       }
     }
@@ -2144,7 +3980,9 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     if (pos) {
       const q = roomQualityAt(sim, pos.x, pos.y, "dining_hall");
       if (q > QUALITY_BASE) {
-        const bump = Math.floor((q - QUALITY_BASE) / 10);
+        const dw = sim.dwarf.get(e);
+        const scale = dw ? effectsFor(dw.traitIds).roomQualityScale : 1;
+        const bump = Math.floor((q - QUALITY_BASE) / 10 * scale);
         needs.morale = Math.min(100, needs.morale + bump);
       }
     }
@@ -2184,6 +4022,7 @@ function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   job.progress++;
   if (job.progress >= TEND_TICKS) {
+    awardSkillXp(sim, e, "farming", 1);
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -2227,6 +4066,10 @@ function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: {
   }
   job.progress++;
   if (job.progress >= MAINTAIN_TICKS) {
+    // Maintenance is general upkeep — credit masonry XP, the broad
+    // industry skill that matches scrubbing, fitting blocks, and
+    // tidying joinery.
+    awardSkillXp(sim, e, "masonry", 1);
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -2266,9 +4109,29 @@ function progressWander(sim: SimWorld, e: EntityId, job: JobAssignment): void {
 // ---- Recovery ----------------------------------------------------------
 
 const HEAL_TICK_INTERVAL = 30;
+const HEAL_RATE_HOSPITAL = 5; // tended wound on a hospital cot
 const HEAL_RATE_BED = 3;
 const HEAL_RATE_RESTING = 2; // sleeping anywhere
 const HEAL_RATE_IDLE = 1;    // wandering / socialising
+
+/** Return the entity id of the dwarf with the highest medicine skill,
+ * tie-broken by entity id for determinism. -1 if no dwarves exist. */
+function findBestMedic(sim: SimWorld): EntityId {
+  let best: EntityId = -1;
+  let bestSkill = 0;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const dw = sim.dwarf.get(e);
+    if (!dw) continue;
+    const skill = dw.skills.medicine ?? 1;
+    if (best === -1 || skill > bestSkill || (skill === bestSkill && e < best)) {
+      best = e;
+      bestSkill = skill;
+    }
+  }
+  return best;
+}
 
 /**
  * Passive recovery. Dwarves regain HP slowly — faster while sleeping,
@@ -2300,9 +4163,18 @@ function healingSystem(sim: SimWorld): void {
     if (inCombat) continue;
 
     let healing = 0;
+    let onHospitalBed = false;
     const job = sim.job.get(e);
     if (job?.kind === "sleep") {
-      healing = sim.grid.getTile(pos.x, pos.y) === TileType.Bed ? HEAL_RATE_BED : HEAL_RATE_RESTING;
+      const tile = sim.grid.getTile(pos.x, pos.y);
+      if (tile === TileType.HospitalBed) {
+        healing = HEAL_RATE_HOSPITAL;
+        onHospitalBed = true;
+      } else if (tile === TileType.Bed) {
+        healing = HEAL_RATE_BED;
+      } else {
+        healing = HEAL_RATE_RESTING;
+      }
     } else if (!job || job.kind === "wander" || job.kind === "socialise") {
       healing = HEAL_RATE_IDLE;
     }
@@ -2310,6 +4182,16 @@ function healingSystem(sim: SimWorld): void {
     if (healing === 0) continue;
 
     hp.hp = Math.min(hp.maxHp, hp.hp + healing);
+    // Hospital tending: credit the colony's best-skilled medic with
+    // medicine XP every healing tick a wound is treated on a cot.
+    // The dwarf with the highest medicine skill is "on duty" — if no
+    // dwarf has any medicine skill yet, none of them gains XP this
+    // tick (someone has to start somewhere; running wounded through a
+    // cot doesn't teach anyone medicine in the abstract).
+    if (onHospitalBed) {
+      const medic = findBestMedic(sim);
+      if (medic !== -1 && medic !== e) awardSkillXp(sim, medic, "medicine", 1);
+    }
     // Severe-recovery announcement: combat sets `wasSevereWound` when HP
     // dropped below 30%; we clear it (and write to the chronicle) the
     // first time the dwarf returns to full HP.
@@ -2397,6 +4279,35 @@ function hostileSpawnSystem(sim: SimWorld): void {
     "crisis",
     narrateHostileSpawn(sim.aiRng, def.spawnArticle, pick.y, sim.spawn.y),
   );
+  // Goblin patrols: a scout never really comes alone. With moderate
+  // probability the original spawn is reinforced by 1–2 extra scouts
+  // within a short radius, producing patrol formations the colony's
+  // standing guard has to actually engage as a unit (GDD §9.3).
+  // After Military Tactics research the patrols swell further. Gated
+  // on population so a one-dwarf colony isn't crushed by a 3-goblin
+  // patrol on day one — the GDD's narrative beat is that patrols
+  // arrive when the colony is worth raiding.
+  if (kind === "goblin_scout" && dwarves >= 6) {
+    const tactics = sim.research.completed.includes("military_tactics");
+    const patrolChance = tactics ? 0.85 : 0.55;
+    if (sim.aiRng.nextFloat() < patrolChance) {
+      const extras = (tactics ? 2 : 1) + sim.aiRng.nextRange(0, 2);
+      for (let i = 0; i < extras; i++) {
+        // Sample a nearby tile from the candidate set — keep them in
+        // line-of-sight of the original.
+        let attempts = 8;
+        while (attempts-- > 0) {
+          const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+          const dx = c.x - pick.x;
+          const dy = c.y - pick.y;
+          if (dx * dx + dy * dy > 25) continue; // patrol cohesion radius
+          if (c.x === pick.x && c.y === pick.y) continue;
+          sim.spawnHostile({ kind, x: c.x, y: c.y });
+          break;
+        }
+      }
+    }
+  }
 }
 
 /** Weighted random hostile kind. Each kind only enters the pool once
@@ -2406,9 +4317,15 @@ function hostileSpawnSystem(sim: SimWorld): void {
 function pickHostileKind(sim: SimWorld, deepestY: number): HostileKind {
   const reachableDepth = deepestY - sim.spawn.y;
   const eligible: HostileKind[] = ["cave_rat"]; // always available
+  if (reachableDepth >= HOSTILE_DEFS.cave_bat.minDepth) eligible.push("cave_bat");
   if (reachableDepth >= HOSTILE_DEFS.cave_spider.minDepth) eligible.push("cave_spider");
   if (reachableDepth >= HOSTILE_DEFS.goblin_scout.minDepth) eligible.push("goblin_scout", "goblin_scout");
+  if (reachableDepth >= HOSTILE_DEFS.cave_bear.minDepth) eligible.push("cave_bear");
   if (reachableDepth >= HOSTILE_DEFS.cave_troll.minDepth) eligible.push("cave_troll");
+  if (reachableDepth >= HOSTILE_DEFS.giant_spider.minDepth) eligible.push("giant_spider");
+  if (reachableDepth >= HOSTILE_DEFS.fire_imp.minDepth) eligible.push("fire_imp");
+  if (reachableDepth >= HOSTILE_DEFS.undead.minDepth) eligible.push("undead");
+  if (reachableDepth >= HOSTILE_DEFS.automaton.minDepth) eligible.push("automaton");
   return eligible[sim.aiRng.nextRange(0, eligible.length)];
 }
 
@@ -2535,14 +4452,21 @@ function combatSystem(sim: SimWorld): void {
       const equipped = equipment?.weapon === true;
       const weaponQuality = equipment?.weaponQuality ?? 0;
       const inFury = sim.fury.has(target);
+      const ambidextrous = dwarf ? effectsFor(dwarf.traitIds).ambidextrous : false;
       const damage =
         DWARF_BASE_DAMAGE +
         Math.floor((military - 1) / 2) +
         (isSoldier ? 5 : 0) +
         (equipped ? 8 : 0) +
         (equipped ? weaponQuality * 2 : 0) + // Fine +2, Masterwork +8 (§6.3).
+        (equipped && ambidextrous ? 4 : 0) + // Two-weapon flourish (GDD §6.5).
         (inFury ? 30 : 0); // The Fury: huge bonus, hostiles fall fast.
       hHealth.hp -= damage;
+      // Every successful retaliation hit earns military XP — combat
+      // experience is the only way the skill grows. Soldiers practising
+      // against rats and spiders eventually reach Skilled / Expert and
+      // their squad bonus actually matters.
+      awardSkillXp(sim, target, "military", 1);
       if (hHealth.hp <= 0) {
         const dwarfName = dwarf?.name ?? "A dwarf";
         sim.events.add(
@@ -2570,6 +4494,14 @@ function combatSystem(sim: SimWorld): void {
             "the_hollow_king_falls",
             "The Hollow King Falls. The King is dead. The mountain is the dwarves' alone, for as long as anyone remembers.",
           );
+        }
+        // Hides drop on the corpse tile for the larger creatures —
+        // spiders, goblins, trolls (cave rats and incorporeal void
+        // entities leave nothing). The tanner picks them up like any
+        // other haulable item once a Tannery exists.
+        if (def.dropsHide) {
+          const hp = sim.position.get(h);
+          if (hp) sim.spawnItem({ kind: "hide", x: hp.x, y: hp.y });
         }
         sim.ecs.destroy(h, [sim.position, sim.hostile, sim.health]);
       }

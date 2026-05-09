@@ -9,6 +9,20 @@ export const TICKS_PER_DAY = TICKS_PER_HOUR * 24;
 // ~24 real minutes (~6 in-game days each), so 24 in-game days per year.
 // Dwarves age accordingly (founders age 25 = 25 × TICKS_PER_YEAR ago).
 export const TICKS_PER_YEAR = TICKS_PER_DAY * 24;
+/** A season is a quarter-year (~6 in-game days). The seasonal cycle
+ * drives caravan frequency, farm yield, surface tile tint, and the
+ * "Spring returns" / "Winter sets in" chronicle beats. */
+export const TICKS_PER_SEASON = TICKS_PER_YEAR / 4;
+
+export type Season = "spring" | "summer" | "autumn" | "winter";
+
+/** Pure helper — a tick maps to one of four seasons by integer
+ * division. Year boundary lines up with the start of spring. */
+export function seasonOf(tick: number): Season {
+  const intoYear = ((tick % TICKS_PER_YEAR) + TICKS_PER_YEAR) % TICKS_PER_YEAR;
+  const idx = Math.floor(intoYear / TICKS_PER_SEASON) % 4;
+  return idx === 0 ? "spring" : idx === 1 ? "summer" : idx === 2 ? "autumn" : "winter";
+}
 
 export const SPEED_LEVELS = [0, 1, 4, 16] as const;
 export type SpeedLevel = (typeof SPEED_LEVELS)[number];

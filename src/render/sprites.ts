@@ -42,7 +42,7 @@ function paintFromRows(rows: string[]): HTMLCanvasElement | OffscreenCanvas {
 
 // Tile sprite definitions. Pixel grid: '.' / '0' = transparent, hex digit =
 // palette index. 16 rows × 16 cols.
-const TILE_PIXELS: Record<TileType, string[]> = {
+const TILE_PIXELS: Partial<Record<TileType, string[]>> = {
   [TileType.Air]: rep("0", 16, 16),
   [TileType.Dirt]: noisyFill(5, 4),
   [TileType.Sand]: noisyFill(7, 6),
@@ -59,7 +59,131 @@ const TILE_PIXELS: Record<TileType, string[]> = {
   [TileType.Bin]: binSprite(),
   [TileType.Memorial]: memorialSprite(),
   [TileType.FarmTile]: farmSprite(),
+  [TileType.Grass]: grassSprite(),
+  [TileType.Tree]: treeSprite(),
+  [TileType.Door]: doorSprite(false),
+  [TileType.DoorBarred]: doorSprite(true),
+  [TileType.Grave]: gravePlotSprite(),
+  [TileType.Headstone]: headstoneSprite(),
 };
+
+/** Empty grave plot — a darker patch of disturbed earth with a small
+ * sunken outline. Reads as "ready for an interment". */
+function gravePlotSprite(): string[] {
+  const base = noisyFill(2, 3); // dark earth
+  // Sunken rectangle in the middle.
+  for (let y = 5; y <= 12; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const c = (y === 5 || y === 12 || x === 4 || x === 11) ? "1" : "2";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Headstone — an upright marker over an occupied plot. Stone slab
+ * with a darker base, slightly weathered. */
+function headstoneSprite(): string[] {
+  const base = noisyFill(2, 3); // dark earth around it
+  // Plot outline, like the empty grave.
+  for (let y = 9; y <= 13; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const c = (y === 9 || y === 13 || x === 4 || x === 11) ? "1" : "2";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Headstone slab at top — rows 2-8, columns 6-9.
+  for (let y = 2; y <= 8; y++) {
+    let row = base[y];
+    for (let x = 6; x <= 9; x++) {
+      const c = (y === 2 || y === 8 || x === 6 || x === 9) ? "1" : "B";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Engraved cross-mark on the slab.
+  base[5] = base[5].substring(0, 7) + "1" + base[5].substring(8);
+  return base;
+}
+
+/** Door: a wooden plank silhouette with a small handle. Barred
+ * version paints heavy reinforcement bars over the same plank shape
+ * so the player can read the lockdown state at a glance. */
+function doorSprite(barred: boolean): string[] {
+  const base = noisyFill(3, 2);
+  // Plank body: rows 1-14, cols 4-11.
+  for (let y = 1; y <= 14; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const c = (y === 1 || y === 14) ? "1" : (x === 4 || x === 11) ? "1" : "5";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Handle.
+  base[8] = base[8].substring(0, 9) + "D" + base[8].substring(10);
+  if (barred) {
+    // Two heavy horizontal bars across the plank in dark grey.
+    for (const yBar of [5, 10]) {
+      let row = base[yBar];
+      for (let x = 3; x <= 12; x++) {
+        row = row.substring(0, x) + "8" + row.substring(x + 1);
+      }
+      base[yBar] = row;
+    }
+  }
+  return base;
+}
+
+/** Surface grass: green-tinted earth dotted with brighter sprout pixels.
+ * Distinct from the dirt cap so the player can read where the colony's
+ * outdoor clearing ends. */
+function grassSprite(): string[] {
+  const base = noisyFill(2, 4); // dark earth + soil
+  const sprouts: Array<[number, number]> = [
+    [2, 3], [6, 5], [11, 4], [14, 7], [4, 9], [9, 11], [13, 13], [3, 14],
+  ];
+  for (const [x, y] of sprouts) {
+    base[y] = base[y].substring(0, x) + "C" + base[y].substring(x + 1);
+  }
+  return base;
+}
+
+/** Surface tree: brown trunk centred under a green canopy. Eight rows
+ * of dappled foliage, four of bark — the kind of pixel-tree silhouette
+ * a sawyer aims their axe at. */
+function treeSprite(): string[] {
+  const rows: string[] = [];
+  for (let y = 0; y < 16; y++) {
+    let row = "";
+    for (let x = 0; x < 16; x++) {
+      // Canopy: a fat ellipse from row 0 to 9 covering most columns.
+      const cx = 7.5;
+      const cy = 4.5;
+      const dx = (x - cx) / 7;
+      const dy = (y - cy) / 4.5;
+      const inCanopy = dx * dx + dy * dy < 1;
+      // Trunk: 2 cols wide at rows 9-15.
+      const inTrunk = y >= 9 && (x === 7 || x === 8);
+      if (inTrunk) {
+        row += y === 15 ? "1" : "5"; // dirt-brown trunk; dark base
+      } else if (inCanopy) {
+        // Speckled canopy: alternate sprout green and granite-shadow for
+        // depth.
+        const k = (x * 5 + y * 3) & 7;
+        row += k < 2 ? "1" : "C";
+      } else {
+        row += "0";
+      }
+    }
+    rows.push(row);
+  }
+  return rows;
+}
 
 /** Farm: dark tilled-soil base with bright green crop tufts and dark
  * furrow lines, deliberately distinct from plain dirt at the surface. */
@@ -486,11 +610,216 @@ const HOLLOW_KING_PIXELS: string[] = [
   "0010000000010000",
 ];
 
+// Cave dog: low quadruped silhouette, dirt-brown body. Used for
+// the pet system — wild and tame both render with this sprite,
+// with a small claim pip overlaid in the renderer for tame pets.
+const CAVE_DOG_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000111000",
+  "00000111111144110",
+  "0001144444444411",
+  "0014444444444411",
+  "0144444444444141",
+  "1444444444444401",
+  "1411111141111100",
+  "0010100000110100",
+  "0010100000110100",
+  "0010000000010000",
+  "0000000000000000",
+];
+
+// Cave falcon: wings spread, sharp profile in clothes-blue body
+// with a dark beak. Distinct from the bat's chunkier silhouette so
+// the two pets read at a glance.
+const CAVE_FALCON_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0001100000011000",
+  "0011510000015100",
+  "0015511111155100",
+  "0015555111555100",
+  "0015555111155100",
+  "0001515551111000",
+  "0000115551100000",
+  "0000011110000000",
+  "0000010110000000",
+  "0000010100000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+// Cave bat-as-pet: reuse the hostile bat sprite but tinted lighter.
+const CAVE_BAT_PET_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0011000000001100",
+  "0151100000011510",
+  "0155100000015510",
+  "0015510000155100",
+  "0001551115551000",
+  "0000155CCC100000",
+  "0000015551000000",
+  "0000001110000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+export function getPetSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {
+  const key = `pet:${kind}`;
+  let s = cache.get(key);
+  if (!s) {
+    const rows =
+      kind === "cave_falcon" ? CAVE_FALCON_PIXELS :
+      kind === "cave_bat" ? CAVE_BAT_PET_PIXELS :
+      CAVE_DOG_PIXELS;
+    s = paintFromRows(rows);
+    cache.set(key, s);
+  }
+  return s;
+}
+
+// Cave bat: small flying silhouette in dusk-purple wings.
+const CAVE_BAT_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0011000000001100",
+  "0151100000011510",
+  "0155100000015510",
+  "0015510000155100",
+  "0001551115551000",
+  "0000155555100000",
+  "0000015551000000",
+  "0000001110000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+// Giant spider: scaled cave spider, broader body, longer legs.
+const GIANT_SPIDER_PIXELS: string[] = [
+  "1000000000000001",
+  "1100000000000011",
+  "0110111111110110",
+  "0010144444410100",
+  "0101444444441010",
+  "1014444444444101",
+  "1014444444444101",
+  "0114444444444110",
+  "0114444554444110",
+  "0114444554444110",
+  "1014444444444101",
+  "1014444444444101",
+  "0101444444441010",
+  "0010111111110100",
+  "0110000000000110",
+  "1100000000000011",
+];
+
+// Cave bear: hulking quadruped silhouette in dirt-brown.
+const CAVE_BEAR_PIXELS: string[] = [
+  "0000000000000000",
+  "0000111000111000",
+  "0001551001551000",
+  "0001555111555000",
+  "0011555555555100",
+  "0155555555555510",
+  "1555555555555551",
+  "1555515555515551",
+  "1555555555555551",
+  "1555555555555551",
+  "1555555555555551",
+  "0155555555555510",
+  "0115551111155110",
+  "0011000000001100",
+  "0010000000001000",
+  "0000000000000000",
+];
+
+// Undead: gaunt humanoid silhouette in sickly green.
+const UNDEAD_PIXELS: string[] = [
+  "0000011111100000",
+  "0000111CCC110000",
+  "0001CCCCCCCC1000",
+  "0001CCCCCCCC1000",
+  "0011C1CCCC1CC100",
+  "0001CCCCCCCC1000",
+  "0001CCCCCCCC1000",
+  "0001CC1CCCC11000",
+  "0011CCCCCCCC1100",
+  "01CCCCCCCCCCCC10",
+  "01CCC1CCCCCC1C10",
+  "0001CCCCCCCCC100",
+  "0001CC11CC11C100",
+  "0011C1001100C100",
+  "0010100000110100",
+  "0000000000000000",
+];
+
+// Fire imp: small clothes-red silhouette with flickering halo.
+const FIRE_IMP_PIXELS: string[] = [
+  "00000EEE00EEE000",
+  "0000EEEE00EEEE00",
+  "00000EE0000EE000",
+  "0000111EE111E000",
+  "00111EEEEEEE1100",
+  "0111EEEEEEEEE110",
+  "1EEEEEEEEEEEEEE1",
+  "1EEEE111111EEEE1",
+  "01EEEEEEEEEEEE10",
+  "001EEEEEEEEE1100",
+  "00111EEEEEE11000",
+  "00011EEE1EEE1000",
+  "0011001100110100",
+  "0010001000010000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+// Automaton: blocky humanoid silhouette, stone-grey body, single
+// glowing eye pixel.
+const AUTOMATON_PIXELS: string[] = [
+  "0000111111110000",
+  "0001999999991000",
+  "0011999999999100",
+  "0119999E9E99991",
+  "1199999999999911",
+  "1199911111119911",
+  "1199900099009911",
+  "1199900099009911",
+  "1199911111119911",
+  "1199999999999911",
+  "0119999999999110",
+  "0011199999991100",
+  "0001199009990100",
+  "0001199009990100",
+  "0011199001199100",
+  "0011000001100000",
+];
+
 const HOSTILE_PIXELS: Record<string, string[]> = {
   cave_rat: CAVE_RAT_PIXELS,
+  cave_bat: CAVE_BAT_PIXELS,
   cave_spider: CAVE_SPIDER_PIXELS,
+  giant_spider: GIANT_SPIDER_PIXELS,
+  cave_bear: CAVE_BEAR_PIXELS,
   goblin_scout: GOBLIN_SCOUT_PIXELS,
   cave_troll: CAVE_TROLL_PIXELS,
+  undead: UNDEAD_PIXELS,
+  fire_imp: FIRE_IMP_PIXELS,
+  automaton: AUTOMATON_PIXELS,
   void_shade: VOID_SHADE_PIXELS,
   hollow_king: HOLLOW_KING_PIXELS,
 };

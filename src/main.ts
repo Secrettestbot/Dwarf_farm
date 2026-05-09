@@ -19,6 +19,9 @@ import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
 import { WorkerToMain } from "./shared/protocol";
 import { Founder } from "./sim/dwarves/founders";
 import { narrateFounding } from "./sim/events/narrator";
+import { playEventSound } from "./audio/sound";
+import { showTutorial, tutorialAlreadySeen } from "./ui/tutorial";
+import { HistoryPanel } from "./ui/historyPanel";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
 // 200×500 world for speed; live play uses the full size.
@@ -80,6 +83,11 @@ async function boot() {
     camera.setZoom(2);
     active = { sim, slotId: choice.slotId, fortressName: founderResult.fortressName, mode: choice.mode };
     await persist(active, camera);
+    // First-fortress tutorial — shown once across the player's
+    // localStorage. The replay button on the HUD opens it again.
+    if (!tutorialAlreadySeen()) {
+      await showTutorial(uiHost);
+    }
   } else {
     const save = await loadGame(choice.slotId);
     if (!save) throw new Error(`No save in ${choice.slotId}`);
@@ -157,13 +165,19 @@ async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Pro
         screen.setProgress(msg.ticksDone, msg.ticksDone + msg.ticksRemaining);
       } else if (msg.type === "DONE") {
         screen.setProgress(ticksToRun, ticksToRun);
-        screen.setStatus("Done. Resuming.");
+        screen.setStatus("Done. Building digest…");
         worker.terminate();
-        setTimeout(() => {
+        // Restore + show the GDD §3.2 digest of what happened. The
+        // chronicle entries from the catch-up window land in the
+        // restored sim; we filter to just the new ones (tick > the
+        // pre-catchup tick from the original save).
+        const sim = restore(msg.save);
+        const beforeTick = save.tick;
+        const digestEvents = sim.events.events.filter((e) => e.tick > beforeTick);
+        screen.showDigest(digestEvents, () => {
           screen.close();
-          const sim = restore(msg.save);
           resolve(sim);
-        }, 200);
+        });
       } else if (msg.type === "ERROR") {
         screen.close();
         worker.terminate();
@@ -183,11 +197,13 @@ function runGame(active: ActiveFortress, camera: Camera) {
   const minimap = new Minimap(sim.grid.width, sim.grid.height);
   minimap.refresh(sim, performance.now(), true);
 
+  const historyPanel = new HistoryPanel(uiHost);
+
   let panStart: { mx: number; my: number; cx: number; cy: number } | null = null;
   let isPanning = false;
 
   const hud = new Hud(uiHost, {
-    fortressName: active.fortressName,
+    fortressName: () => active.fortressName,
     mode: active.mode,
     onSpeedChange(s: SpeedLevel) { clock.setSpeed(s); },
     async onSave() {
@@ -195,6 +211,19 @@ function runGame(active: ActiveFortress, camera: Camera) {
       flashSave();
     },
     worldSeed: () => sim.seed,
+    onShowTutorial: () => {
+      void showTutorial(uiHost);
+    },
+    onShowHistory: () => {
+      historyPanel.open(active.sim);
+    },
+    onRenameFortress: () => {
+      const next = window.prompt("Rename the fortress:", active.fortressName);
+      if (next && next.trim()) {
+        active.fortressName = next.trim().slice(0, 60);
+        void persist(active, camera);
+      }
+    },
   });
   const eventPanel = new EventLogPanel(uiHost);
   const inspector = new DwarfInspector(uiHost);
@@ -232,9 +261,14 @@ function runGame(active: ActiveFortress, camera: Camera) {
       const id = findDwarfNear(active.sim, tx, ty);
       if (id !== null) {
         inspector.open(id);
-      } else {
-        // Click on empty space closes the inspector.
+      } else if (showGraveTooltip(active.sim, tx, ty, e.clientX, e.clientY)) {
+        // Headstone — tooltip handled separately. Close the dwarf
+        // inspector so the two UIs don't overlap.
         inspector.close();
+      } else {
+        // Click on empty space closes the inspector + any tooltip.
+        inspector.close();
+        hideGraveTooltip();
       }
     }
     panStart = null;
@@ -268,6 +302,11 @@ function runGame(active: ActiveFortress, camera: Camera) {
   });
 
   // ---- Game loop ----
+  // Sound trigger: when the chronicle grows, play a category-tagged
+  // motif for the new entries. We also rate-limit to one sound per
+  // category per frame so a single tick that produces a milestone +
+  // a crisis + four constructions doesn't sound like a slot machine.
+  let lastEventCount = sim.events.size();
   let lastFrame = performance.now();
   function frame(now: number) {
     const dt = Math.min(100, now - lastFrame);
@@ -280,6 +319,20 @@ function runGame(active: ActiveFortress, camera: Camera) {
     if (autoSaveAccum >= 60) {
       autoSaveAccum = 0;
       void persist(active, camera);
+    }
+
+    // Play sounds for any chronicle entries added this frame, deduped
+    // by category so a busy tick doesn't overflow the audio bus.
+    const evCount = sim.events.size();
+    if (evCount > lastEventCount) {
+      const played = new Set<string>();
+      for (let i = lastEventCount; i < evCount; i++) {
+        const cat = sim.events.events[i].category;
+        if (played.has(cat)) continue;
+        played.add(cat);
+        playEventSound(cat);
+      }
+      lastEventCount = evCount;
     }
 
     minimap.refresh(sim, now);
@@ -297,6 +350,43 @@ function runGame(active: ActiveFortress, camera: Camera) {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+}
+
+/** Find a grave at (tx, ty) and show a small floating tooltip with
+ * the buried dwarf's epitaph. Returns true if a grave was found. */
+function showGraveTooltip(sim: SimWorld, tx: number, ty: number, screenX: number, screenY: number): boolean {
+  const grave = sim.graves.find((g) => g.x === tx && g.y === ty);
+  if (!grave) return false;
+  let tooltip = document.getElementById("grave-tooltip") as HTMLDivElement | null;
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "grave-tooltip";
+    tooltip.style.cssText =
+      "position:fixed;background:#1a1410;border:1px solid #4a4030;padding:8px 12px;color:#cdb88a;font-family:monospace;font-size:11px;line-height:1.4;z-index:30;pointer-events:none;max-width:240px;";
+    uiHost.appendChild(tooltip);
+  }
+  const yearOfDeath = Math.floor(grave.deathTick / 34560) + 1;
+  tooltip.innerHTML = `
+    <div style="color:#e0c080;font-size:12px;">${escapeHtml(grave.name)}</div>
+    <div style="color:#999;">${escapeHtml(grave.profession)}, aged ${grave.ageAtDeath}</div>
+    <div style="color:#888;margin-top:4px;">${escapeHtml(grave.cause)}</div>
+    <div style="color:#666;font-size:10px;margin-top:4px;">Year ${yearOfDeath}</div>
+  `;
+  tooltip.style.left = `${Math.min(screenX + 12, window.innerWidth - 260)}px`;
+  tooltip.style.top = `${Math.min(screenY + 12, window.innerHeight - 100)}px`;
+  tooltip.style.display = "block";
+  return true;
+}
+
+function hideGraveTooltip(): void {
+  const tooltip = document.getElementById("grave-tooltip");
+  if (tooltip) tooltip.style.display = "none";
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
+  );
 }
 
 /** Click tolerance: try the exact tile first, then 1-tile neighbors. */

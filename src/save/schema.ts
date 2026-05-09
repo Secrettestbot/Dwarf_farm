@@ -40,9 +40,15 @@ export interface SavedDwarf {
     decayAccumThirst?: number;
     decayAccumMorale?: number;
   };
+  /** Coordinates of a buried former partner, or undefined if none. */
+  lostPartnerGrave?: { x: number; y: number };
+  /** Tick of the last grave visit. */
+  lastGraveVisitTick?: number;
+  /** Mother + father names, set for colony-born dwarves. */
+  parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
     targetX: number;
     targetY: number;
     progress: number;
@@ -59,7 +65,7 @@ export interface SavedDwarf {
   /** Combat HP. Optional for back-compat with v2 saves. */
   health?: { hp: number; maxHp: number; lastAttackTick: number; wasSevereWound?: boolean };
   /** What this dwarf is currently carrying mid-haul, if anything. */
-  carrying?: { kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal"; quality?: number };
+  carrying?: { kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide"; quality?: number };
   /** Squad membership at save time. The draft is re-checked at the next
    * year boundary regardless, but persisting the current state means an
    * in-progress engagement survives a save/load cycle. */
@@ -67,12 +73,21 @@ export interface SavedDwarf {
   /** Personal equipment — a forged weapon. Sticks with the dwarf for
    * life, so the save flows naturally; no consumption to track. */
   equipment?: { weapon: boolean; weaponQuality?: number };
+  /** Active Obsessive fixation, if any. Round-trips so a saved
+   * fortress reopens with the dwarf still grinding the same skill. */
+  obsession?: { skillId: string; endsAtTick: number };
+  /** Active tantrum (broken-morale state), if any. Round-trips so
+   * a save mid-breakdown restores the same state. */
+  tantrum?: { startedAtTick: number; endsAtTick: number };
+  /** Active disease, if any. Round-trips so a save mid-illness
+   * restores the same condition. */
+  disease?: { kind: string; contractedAtTick: number; treatProgress: number };
 }
 
 /** A loose item on the floor — dropped by mining or by a workshop,
  * picked up by hauling. */
 export interface SavedItem {
-  kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal";
+  kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide";
   x: number;
   y: number;
   /** Quality tier 0-4 (§6.3). Optional; missing means basic. */
@@ -88,6 +103,22 @@ export interface SavedHostile {
   maxHp: number;
   lastAttackTick: number;
   lastMoveTick: number;
+}
+
+/** Saved pet entity — wild or tame. ownerIndex is an index into
+ * the dwarves[] array (matching the same encoding partnerIndex
+ * uses); -1 means wild or owner-deceased. */
+export interface SavedPet {
+  kind: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  ownerIndex: number;
+  ownerName?: string;
+  tameProgress: number;
+  tamedAtTick: number;
+  lastAttackTick: number;
 }
 
 export interface SavedBlueprint {
@@ -130,6 +161,15 @@ export interface SavedStockpile {
   tools?: number;
   gems?: number;
   meals?: number;
+  blocks?: number;
+  cut_gems?: number;
+  wood?: number;
+  planks?: number;
+  pots?: number;
+  hide?: number;
+  leather?: number;
+  rope?: number;
+  cloth?: number;
 }
 
 export interface SaveV1 {
@@ -175,6 +215,7 @@ export interface SaveV1 {
   lastYearAnnounced?: number;
   populationMilestones?: number[];
   hostiles?: SavedHostile[];
+  pets?: SavedPet[];
   /** Player priority sliders. Optional for back-compat with v2 saves —
    * older saves restore to the neutral defaults. */
   sliders?: SliderState;
@@ -207,6 +248,43 @@ export interface SaveV1 {
    * no breach has happened yet. Drives the flood spread + Aquifer
    * Survived milestone window. */
   aquiferBreachTick?: number;
+  /** Caravan-on-site marker. Round-trips so a save mid-trade-visit
+   * restores with the wagons still parked. */
+  caravan?: { x: number; y: number; leavesTick: number; origin: string };
+  /** Cemetery registry — every dwarf interred in a Headstone tile.
+   * Round-trips so a reload restores the colony's full memorial
+   * roll call. */
+  graves?: Array<{
+    x: number;
+    y: number;
+    name: string;
+    profession: string;
+    ageAtDeath: number;
+    deathTick: number;
+    cause: string;
+  }>;
+  /** Notable artifacts registry — Masterworks the colony has named.
+   * Round-trips through save so the history persists across reloads. */
+  artifacts?: Array<{
+    id: number;
+    name: string;
+    kindLabel: string;
+    makerName: string;
+    makerProfession: string;
+    createdTick: number;
+  }>;
+  artifactsNextId?: number;
+  /** Library registry — books the colony's scholars have written. */
+  books?: Array<{
+    title: string;
+    topicId: string;
+    authorName: string;
+    writtenAtTick: number;
+  }>;
+  /** Currently-recognised Mayor's name. */
+  mayorName?: string;
+  /** Currently-recognised King's name (empty if no King yet). */
+  kingName?: string;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;
