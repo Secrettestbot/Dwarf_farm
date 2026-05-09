@@ -32,6 +32,13 @@ export interface TraitEffects {
   /** Bereavement morale hit multiplier. Loyal dwarves take a much
    * bigger hit when a bonded dwarf dies; Fickle ones barely notice. */
   bereavementScale: number;
+  /** Movement-speed multiplier (GDD §6.5 Agile / Slow). Movement
+   * accrues per-tick budget; > 1 means an extra step now and then,
+   * < 1 means an occasional skipped step. */
+  moveSpeed: number;
+  /** Multiplier on morale gained from a high-quality room — Proud
+   * dwarves care twice as much, Humble ones half. */
+  roomQualityScale: number;
 }
 
 export function defaultEffects(): TraitEffects {
@@ -47,6 +54,8 @@ export function defaultEffects(): TraitEffects {
     qualityBias: 0,
     visibilityRadius: 5,
     bereavementScale: 1,
+    moveSpeed: 1,
+    roomQualityScale: 1,
   };
 }
 
@@ -116,6 +125,21 @@ function applyTraitEffects(e: TraitEffects, id: string): void {
     // Senses
     case "eagle_eyed":
       e.visibilityRadius = 8;
+      break;
+    // Agility — affects how fast the dwarf moves between tiles.
+    case "agile":
+      e.moveSpeed = 1.20;
+      break;
+    case "slow":
+      e.moveSpeed = 0.80;
+      break;
+    // Esteem (GDD §6.4) — Proud dwarves care twice as much about
+    // room quality, Humble ones a quarter as much.
+    case "proud":
+      e.roomQualityScale = 2;
+      break;
+    case "humble":
+      e.roomQualityScale = 0.25;
       break;
     case "iron_constitution":
       e.needDecay *= 1.3; // 30% slower decay

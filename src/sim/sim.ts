@@ -78,6 +78,7 @@ export function tick(sim: SimWorld): void {
   hollowKingSystem(sim);
   hollowKingManifestSystem(sim);
   specialTraitSystem(sim);
+  passiveTraitSystem(sim);
   furyEndSystem(sim);
   engravingSystem(sim);
   floodSystem(sim);
@@ -217,6 +218,50 @@ function furyEndSystem(sim: SimWorld): void {
       f.used = true;
     }
     sim.fury.remove(id);
+  }
+}
+
+// ---- Passive trait auras (GDD §6.5) ----------------------------------
+//
+// Some traits influence the dwarves around them rather than
+// themselves. Once per in-game hour we sweep the population:
+// - Natural Leaders give a small morale bump to every dwarf within
+//   8 tiles, themselves included.
+// - Phobia: Deep Rock dwarves working below depth 300 lose morale
+//   instead of gaining it (their own personal Esteem need bites).
+
+const PASSIVE_TRAIT_INTERVAL = 60; // once per in-game hour
+const LEADER_AURA_RADIUS = 8;
+
+function passiveTraitSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % PASSIVE_TRAIT_INTERVAL !== 0) return;
+  const ents = sim.dwarf.entities;
+  // Natural Leader pass.
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw || !dw.traitIds.includes("natural_leader")) continue;
+    const pos = sim.position.get(id);
+    if (!pos) continue;
+    for (const other of ents) {
+      const op = sim.position.get(other);
+      if (!op) continue;
+      const dx = op.x - pos.x;
+      const dy = op.y - pos.y;
+      if (dx * dx + dy * dy > LEADER_AURA_RADIUS * LEADER_AURA_RADIUS) continue;
+      const n = sim.needs.get(other);
+      if (n) n.morale = Math.min(100, n.morale + 1);
+    }
+  }
+  // Phobia: Deep Rock pass.
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw || !dw.traitIds.includes("phobia_deep")) continue;
+    const pos = sim.position.get(id);
+    if (!pos) continue;
+    if (pos.y - sim.spawn.y < 300) continue;
+    const n = sim.needs.get(id);
+    if (n) n.morale = Math.max(0, n.morale - 2);
   }
 }
 
@@ -1459,6 +1504,17 @@ function movementSystem(sim: SimWorld): void {
       continue;
     }
 
+    // Sub-tick movement budget (GDD §6.5 Agile / Slow). Default
+    // moveSpeed=1 means a step every tick exactly. Agile (1.2)
+    // squeezes in an extra step every 5 ticks; Slow (0.8) skips one.
+    const dw = sim.dwarf.get(e);
+    const moveSpeed = dw ? effectsFor(dw.traitIds).moveSpeed : 1;
+    const accum = (path.moveAccum ?? 0) + moveSpeed;
+    if (accum < 1) {
+      path.moveAccum = accum;
+      continue;
+    }
+    path.moveAccum = accum - 1;
     path.pathIndex++;
     pos.x = nextCell.x;
     pos.y = nextCell.y;
@@ -2070,7 +2126,9 @@ function progressSleep(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     if (pos) {
       const q = roomQualityAt(sim, pos.x, pos.y, "bedroom");
       if (q > QUALITY_BASE) {
-        const bump = Math.floor((q - QUALITY_BASE) / 10);
+        const dw = sim.dwarf.get(e);
+        const scale = dw ? effectsFor(dw.traitIds).roomQualityScale : 1;
+        const bump = Math.floor((q - QUALITY_BASE) / 10 * scale);
         needs.morale = Math.min(100, needs.morale + bump);
       }
     }
@@ -2155,7 +2213,9 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     if (pos) {
       const q = roomQualityAt(sim, pos.x, pos.y, "dining_hall");
       if (q > QUALITY_BASE) {
-        const bump = Math.floor((q - QUALITY_BASE) / 10);
+        const dw = sim.dwarf.get(e);
+        const scale = dw ? effectsFor(dw.traitIds).roomQualityScale : 1;
+        const bump = Math.floor((q - QUALITY_BASE) / 10 * scale);
         needs.morale = Math.min(100, needs.morale + bump);
       }
     }

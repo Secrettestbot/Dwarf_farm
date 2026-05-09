@@ -45,6 +45,12 @@ export interface Pathing {
   // Final destination (the tile we want to be adjacent to, e.g. the rock to mine).
   goalX: number;
   goalY: number;
+  /** Sub-tick movement budget (Agile/Slow). Each tick, the dwarf's
+   * traitMoveSpeed is added; once the accumulator crosses 1, a step
+   * is taken and 1 is subtracted. Defaults to 0 — base-speed dwarves
+   * step exactly once per tick (1.0 + 0 = 1.0). Optional in saved
+   * data; missing means 0. */
+  moveAccum?: number;
 }
 
 /**
