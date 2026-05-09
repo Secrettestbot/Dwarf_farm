@@ -83,6 +83,11 @@ export const enum TileType {
    * spreads into adjacent corridors. The Aquifer Survived milestone
    * fires once the colony lives through the flood. */
   Aquifer = 32,
+  /** Pump station — workstation tile in a Pump Station room (GDD
+   * §10.2 Tier 2 Hydraulic Basics). A dwarf working at this tile
+   * drains one adjacent water tile per pump cycle, reclaiming flooded
+   * corridors after an aquifer breach. */
+  PumpStation = 33,
 }
 
 export interface TileInfo {
@@ -127,6 +132,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Silver]: { name: "silver vein", walkable: false, solid: true, color: 0xd0d8e8 },
   [TileType.Throne]: { name: "throne", walkable: true, solid: false, color: 0x6040a0 },
   [TileType.Aquifer]: { name: "aquifer", walkable: false, solid: true, color: 0x3a5078 },
+  [TileType.PumpStation]: { name: "pump", walkable: true, solid: false, color: 0x4080a0 },
 };
 
 export function tileIsGem(t: number): boolean {

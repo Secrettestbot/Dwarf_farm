@@ -46,6 +46,10 @@ export interface PlannerContext {
    * Toolmaking). When absent, the planner assumes nothing is researched
    * yet — useful for unit tests of the planner in isolation. */
   research?: { completed: string[] };
+  /** True iff the colony has breached an aquifer at some point. Gates
+   * the Pump Station emission — building one before there's water to
+   * pump would be a waste of dwarf-hours. */
+  aquiferBreached?: boolean;
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
@@ -84,6 +88,10 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // colony only earns this once it has the surplus to spare on
   // ornament — gated on population in the architect.
   throne_room: { w: 5, h: 4, priority: 1 },
+  // Pump Station: a 3×3 chamber with a single pump tile. Reclaims
+  // flooded corridors after an aquifer breach; gated on the Tier 2
+  // Hydraulic Basics topic + a breach having actually happened.
+  pump_station: { w: 3, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -200,6 +208,7 @@ export class ColonyPlanner {
     if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
     if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
     if (this.needsThroneRoom(ctx) && this.placeRoom(ctx, "throne_room")) return true;
+    if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
 
     // 2.9 Stairwell — every few completed rooms the architect drops a
     //     vertical 2×6 shaft so the colony actually descends instead of
@@ -316,6 +325,17 @@ export class ColonyPlanner {
     if (ctx.population < 30) return false;
     if (!(ctx.research?.completed ?? []).includes("masonry_and_mortaring")) return false;
     return this.maintainedAndActiveOfKind("throne_room", ctx.tick) === 0;
+  }
+
+  private needsPumpStation(ctx: PlannerContext): boolean {
+    // GDD §10.2 Tier 2 Hydraulic Basics gates the pump room. The
+    // architect waits until an aquifer has actually been breached
+    // before laying one out — an empty pump room with no water to
+    // pump is just a dwarf labor sink.
+    if (ctx.population < 5) return false;
+    if (!ctx.aquiferBreached) return false;
+    if (!(ctx.research?.completed ?? []).includes("hydraulic_basics")) return false;
+    return this.maintainedAndActiveOfKind("pump_station", ctx.tick) === 0;
   }
 
   /**

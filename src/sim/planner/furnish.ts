@@ -47,6 +47,9 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "throne_room":
       furnishThroneRoom(grid, b);
       break;
+    case "pump_station":
+      furnishWorkshop(grid, b, TileType.PumpStation);
+      break;
     // Corridors, mines, and stairwells stay bare — they're passages or
     // active workspaces, not rooms. Real ore mines later get an extraction
     // marker; for now leaving them as plain CorridorFloor.

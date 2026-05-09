@@ -200,6 +200,17 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 6.75 Pump out a nearby flooded tile. Higher priority than research
+  //      so the colony actually reclaims its corridors instead of
+  //      reading books while the water rises. Only triggers when a
+  //      pump station with reachable water exists.
+  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+    const pumpTarget = findPumpTarget(sim, pos.x, pos.y);
+    if (pumpTarget) {
+      return { kind: "pump" as JobKind, targetX: pumpTarget.x, targetY: pumpTarget.y, progress: 0 };
+    }
+  }
+
   // 6.8 Research at a Library desk. Gated by the Research slider, and
   //     only fires when there's an active topic to study.
   if (age >= MIN_WORK_AGE && sim.sliders.research > 0.05 && sim.research.current) {
@@ -584,6 +595,49 @@ function findStockpileDrop(sim: SimWorld, sx: number, sy: number): { x: number; 
     }
   }
   return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find a pump station tile inside a complete pump room with at least
+ * one water tile within PUMP_DRAIN_RADIUS. The pump operator stands on
+ * the station while progressPump dries one nearby tile per cycle. */
+const PUMP_DRAIN_RADIUS = 12;
+function findPumpTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "pump");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "pump_station" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.PumpStation) continue;
+      if (claimed.has((y << 16) | x)) continue;
+      // Verify there's water within drain radius — no point sending a
+      // dwarf to a pump with nothing to pump.
+      if (!hasWaterInRange(sim, x, y, PUMP_DRAIN_RADIUS)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+function hasWaterInRange(sim: SimWorld, sx: number, sy: number, radius: number): boolean {
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx * dx + dy * dy > radius * radius) continue;
+      if (sim.grid.getTile(sx + dx, sy + dy) === TileType.Water) return true;
+    }
+  }
+  return false;
 }
 
 /** Find the nearest unclaimed Library desk for a research job. Skips

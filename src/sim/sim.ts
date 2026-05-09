@@ -53,6 +53,7 @@ export function tick(sim: SimWorld): void {
     rng: sim.plannerRng,
     events: sim.events,
     research: { completed: sim.research.completed },
+    aquiferBreached: sim.aquiferBreachTick >= 0,
   });
   yearRolloverSystem(sim);
   emergencySystem(sim);
@@ -1302,8 +1303,53 @@ function workSystem(sim: SimWorld): void {
       case "research":
         progressResearch(sim, e, job, pos);
         break;
+      case "pump":
+        progressPump(sim, e, job, pos);
+        break;
     }
   }
+}
+
+/** Tick a pump cycle while the dwarf stands on a pump-station tile.
+ * On completion, drain the nearest water tile within PUMP_DRAIN_RADIUS
+ * back to corridor floor — reclaiming flooded space one cell at a time.
+ * If there's no reachable water left, the job ends quietly so the
+ * dwarf can pick something else up. */
+const PUMP_TICKS = 60;
+const PUMP_DRAIN_RADIUS = 12;
+function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  if (sim.grid.getTile(pos.x, pos.y) !== TileType.PumpStation) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  job.progress++;
+  if (job.progress < PUMP_TICKS) return;
+  // Drain the nearest water tile within range. Deterministic tiebreak
+  // by (y, x) — pumps closer to the breach edge dry first.
+  let best: { x: number; y: number; d: number } | null = null;
+  for (let dy = -PUMP_DRAIN_RADIUS; dy <= PUMP_DRAIN_RADIUS; dy++) {
+    for (let dx = -PUMP_DRAIN_RADIUS; dx <= PUMP_DRAIN_RADIUS; dx++) {
+      if (dx * dx + dy * dy > PUMP_DRAIN_RADIUS * PUMP_DRAIN_RADIUS) continue;
+      const wx = pos.x + dx;
+      const wy = pos.y + dy;
+      if (sim.grid.getTile(wx, wy) !== TileType.Water) continue;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (wy < best.y || (wy === best.y && wx < best.x)))
+      ) {
+        best = { x: wx, y: wy, d };
+      }
+    }
+  }
+  if (best) {
+    sim.grid.setTile(best.x, best.y, TileType.CorridorFloor);
+  }
+  sim.dwarf.get(e)!.lastJobTick = sim.tick;
+  sim.job.remove(e);
+  sim.pathing.remove(e);
 }
 
 /** Tick research progress while the scholar sits at a Library desk.
