@@ -197,6 +197,17 @@ export class SimWorld {
    * the colony lives a week past breach without abandoning, the
    * milestone fires. -1 means no breach has happened yet. */
   aquiferBreachTick = -1;
+
+  /** Caravan-on-site marker. While set, the renderer draws a trader
+   * pip at the recorded tile and the chronicle reads as "the wagons
+   * are still here". Cleared when the caravan despawns at
+   * caravanLeavesTick. tick=-1 means no caravan present. */
+  caravanX = 0;
+  caravanY = 0;
+  caravanLeavesTick = -1;
+  /** Origin kingdom of the caravan currently on site, for inspector
+   * display. Empty when no caravan is present. */
+  caravanOrigin = "";
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */

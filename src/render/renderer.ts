@@ -161,6 +161,29 @@ export function renderWorld(
     }
   }
 
+  // Caravan trader pip. Drawn before hostiles + dwarves so anyone
+  // standing on the depot tile renders over the trader. Caravan
+  // presence is indicated by sim.caravanLeavesTick > 0; the pip is a
+  // small wagon-coloured square plus a label so the player can pick
+  // out a visiting kingdom at a glance.
+  if (sim.caravanLeavesTick > 0 && grid.isSeen(sim.caravanX, sim.caravanY)) {
+    const cx = (sim.caravanX - camera.x) * pt + viewW / 2;
+    const cy = (sim.caravanY - camera.y) * pt + viewH / 2;
+    ctx.fillStyle = "#c89060";
+    const m = Math.max(2, Math.floor(pt * 0.25));
+    ctx.fillRect(cx + m, cy + m, pt - m * 2, pt - m * 2);
+    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx + m + 0.5, cy + m + 0.5, pt - m * 2 - 1, pt - m * 2 - 1);
+    if (pt >= 10) {
+      ctx.fillStyle = "#e8c0a0";
+      ctx.font = "9px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("caravan", cx + pt / 2, cy - 2);
+      ctx.textAlign = "start";
+    }
+  }
+
   // Hostiles below dwarves so dwarves draw over them in melee.
   const hostileEnts = sim.hostile.entities;
   for (let i = 0; i < hostileEnts.length; i++) {

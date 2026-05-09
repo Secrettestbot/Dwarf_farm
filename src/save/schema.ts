@@ -219,6 +219,9 @@ export interface SaveV1 {
    * no breach has happened yet. Drives the flood spread + Aquifer
    * Survived milestone window. */
   aquiferBreachTick?: number;
+  /** Caravan-on-site marker. Round-trips so a save mid-trade-visit
+   * restores with the wagons still parked. */
+  caravan?: { x: number; y: number; leavesTick: number; origin: string };
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

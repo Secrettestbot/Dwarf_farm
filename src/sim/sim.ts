@@ -20,7 +20,39 @@ import { nextTopic, TOPICS_BY_ID } from "./research";
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
 export const MOVE_TICKS = 1;
+/** Base ticks to mine a generic rock tile. Material-specific hardness
+ * scales this up; mining-skill and pickaxe-quality scale it down. */
 export const MINE_TICKS = 6;
+/** Per-material hardness multiplier applied to MINE_TICKS. Surface
+ * dirt is fast; granite is harder than stone; gem-seam crystals are
+ * tough; the deep-rock metals (adamantite, void-ore) are the
+ * fortress's grindstone — without a forged pickaxe they're nearly
+ * untouchable. */
+const MATERIAL_HARDNESS: Record<number, number> = {
+  // Surface and skin layer.
+  [TileType.Dirt]: 0.5,
+  [TileType.Sand]: 0.5,
+  [TileType.Tree]: 1.0,
+  // Shallow earth.
+  [TileType.Stone]: 1.0,
+  [TileType.Aquifer]: 1.5,
+  // Deep rock.
+  [TileType.Granite]: 1.5,
+  [TileType.Ore]: 1.6,
+  [TileType.Coal]: 1.2,
+  [TileType.Silver]: 1.7,
+  [TileType.Gold]: 1.8,
+  // Gem seam.
+  [TileType.RawEmerald]: 2.0,
+  [TileType.RawRuby]: 2.2,
+  [TileType.RawDiamond]: 2.5,
+  // Ancient dark / underworld.
+  [TileType.Adamantite]: 3.5,
+  [TileType.VoidOre]: 4.5,
+  [TileType.SoulCrystal]: 3.0,
+  // Cave mushroom is soft — it's a mushroom.
+  [TileType.CaveMushroom]: 0.4,
+};
 export const SLEEP_TICKS = 240; // 4 in-game hours of rest restores 80 sleep
 export const SOCIALISE_TICKS = 30; // half an in-game hour of conversation
 export const WANDER_LINGER_TICKS = 12; // after arrival, pause briefly before next task
@@ -701,28 +733,108 @@ function depthPhraseFor(y: number, surfaceY: number): string {
 // bonus to the deal.
 
 const TRADE_INTERVAL_TICKS = TICKS_PER_DAY * 6; // four caravans per in-game year
-const TRADE_BASE_COST = 30;
 const TRADE_BASE_GAIN = 50;
 
+/** Names the caravan-origin kingdoms cycle through. The chronicle
+ * pulls from this pool deterministically per call so a player who
+ * watches their event log over years sees recurring trade partners
+ * rather than an interchangeable parade of "a caravan". */
+const CARAVAN_KINGDOMS: ReadonlyArray<string> = [
+  "the western kingdoms",
+  "the Iron Vaults of Karnesh",
+  "the Hold of Stoneholm",
+  "the Bronze Reach",
+  "Old Drumheim",
+  "the Free Mountain Confederacy",
+  "the Wandering Hammers guild",
+  "the Black Coal Cantons",
+];
+
+/** Goods the colony can offer to a visiting caravan, ordered by
+ * preference: surplus accumulators first, raw resources last.
+ * Caravans accept whichever offered good the colony has the most of
+ * (above a minimum), so a fortress with a Mason's Workshop trades
+ * blocks instead of stone. */
+type TradeOffer = { resource: keyof import("./world/simWorld").Stockpile; price: number; min: number };
+const TRADE_OFFERS: TradeOffer[] = [
+  { resource: "cut_gems", price: 8, min: 3 },   // most valuable per unit
+  { resource: "blocks", price: 4, min: 8 },
+  { resource: "bars", price: 5, min: 6 },
+  { resource: "tools", price: 7, min: 4 },
+  { resource: "leather", price: 3, min: 8 },
+  { resource: "cloth", price: 3, min: 8 },
+  { resource: "pots", price: 2, min: 8 },
+  { resource: "planks", price: 2, min: 12 },
+  { resource: "gems", price: 4, min: 4 },
+  { resource: "ore", price: 2, min: 15 },
+  { resource: "stone", price: 1, min: 30 }, // legacy fallback
+];
+
+/** Goods caravans bring in exchange. Picked by what the colony is
+ * lowest on. */
+type TradeImport = "food" | "drink" | "tools" | "rope";
+
+/** How long a caravan lingers at the depot once it arrives. The
+ * trade transaction resolves on arrival; the visual trader stays for
+ * a day's worth of in-game wandering so the player can actually see
+ * the caravan in the world. */
+const CARAVAN_STAY_TICKS = TICKS_PER_DAY;
+
 function tradeSystem(sim: SimWorld): void {
+  // Despawn any caravan whose stay has elapsed and write a sendoff
+  // line to the chronicle so the player can see the visit end as
+  // well as begin.
+  if (sim.caravanLeavesTick > 0 && sim.tick >= sim.caravanLeavesTick) {
+    if (sim.caravanOrigin) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `The caravan from ${sim.caravanOrigin} packs its wagons and rolls back out the gate.`,
+      );
+    }
+    sim.caravanLeavesTick = -1;
+    sim.caravanOrigin = "";
+  }
   if (sim.tick === 0) return;
   if (sim.tick % TRADE_INTERVAL_TICKS !== 0) return;
   if (sim.emergency.mode === "lockdown") return;
-  // Need an active Trade Depot.
-  let hasDepot = false;
+  // Need an active Trade Depot. Find its centre while we're at it so
+  // the visible trader can park there.
+  let depot: { cx: number; cy: number } | null = null;
   for (const b of sim.planner.blueprints) {
     if (b.kind === "trade_depot" && b.status === "complete") {
-      hasDepot = true;
+      depot = {
+        cx: b.originX + Math.floor(b.width / 2),
+        cy: b.originY + Math.floor(b.height / 2),
+      };
       break;
     }
   }
-  if (!hasDepot) return;
-  // Need stone to trade.
-  if (sim.stockpile.stone < TRADE_BASE_COST) {
+  if (!depot) return;
+  // Pick a kingdom of origin deterministically — the aiRng's next
+  // draw rotates the pool so a watcher sees variety.
+  const kingdom = CARAVAN_KINGDOMS[sim.aiRng.nextRange(0, CARAVAN_KINGDOMS.length)];
+  // Park the caravan at the depot's centre. The renderer reads this
+  // and draws a trader pip there until caravanLeavesTick elapses.
+  sim.caravanX = depot.cx;
+  sim.caravanY = depot.cy;
+  sim.caravanLeavesTick = sim.tick + CARAVAN_STAY_TICKS;
+  sim.caravanOrigin = kingdom;
+  // Pick the offered good: the highest-stocked one above its
+  // minimum threshold. Falls back to stone when nothing else
+  // qualifies — that's the early-game caravan.
+  let offer: TradeOffer | null = null;
+  for (const o of TRADE_OFFERS) {
+    if ((sim.stockpile[o.resource] ?? 0) >= o.min) {
+      offer = o;
+      break;
+    }
+  }
+  if (!offer) {
     sim.events.add(
       sim.tick,
       "social",
-      "A caravan arrives, but the colony has no stone to trade. They depart empty-handed.",
+      `A caravan from ${kingdom} arrives, but the colony has nothing worth trading. They depart empty-handed.`,
     );
     return;
   }
@@ -738,28 +850,37 @@ function tradeSystem(sim: SimWorld): void {
       bestSkill = skill;
     }
   }
-  // Decide the deal based on the colony's lowest-stocked food / drink.
+  // Pick what to import: the colony's lowest-stocked staple. Rope is
+  // a rare delivery — only when food/drink are amply stocked AND the
+  // colony has researched textile work (otherwise rope is useless to
+  // them).
   const foodLow = sim.stockpile.food < 200;
   const drinkLow = sim.stockpile.drink < 200;
-  let kind: "food" | "drink" | "tools";
-  if (foodLow && (!drinkLow || sim.stockpile.food <= sim.stockpile.drink)) kind = "food";
-  else if (drinkLow) kind = "drink";
-  else kind = "tools";
+  let importKind: TradeImport;
+  if (foodLow && (!drinkLow || sim.stockpile.food <= sim.stockpile.drink)) importKind = "food";
+  else if (drinkLow) importKind = "drink";
+  else if (sim.research.completed.includes("rope_and_fibre") && sim.stockpile.rope < 20) importKind = "rope";
+  else importKind = "tools";
   // Broker bonus: each level above 1 adds 4% to the gain.
-  // Skill-driven bonus + Charismatic bump (GDD §6.5).
   const brokerDw = bestBroker !== -1 ? sim.dwarf.get(bestBroker) : undefined;
   const tradeBonus = brokerDw ? effectsFor(brokerDw.traitIds).tradeBonus : 0;
   const brokerBonus = (1 + Math.max(0, bestSkill - 1) * 0.04) * (1 + tradeBonus);
-  const gain = Math.round(TRADE_BASE_GAIN * brokerBonus);
-  sim.stockpile.stone -= TRADE_BASE_COST;
-  sim.stockpile[kind] += gain;
+  // The deal. Spend `min` units of the offered good at price-per-unit
+  // for `min * price * brokerBonus` worth of imports — scaled to
+  // TRADE_BASE_GAIN's tuning so an early stone caravan still feels
+  // like a meaningful exchange.
+  const cost = offer.min;
+  const grossValue = cost * offer.price;
+  const gain = Math.round(grossValue * brokerBonus * (TRADE_BASE_GAIN / 30));
+  sim.stockpile[offer.resource] -= cost;
+  sim.stockpile[importKind] += gain;
   // Award XP to the broker.
   if (bestBroker !== -1) awardSkillXp(sim, bestBroker, "trading", 1);
   const brokerName = bestBroker !== -1 ? sim.dwarf.get(bestBroker)?.name ?? "the broker" : "the broker";
   sim.events.add(
     sim.tick,
     "social",
-    `A caravan from the western kingdoms arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${kind} for ${TRADE_BASE_COST} stone.`,
+    `A caravan from ${kingdom} arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${importKind} for ${cost} ${offer.resource}.`,
   );
 }
 
@@ -2233,6 +2354,42 @@ function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
   return speed;
 }
 
+/** Best available pickaxe quality in the colony (0 = basic, 4 =
+ * Masterwork). The miner uses whichever forged tool is highest-tier
+ * — they share a tool pool informally, no per-dwarf equipment.
+ * Falls back to 0 (a stone pick) when no metal tools have been
+ * forged yet. Mid-tick scan is fast: typical fortresses carry only
+ * a handful of tool items at once. */
+function colonyToolQuality(sim: SimWorld): number {
+  let best = 0;
+  // Scan tool items in the world (on the floor, on armoury racks,
+  // or being carried mid-haul).
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const it = sim.item.get(ents[i]);
+    if (!it || it.kind !== "tools") continue;
+    const q = it.quality ?? 0;
+    if (q > best) best = q;
+  }
+  // A dwarf carrying a tool counts too — they'll let a miner borrow it.
+  const carryEnts = sim.carrying.entities;
+  for (let i = 0; i < carryEnts.length; i++) {
+    const c = sim.carrying.get(carryEnts[i]);
+    if (!c || c.kind !== "tools") continue;
+    const q = c.quality ?? 0;
+    if (q > best) best = q;
+  }
+  // Equipped soldiers: their weapon is a forged tool too.
+  const eqEnts = sim.equipment.entities;
+  for (let i = 0; i < eqEnts.length; i++) {
+    const eq = sim.equipment.get(eqEnts[i]);
+    if (!eq || !eq.weapon) continue;
+    const q = eq.weaponQuality ?? 0;
+    if (q > best) best = q;
+  }
+  return best;
+}
+
 const WATER_WHEEL_AURA = 8;
 function hasNearbyWaterWheel(sim: SimWorld, sx: number, sy: number): boolean {
   for (let dy = -WATER_WHEEL_AURA; dy <= WATER_WHEEL_AURA; dy++) {
@@ -2394,7 +2551,20 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   // scale how fast progress accrues per tick.
   const mineSpeed = effectiveWorkSpeed(sim, e);
   job.progress += mineSpeed;
-  if (job.progress >= MINE_TICKS) {
+  // Material hardness + skill + pickaxe quality determine how many
+  // ticks of progress are needed. Hardness is per-tile; skill scales
+  // ticks down ~3% per level above novice; tool quality scales ticks
+  // down 8% per quality tier so a Masterwork pickaxe roughly halves
+  // the dig time on hard rock.
+  const targetTile = sim.grid.getTile(job.targetX, job.targetY);
+  const hardness = MATERIAL_HARDNESS[targetTile] ?? 1.0;
+  const dw = sim.dwarf.get(e);
+  const miningSkill = dw?.skills.mining ?? 1;
+  const skillScale = Math.max(0.4, 1 - (miningSkill - 1) * 0.03);
+  const toolQuality = colonyToolQuality(sim);
+  const toolScale = Math.max(0.4, 1 - toolQuality * 0.08);
+  const ticksNeeded = Math.max(2, Math.round(MINE_TICKS * hardness * skillScale * toolScale));
+  if (job.progress >= ticksNeeded) {
     // What was the rock made of? Determines stockpile credit.
     const tileType = sim.grid.getTile(job.targetX, job.targetY);
     // Aquifer breach: replace with water rather than corridor floor,

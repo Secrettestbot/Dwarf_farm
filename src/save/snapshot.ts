@@ -192,6 +192,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     hollowKingSpawned: sim.hollowKingSpawned,
     voidShadesSlain: sim.voidShadesSlain,
     aquiferBreachTick: sim.aquiferBreachTick,
+    caravan: sim.caravanLeavesTick > 0
+      ? { x: sim.caravanX, y: sim.caravanY, leavesTick: sim.caravanLeavesTick, origin: sim.caravanOrigin }
+      : undefined,
   };
 }
 
@@ -420,6 +423,12 @@ export function restore(save: SaveV1): SimWorld {
   if (save.hollowKingSpawned) sim.hollowKingSpawned = true;
   if (save.voidShadesSlain !== undefined) sim.voidShadesSlain = save.voidShadesSlain;
   if (save.aquiferBreachTick !== undefined) sim.aquiferBreachTick = save.aquiferBreachTick;
+  if (save.caravan) {
+    sim.caravanX = save.caravan.x;
+    sim.caravanY = save.caravan.y;
+    sim.caravanLeavesTick = save.caravan.leavesTick;
+    sim.caravanOrigin = save.caravan.origin;
+  }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).
