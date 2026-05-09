@@ -13,7 +13,7 @@ import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skil
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 import { recipeFor } from "./planner/recipes";
-import { QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN } from "./planner/blueprint";
+import { QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID } from "./research";
 
@@ -79,6 +79,7 @@ export function tick(sim: SimWorld): void {
   hollowKingManifestSystem(sim);
   specialTraitSystem(sim);
   furyEndSystem(sim);
+  engravingSystem(sim);
   floodSystem(sim);
   depthMilestoneSystem(sim);
   plannerMilestoneSystem(sim);
@@ -216,6 +217,45 @@ function furyEndSystem(sim: SimWorld): void {
       f.used = true;
     }
     sim.fury.remove(id);
+  }
+}
+
+// ---- Engravings (GDD §7.2, §6.3 Artistry) ---------------------------
+//
+// "Dwarves will continue to improve rooms long after they are
+// functional. A dwarf with artistic tendencies may engrave the walls
+// of a finished room, adding value." Implementation: every
+// ENGRAVING_INTERVAL ticks, any Skilled+ Artistry dwarf standing in
+// a complete maintainable room nudges that room's quality up. Award
+// Artistry XP for the work, gated on real Artistry skill so a Novice
+// can't engrave their way to legend.
+
+const ENGRAVING_INTERVAL_TICKS = 60; // once per in-game hour
+const ENGRAVING_MIN_SKILL = 9; // Skilled or higher
+
+function engravingSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % ENGRAVING_INTERVAL_TICKS !== 0) return;
+  for (const id of sim.dwarf.entities) {
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    const artistry = dw.skills.artistry ?? 1;
+    if (artistry < ENGRAVING_MIN_SKILL) continue;
+    const pos = sim.position.get(id);
+    if (!pos) continue;
+    // Find a complete maintainable room they're standing in. Quality
+    // creeps up by 1 per tick, faster for Legendary artists.
+    for (const b of sim.planner.blueprints) {
+      if (b.status !== "complete") continue;
+      if (!isMaintainable(b.kind)) continue;
+      if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+      if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+      const cur = b.quality ?? QUALITY_BASE;
+      const bump = artistry >= 17 ? 2 : 1;
+      b.quality = Math.min(QUALITY_MAX, cur + bump);
+      awardSkillXp(sim, id, "artistry", 1);
+      break;
+    }
   }
 }
 
@@ -1691,7 +1731,10 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     if (outAsItem) {
       // Roll output quality from the crafter's skill — Skilled+ smiths
       // produce Fine bars, Legendary smiths produce Masterworks (GDD §6.3).
-      const quality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
+      // A Perfectionist's roll lands one tier higher.
+      const traitBias = dw ? effectsFor(dw.traitIds).qualityBias : 0;
+      const baseQuality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
+      const quality = Math.max(0, Math.min(4, baseQuality + traitBias));
       for (let i = 0; i < recipe.outputQty; i++) {
         sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y, quality });
       }

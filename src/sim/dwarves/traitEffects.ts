@@ -22,6 +22,10 @@ export interface TraitEffects {
   miningBonus: number;
   smithingBonus: number;
   scholarshipBonus: number;
+  /** Quality-tier bias on crafted items (GDD §6.3). +1 means a
+   * Perfectionist's roll lands one tier above the table; -1 would be
+   * a sloppy hand. Clamped to the 0..4 range at use site. */
+  qualityBias: number;
 }
 
 export function defaultEffects(): TraitEffects {
@@ -34,6 +38,7 @@ export function defaultEffects(): TraitEffects {
     miningBonus: 0,
     smithingBonus: 0,
     scholarshipBonus: 0,
+    qualityBias: 0,
   };
 }
 
@@ -55,7 +60,11 @@ function applyTraitEffects(e: TraitEffects, id: string): void {
       e.workSpeed *= 0.85;
       break;
     case "perfectionist":
-      e.workSpeed *= 0.8; // quality bonus lands when room-quality system arrives
+      e.workSpeed *= 0.8;
+      // Slower, but a Perfectionist's roll lands one tier above the
+      // table — exactly the GDD §6.5 "produces one quality tier
+      // higher on average" rule.
+      e.qualityBias += 1;
       break;
     case "efficient":
       e.workSpeed *= 1.1;

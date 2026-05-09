@@ -120,4 +120,40 @@ describe("workshop quality (GDD §6.3)", () => {
     expect(eq?.weapon).toBe(true);
     expect(eq?.weaponQuality).toBe(4);
   });
+
+  it("a Perfectionist's craft lands a tier higher than the base roll", () => {
+    const w = generateWorld({ seed: 1007, width: 200, height: 500 });
+    const sim = new SimWorld(1007, w.grid, w.surfaceY, w.spawn);
+    for (let xx = w.spawn.x; xx <= w.spawn.x + 5; xx++) {
+      sim.grid.setTile(xx, w.spawn.y, TileType.CorridorFloor);
+    }
+    plantSmelter(sim, w.spawn.x + 2, w.spawn.y - 1);
+    sim.spawnDwarf({
+      name: "Picky",
+      x: w.spawn.x,
+      y: w.spawn.y,
+      age: 30,
+      traitIds: ["perfectionist"],
+    });
+    const e = sim.dwarf.entities[0];
+    sim.dwarf.get(e)!.skills.smithing = 1; // Novice — base roll is always 0.
+    sim.stockpile.ore = 50;
+    for (let i = 0; i < 2000; i++) {
+      const n = sim.needs.get(e)!;
+      n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
+      tick(sim);
+    }
+    // With Novice + Perfectionist (+1 bias), every bar should be at
+    // least Fine (quality 1).
+    let allAtLeastFine = true;
+    let totalBars = 0;
+    for (const ie of sim.item.entities) {
+      const it = sim.item.get(ie);
+      if (it?.kind !== "bars") continue;
+      totalBars++;
+      if ((it.quality ?? 0) < 1) allAtLeastFine = false;
+    }
+    expect(totalBars).toBeGreaterThan(0);
+    expect(allAtLeastFine).toBe(true);
+  });
 });
