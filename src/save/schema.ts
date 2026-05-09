@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat";
     targetX: number;
     targetY: number;
     progress: number;
@@ -149,6 +149,11 @@ export interface SavedLogEvent {
   tick: number;
   category: string;
   text: string;
+  /** Optional tile coordinates the event happened at — added so the
+   * notification UI's camera-jump survives a save/restore. Older
+   * saves without these fields restore as non-spatial events. */
+  x?: number;
+  y?: number;
 }
 
 export interface SavedStockpile {

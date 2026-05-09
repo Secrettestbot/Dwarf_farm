@@ -1136,7 +1136,8 @@ function resolveBrawl(sim: SimWorld, aggressor: EntityId, victim: EntityId, kind
   const line = kind === "fury"
     ? `${aDw.name} strikes ${vDw.name} in their fury. The colony watches in silence.`
     : `${aDw.name} swings on ${vDw.name}. The grudge between them spills into blood.`;
-  sim.events.add(sim.tick, "crisis", line);
+  const aPos = sim.position.get(aggressor);
+  sim.events.add(sim.tick, "crisis", line, aPos ? { x: aPos.x, y: aPos.y } : undefined);
   if (vHp && vHp.hp <= 0) {
     killDwarf(sim, victim, `struck dead by ${aDw.name}`);
   }
@@ -2380,7 +2381,16 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   if (sim.grid.isWalkable(pos.x, pos.y)) {
     sim.grid.setTile(pos.x, pos.y, TileType.Memorial);
   }
-  sim.events.add(sim.tick, "social", narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause));
+  // Violent deaths fire as crisis so the player gets a notification;
+  // peaceful deaths (old age, disease) stay social so the chronicle
+  // is the place to read them. The position lets the UI offer a
+  // camera-jump to the death tile.
+  sim.events.add(
+    sim.tick,
+    violentCause ? "crisis" : "social",
+    narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause),
+    { x: pos.x, y: pos.y },
+  );
   // Burial: if a Cemetery exists with an empty Grave plot, mark a
   // Headstone there and register the dead dwarf in the colony's
   // gravestones registry. The Memorial tile on the spot they fell

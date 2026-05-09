@@ -21,7 +21,7 @@
 // per leader), and stairwells as a distinct kind for descending floors.
 
 import { TileGrid } from "../world/grid";
-import { TileType } from "../world/tiles";
+import { TileType, tileIsGem } from "../world/tiles";
 import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
@@ -135,6 +135,20 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
 const CORRIDOR_MIN_LEN = 4;
 const CORRIDOR_MAX_LEN = 10;
 const ORE_SENSE_RADIUS = 12; // an ore tile is sense-able this many tiles from walkable
+/** Geology signal — when the planner places a corridor, it counts
+ * ore + gem tiles in solid rock within this radius of the corridor's
+ * exit point, and adds a bonus to the candidate's score. The colony
+ * thus tends to dig outward toward what its dwarves can faintly
+ * sense ahead, even before a tunnel exposes it. The radius is wider
+ * than ORE_SENSE_RADIUS because the planner's "rumour" radius
+ * extends beyond what an actual mining target needs. */
+const GEOLOGY_SCAN_RADIUS = 18;
+/** Score multiplier per sensed mineral tile within the scan radius.
+ * Tuned so a corridor heading into a dense vein can outweigh the
+ * default downward depth bias only by a modest margin — the colony
+ * still wants to descend overall, but it will deviate sideways for
+ * a worthwhile vein. */
+const GEOLOGY_PER_TILE_BONUS = 6;
 /** One architect per ARCHITECT_PER_DWARVES dwarves: a small colony of seven
  * gets one active blueprint at a time, but a larger colony parallelises the
  * work and expands faster. */
@@ -739,14 +753,22 @@ export class ColonyPlanner {
             const perp = perpendicularOf(dir.dx, dir.dy);
             const m = this.measureCorridor(grid, ax, ay, dir.dx, dir.dy, perp.dx, perp.dy, tryWidth, wantMaxLen);
             if (m.len < CORRIDOR_MIN_LEN) continue;
+            const exitX = ax + dir.dx * m.len;
             const exitY = ay + dir.dy * m.len;
             const depthBonus = Math.max(0, exitY - spawn.y) * 4;
             const widthBonus = tryWidth === 2 ? 30 : 0;
+            // Geology signal: count ore + gem tiles in the rock around
+            // this corridor's exit. The dwarves "sense" mineral
+            // density ahead of where they're digging, biasing the
+            // colony toward veins it might otherwise miss while
+            // descending. Cheap O((2R+1)²) per candidate; the
+            // candidate set itself is bounded by reachable count.
+            const geologyBonus = this.geologyAttraction(grid, exitX, exitY) * GEOLOGY_PER_TILE_BONUS;
             // No distance penalty: corridors *should* reach outward. The
             // squared penalty used previously made the score plateau around
             // 30 tiles from spawn, so the colony stalled before reaching
             // the ore-bearing Shallow Earth layer at y ≥ 80.
-            const score = dir.pref + m.len * 5 + depthBonus + widthBonus;
+            const score = dir.pref + m.len * 5 + depthBonus + widthBonus + geologyBonus;
             const cand: Candidate = {
               startX: m.startX,
               startY: m.startY,
@@ -781,12 +803,27 @@ export class ColonyPlanner {
     // chance of going laterally rather than always descending. Up direction
     // gets 0% weight — it's only ever picked as a last resort if no other
     // direction has any valid candidate.
+    //
+    // Geology signal also bumps the weight of any direction whose best
+    // candidate scans dense ore: a strong vein off to the side can pull
+    // the colony's direction roll toward it, not just the within-direction
+    // exit choice. Without this the rightward / leftward bucket only
+    // wins when the dice land that way; the signal makes that roll more
+    // likely as the rumour intensifies.
     const dirWeights: Array<{ key: string; weight: number }> = [
       { key: "0,1", weight: 50 },   // down
       { key: "1,0", weight: 25 },   // right
       { key: "-1,0", weight: 25 },  // left
     ];
-    const validWeighted = dirWeights.filter((d) => bestByDir.has(d.key));
+    const validWeighted = dirWeights
+      .filter((d) => bestByDir.has(d.key))
+      .map((d) => {
+        const cand = bestByDir.get(d.key)!;
+        const exitX = cand.startX + cand.dx * cand.len;
+        const exitY = cand.startY + cand.dy * cand.len;
+        const ore = this.geologyAttraction(grid, exitX, exitY);
+        return { key: d.key, weight: d.weight + ore * 2 };
+      });
     let chosen: Candidate | undefined;
     if (validWeighted.length > 0) {
       const totalW = validWeighted.reduce((s, d) => s + d.weight, 0);
@@ -949,6 +986,31 @@ export class ColonyPlanner {
     const cavity = new Int32Array(1);
     cavity[0] = (bestTree.y << 16) | bestTree.x;
     return this.commitBlueprint(ctx, "lumberyard", bestTree.x, bestTree.y, 1, 1, cavity);
+  }
+
+  /** Geology signal — count solid Ore + Gem tiles within
+   * GEOLOGY_SCAN_RADIUS of (x, y). Used to bias corridor placement
+   * toward dense unmined veins so the colony's tunnels follow what
+   * the dwarves can faintly sense. Cheap: a single bounded square
+   * sweep. Gems weight a bit higher than plain ore — a gem cluster
+   * is a stronger draw than the same count of dirt-iron. */
+  private geologyAttraction(grid: import("../world/grid").TileGrid, x: number, y: number): number {
+    let score = 0;
+    const r = GEOLOGY_SCAN_RADIUS;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const tx = x + dx;
+        const ty = y + dy;
+        const t = grid.getTile(tx, ty);
+        if (t === TileType.Ore || t === TileType.Adamantite || t === TileType.VoidOre) {
+          score += 1;
+        } else if (tileIsGem(t)) {
+          score += 2;
+        }
+      }
+    }
+    return score;
   }
 
   /** True if there's a reachable walkable tile within `radius` of (x, y). */
