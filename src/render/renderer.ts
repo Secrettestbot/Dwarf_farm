@@ -146,6 +146,17 @@ export function renderWorld(
     ctx.strokeStyle = "rgba(0,0,0,0.6)";
     ctx.lineWidth = 1;
     ctx.strokeRect(sx + m + 0.5, sy + pt - m * 1.5 + 0.5, pt - m * 2 - 1, m - 1);
+    // Quality glint: items above baseline get a small bright pip on
+    // the corner so masterworks read at a glance. Tier 0 (basic) →
+    // nothing; Fine/Superior/Exceptional/Masterwork get progressively
+    // brighter golden pips. GDD §6.3 quality tiers.
+    const q = it.quality ?? 0;
+    if (q > 0 && pt >= 8) {
+      const pipColors = ["", "#d8b870", "#e6c878", "#f0d880", "#ffe890"];
+      ctx.fillStyle = pipColors[Math.min(4, q)];
+      const ps = Math.max(2, Math.floor(pt * 0.18));
+      ctx.fillRect(sx + pt - ps - 1, sy + 1, ps, ps);
+    }
   }
 
   // Hostiles below dwarves so dwarves draw over them in melee.
