@@ -51,6 +51,13 @@ export interface Stockpile {
    * Cutting). Trade-good with no in-game consumer yet beyond the
    * trade caravan. */
   cut_gems: number;
+  /** Loose wood logs — output of logging surface trees, future input
+   * to the Carpenter's Workshop. Counter mirrors what's in the
+   * stockpile after haulers deposit logs. */
+  wood: number;
+  /** Sawn planks — Carpenter's Workshop output (GDD §7.1). Future
+   * construction material; for now just accumulates. */
+  planks: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -113,6 +120,8 @@ export class SimWorld {
     meals: 0,
     blocks: 0,
     cut_gems: 0,
+    wood: 0,
+    planks: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-

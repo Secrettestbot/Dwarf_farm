@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -95,6 +95,16 @@ export const RECIPES: Partial<Record<BlueprintKind, Recipe>> = {
     ticks: 110,
     skill: "jewelling",
     station: TileType.JewellerStation,
+  },
+  carpenter: {
+    verb: "saws planks",
+    inputKind: "wood",
+    inputQty: 1,
+    outputKind: "planks",
+    outputQty: 2, // a single log saws into two planks
+    ticks: 70,
+    skill: "carpentry",
+    station: TileType.CarpenterStation,
   },
 };
 

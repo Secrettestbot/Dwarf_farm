@@ -1987,6 +1987,7 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "tools") return "tools";
   if (resource === "drink") return "drink";
   if (resource === "meals") return "meal";
+  if (resource === "wood") return "wood";
   return null;
 }
 
@@ -2111,6 +2112,7 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     else if (carrying.kind === "food") sim.stockpile.food++;
     else if (carrying.kind === "drink") sim.stockpile.drink++;
     else if (carrying.kind === "meal") sim.stockpile.meals++;
+    else if (carrying.kind === "wood") sim.stockpile.wood++;
   }
   sim.carrying.remove(e);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
@@ -2173,18 +2175,30 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       sim.pathing.remove(e);
       return;
     }
-    sim.grid.setTile(job.targetX, job.targetY, TileType.CorridorFloor);
+    // Trees leave Grass behind (the surface stays surface), every other
+    // mineable tile becomes a CorridorFloor. Logging awards carpentry XP
+    // since the cut is the carpenter's craft, not a miner's. The wood
+    // log drops as a haulable item the same way ore does.
+    const postMineTile =
+      tileType === TileType.Tree ? TileType.Grass : TileType.CorridorFloor;
+    sim.grid.setTile(job.targetX, job.targetY, postMineTile);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
     sim.releaseMineTarget(job.targetX, job.targetY);
-    // Grant mining XP and announce tier crossings ("become a Skilled Miner").
-    awardSkillXp(sim, e, "mining", 1);
+    if (tileType === TileType.Tree) {
+      awardSkillXp(sim, e, "carpentry", 1);
+    } else {
+      // Grant mining XP and announce tier crossings ("become a Skilled Miner").
+      awardSkillXp(sim, e, "mining", 1);
+    }
 
     // Drop the rock as a haulable item on the freshly-excavated tile.
     // A separate hauler job picks it up later and carries it to the
     // stockpile. The first-strike narration still fires the moment the
     // ore is broken.
     let itemKind: import("./ecs/components").ItemKind | null = null;
-    if (tileType === TileType.Ore) {
+    if (tileType === TileType.Tree) {
+      itemKind = "wood";
+    } else if (tileType === TileType.Ore) {
       itemKind = "ore";
       if (!sim.oreEverStruck) {
         sim.oreEverStruck = true;

@@ -23,6 +23,8 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   pump_station: { fill: "rgba(60, 130, 170, 0.12)", stroke: "rgba(90, 160, 200, 0.65)" },
   mason: { fill: "rgba(140, 140, 160, 0.12)", stroke: "rgba(170, 170, 190, 0.65)" },
   jeweller: { fill: "rgba(180, 130, 220, 0.12)", stroke: "rgba(200, 160, 240, 0.7)" },
+  carpenter: { fill: "rgba(180, 130, 70, 0.12)", stroke: "rgba(200, 150, 90, 0.7)" },
+  lumberyard: { fill: "rgba(90, 160, 70, 0.18)", stroke: "rgba(120, 200, 100, 0.75)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -131,6 +133,7 @@ export function renderWorld(
       it.kind === "food" ? "#9ad3a3" :
       it.kind === "drink" ? "#8aa9ff" :
       it.kind === "meal" ? "#e0c080" :
+      it.kind === "wood" ? "#a87838" :
       "#8a6a4a";
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);
@@ -197,5 +200,7 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "pump_station": return "pump";
     case "mason": return "mason";
     case "jeweller": return "jeweller";
+    case "carpenter": return "carpenter";
+    case "lumberyard": return "tree";
   }
 }

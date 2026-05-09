@@ -138,6 +138,34 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
   // soil before opening into the chamber so the entrance reads as deliberate.
   const spawnX = Math.floor(width / 2);
   const spawnY = surfaceY[spawnX] + 2;
+
+  // Surface clearing around the entrance: a flat shelf of Grass with a
+  // scatter of Tree tiles. Gives the colony a visible source of wood
+  // before the carpenter's workshop comes online. Flatten any terrain
+  // above the spawn-row in this strip so the clearing reads as a
+  // deliberate cleared area rather than a bumpy hillside.
+  const clearY = surfaceY[spawnX];
+  const clearHalf = 12;
+  for (let dx = -clearHalf; dx <= clearHalf; dx++) {
+    const cx = spawnX + dx;
+    if (cx < 0 || cx >= width) continue;
+    for (let y = 0; y < clearY; y++) grid.setTile(cx, y, TileType.Air);
+    grid.setTile(cx, clearY, TileType.Grass);
+  }
+  // Trees: deterministic noise scatters them across the clearing.
+  // Avoid placing one over the entrance shaft itself so dwarves can
+  // descend cleanly without immediately tripping on a tree.
+  const treeSeed = seed ^ 0x71ee_71ee;
+  for (let dx = -clearHalf; dx <= clearHalf; dx++) {
+    const cx = spawnX + dx;
+    if (cx < 0 || cx >= width) continue;
+    if (cx === spawnX || cx === spawnX + 1) continue;
+    const n = noise2(treeSeed, cx * 0.45, 0);
+    if (n > 0.25) {
+      grid.setTile(cx, clearY, TileType.Tree);
+    }
+  }
+
   // Entrance shaft (a 2-wide stair down into the soil cap).
   carveRect(grid, spawnX, surfaceY[spawnX], 2, spawnY - surfaceY[spawnX] + 1, TileType.CorridorFloor);
   // Founders' chamber: 13×4 cavern just below.

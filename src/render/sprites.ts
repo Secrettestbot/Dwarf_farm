@@ -42,7 +42,7 @@ function paintFromRows(rows: string[]): HTMLCanvasElement | OffscreenCanvas {
 
 // Tile sprite definitions. Pixel grid: '.' / '0' = transparent, hex digit =
 // palette index. 16 rows × 16 cols.
-const TILE_PIXELS: Record<TileType, string[]> = {
+const TILE_PIXELS: Partial<Record<TileType, string[]>> = {
   [TileType.Air]: rep("0", 16, 16),
   [TileType.Dirt]: noisyFill(5, 4),
   [TileType.Sand]: noisyFill(7, 6),
@@ -59,7 +59,55 @@ const TILE_PIXELS: Record<TileType, string[]> = {
   [TileType.Bin]: binSprite(),
   [TileType.Memorial]: memorialSprite(),
   [TileType.FarmTile]: farmSprite(),
+  [TileType.Grass]: grassSprite(),
+  [TileType.Tree]: treeSprite(),
 };
+
+/** Surface grass: green-tinted earth dotted with brighter sprout pixels.
+ * Distinct from the dirt cap so the player can read where the colony's
+ * outdoor clearing ends. */
+function grassSprite(): string[] {
+  const base = noisyFill(2, 4); // dark earth + soil
+  const sprouts: Array<[number, number]> = [
+    [2, 3], [6, 5], [11, 4], [14, 7], [4, 9], [9, 11], [13, 13], [3, 14],
+  ];
+  for (const [x, y] of sprouts) {
+    base[y] = base[y].substring(0, x) + "C" + base[y].substring(x + 1);
+  }
+  return base;
+}
+
+/** Surface tree: brown trunk centred under a green canopy. Eight rows
+ * of dappled foliage, four of bark — the kind of pixel-tree silhouette
+ * a sawyer aims their axe at. */
+function treeSprite(): string[] {
+  const rows: string[] = [];
+  for (let y = 0; y < 16; y++) {
+    let row = "";
+    for (let x = 0; x < 16; x++) {
+      // Canopy: a fat ellipse from row 0 to 9 covering most columns.
+      const cx = 7.5;
+      const cy = 4.5;
+      const dx = (x - cx) / 7;
+      const dy = (y - cy) / 4.5;
+      const inCanopy = dx * dx + dy * dy < 1;
+      // Trunk: 2 cols wide at rows 9-15.
+      const inTrunk = y >= 9 && (x === 7 || x === 8);
+      if (inTrunk) {
+        row += y === 15 ? "1" : "5"; // dirt-brown trunk; dark base
+      } else if (inCanopy) {
+        // Speckled canopy: alternate sprout green and granite-shadow for
+        // depth.
+        const k = (x * 5 + y * 3) & 7;
+        row += k < 2 ? "1" : "C";
+      } else {
+        row += "0";
+      }
+    }
+    rows.push(row);
+  }
+  return rows;
+}
 
 /** Farm: dark tilled-soil base with bright green crop tufts and dark
  * furrow lines, deliberately distinct from plain dirt at the surface. */

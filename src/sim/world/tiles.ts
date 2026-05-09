@@ -95,6 +95,17 @@ export const enum TileType {
    * §10.2 Tier 3 Gem Cutting). Cuts rough gems into cut gems for
    * trade and inlay. */
   JewellerStation = 35,
+  /** Surface ground — a walkable patch of grass around the entrance.
+   * Distinct from CavernFloor so the renderer can paint it as an
+   * outdoor tile and worldgen can decide where to seed trees. */
+  Grass = 36,
+  /** A surface tree. Solid like a rock pillar; mining one ("logging")
+   * drops a wood item and leaves Grass behind. The colony's source of
+   * wood for the Carpenter's Workshop. */
+  Tree = 37,
+  /** Carpenter's bench — workstation in a Carpenter's Workshop (GDD
+   * §7.1 / §10.2 Tier 1 Basic Carpentry). Turns logs into planks. */
+  CarpenterStation = 38,
 }
 
 export interface TileInfo {
@@ -142,6 +153,9 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.PumpStation]: { name: "pump", walkable: true, solid: false, color: 0x4080a0 },
   [TileType.MasonStation]: { name: "mason's bench", walkable: true, solid: false, color: 0x9090a0 },
   [TileType.JewellerStation]: { name: "jeweller's bench", walkable: true, solid: false, color: 0xb888d0 },
+  [TileType.Grass]: { name: "grass", walkable: true, solid: false, color: 0x4a8c3a },
+  [TileType.Tree]: { name: "tree", walkable: false, solid: true, color: 0x3a6c28 },
+  [TileType.CarpenterStation]: { name: "carpenter's bench", walkable: true, solid: false, color: 0xc08a4a },
 };
 
 export function tileIsGem(t: number): boolean {

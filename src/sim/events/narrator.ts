@@ -30,6 +30,19 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   mine: "mine",
   farm: "farm",
   stairwell: "stairwell",
+  kitchen: "kitchen",
+  brewery: "brewery",
+  smelter: "smelter",
+  forge: "forge",
+  trade_depot: "trade depot",
+  library: "library",
+  armoury: "armoury",
+  throne_room: "throne room",
+  pump_station: "pump station",
+  mason: "mason's workshop",
+  jeweller: "jeweller's workshop",
+  carpenter: "carpenter's workshop",
+  lumberyard: "lumberyard",
 };
 
 export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): string {
@@ -93,6 +106,10 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A mason's workshop is mapped out ${where}. Rough stone will become block.`;
     case "jeweller":
       return `A jeweller's workshop is sketched ${where}. Rough stones will catch the light.`;
+    case "carpenter":
+      return `A carpenter's workshop is laid out ${where}. The first logs are already on the way.`;
+    case "lumberyard":
+      return `The colony marks a tree for felling on the surface.`;
   }
 }
 
@@ -153,6 +170,10 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The mason's workshop opens ${where}. The first block is cut.`;
     case "jeweller":
       return `The jeweller's workshop opens ${where}. The first cut gem catches the light.`;
+    case "carpenter":
+      return `The carpenter's workshop opens ${where}. The first plank is sawn from a log.`;
+    case "lumberyard":
+      return `A tree falls on the surface. The colony has wood.`;
   }
 }
 

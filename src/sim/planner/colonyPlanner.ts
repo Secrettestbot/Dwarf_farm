@@ -99,6 +99,13 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Jeweller's Workshop: 3×3. Tier 3 Gem Cutting + at least one gem
   // discovered before the architect bothers laying it out.
   jeweller: { w: 3, h: 3, priority: 2 },
+  // Carpenter's Workshop: 3×3 with a bench in the centre. Gated on the
+  // Tier 1 Basic Carpentry research; needs surface trees to feed it.
+  carpenter: { w: 3, h: 3, priority: 2 },
+  // Lumberyard: a single-tile commitment to chop one surface tree.
+  // Width/height get adjusted to 1×1 in placeLumberyard; the entry here
+  // is just for table completeness.
+  lumberyard: { w: 1, h: 1, priority: 3 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -218,6 +225,15 @@ export class ColonyPlanner {
     if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
     if (this.needsMason(ctx) && this.placeRoom(ctx, "mason")) return true;
     if (this.needsJeweller(ctx) && this.placeRoom(ctx, "jeweller")) return true;
+    if (this.needsCarpenter(ctx) && this.placeRoom(ctx, "carpenter")) return true;
+
+    // 2.8 Lumberyard — chop a surface tree any time one is sense-able
+    //     and there's no active lumberyard yet. Cheap, single-tile
+    //     blueprints, so the colony harvests wood as the architect
+    //     spots it. Gated only on having a Carpenter's Workshop or
+    //     basic carpentry research — without somewhere to use the wood,
+    //     felling trees is just clearing.
+    if ((active["lumberyard"] ?? 0) === 0 && this.wantsLumberyard(ctx) && this.placeLumberyard(ctx)) return true;
 
     // 2.9 Stairwell — every few completed rooms the architect drops a
     //     vertical 2×6 shaft so the colony actually descends instead of
@@ -364,6 +380,26 @@ export class ColonyPlanner {
     if (ctx.population < 10) return false;
     if (!(ctx.research?.completed ?? []).includes("gem_cutting")) return false;
     return this.maintainedAndActiveOfKind("jeweller", ctx.tick) === 0;
+  }
+
+  private needsCarpenter(ctx: PlannerContext): boolean {
+    // Carpenter's Workshop is gated on Tier 1 Basic Carpentry. Pop ≥ 6
+    // mirrors the Mason gate — the colony needs the bandwidth to spare
+    // a sawyer.
+    if (ctx.population < 6) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_carpentry")) return false;
+    return this.maintainedAndActiveOfKind("carpenter", ctx.tick) === 0;
+  }
+
+  /** Lumberyards land any time a tree is reachable from the colony's
+   * walkable space. We don't gate on research — chopping wood is just
+   * labour — but if the colony has neither a Carpenter's Workshop nor
+   * the research to build one, suppress new lumberyards so wood
+   * doesn't pile up uselessly. */
+  private wantsLumberyard(ctx: PlannerContext): boolean {
+    const hasCarpenter = this.maintainedAndActiveOfKind("carpenter", ctx.tick) > 0;
+    const willBuildOne = (ctx.research?.completed ?? []).includes("basic_carpentry");
+    return hasCarpenter || willBuildOne;
   }
 
   /**
@@ -756,6 +792,39 @@ export class ColonyPlanner {
       }
     }
     return null;
+  }
+
+  /**
+   * Chop down the nearest reachable tree. The cavity is exactly the
+   * tree tile — no surrounding rock — so the dwarf walks up adjacent,
+   * fells the tree, and the blueprint is done. Closest tree to spawn
+   * wins so the surface clearing doesn't get strip-felled in random
+   * order.
+   */
+  private placeLumberyard(ctx: PlannerContext): Blueprint | null {
+    const { grid } = ctx;
+    let bestTree: { x: number; y: number; score: number } | null = null;
+    for (let y = 0; y < grid.height; y++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (grid.getTile(x, y) !== TileType.Tree) continue;
+        if (this.isClaimed(grid, x, y)) continue;
+        if (!this.tileNearReachable(ctx, x, y, 2)) continue;
+        const dx = x - ctx.spawn.x;
+        const dy = y - ctx.spawn.y;
+        const score = -(dx * dx + dy * dy);
+        if (
+          !bestTree ||
+          score > bestTree.score ||
+          (score === bestTree.score && (y < bestTree.y || (y === bestTree.y && x < bestTree.x)))
+        ) {
+          bestTree = { x, y, score };
+        }
+      }
+    }
+    if (!bestTree) return null;
+    const cavity = new Int32Array(1);
+    cavity[0] = (bestTree.y << 16) | bestTree.x;
+    return this.commitBlueprint(ctx, "lumberyard", bestTree.x, bestTree.y, 1, 1, cavity);
   }
 
   /** True if there's a reachable walkable tile within `radius` of (x, y). */
