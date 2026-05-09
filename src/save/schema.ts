@@ -285,6 +285,10 @@ export interface SaveV1 {
   mayorName?: string;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
+  /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
+   * count rises with each spat. Round-trips so a feud survives a
+   * reload (or a worker catch-up) instead of resetting to peace. */
+  grudges?: Array<{ key: string; count: number; lastIncidentTick: number }>;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

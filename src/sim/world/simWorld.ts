@@ -288,6 +288,14 @@ export class SimWorld {
    * cut down — survival, in this game, is the win condition. */
   voidShadesSlain = 0;
 
+  /** Pairwise grudge ledger keyed by `${minId}:${maxId}` (smaller
+   * entity id first). Each argument bumps the count by 1, each brawl
+   * by 2. The argument system reads back the count so a feuding pair
+   * argues more frequently and can escalate to a brawl even without
+   * a tantrum. Grudges decay slowly so a one-off spat doesn't follow
+   * the dwarves forever. Round-trips through save. */
+  grudges: Map<string, { count: number; lastIncidentTick: number }> = new Map();
+
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
 

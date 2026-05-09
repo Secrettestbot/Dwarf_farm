@@ -60,6 +60,16 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   research: { glyph: "📖", color: "#8aa9ff" },
   pump: { glyph: "≈", color: "#80b0d0" },
   visit_grave: { glyph: "†", color: "#9a8a72" },
+  treat: { glyph: "+", color: "#ffd0d0" },
+};
+
+/** Disease pip colour by kind — the pip is rendered below the dwarf
+ * sprite so an outbreak is legible at a glance even when the camera
+ * is zoomed out. Fades from light cough-yellow to deep wound-red. */
+const DISEASE_PIP: Record<string, string> = {
+  cave_cough: "#d8c060",
+  deep_fever: "#e08840",
+  wound_sickness: "#e04040",
 };
 
 export function renderWorld(
@@ -292,6 +302,20 @@ export function renderWorld(
     const sx = (pos.x - camera.x) * pt + viewW / 2;
     const sy = (pos.y - camera.y) * pt + viewH / 2;
     ctx.drawImage(dwarfSprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
+    // Disease pip — small coloured dot at the dwarf's feet so an
+    // outbreak is visible without opening the inspector. Drawn below
+    // the activity glyph so both can coexist on a sick worker.
+    if (pt >= 4) {
+      const disease = sim.disease.get(id);
+      if (disease) {
+        const colour = DISEASE_PIP[disease.kind] ?? "#e04040";
+        const r = Math.max(1, Math.floor(pt / 6));
+        ctx.fillStyle = colour;
+        ctx.beginPath();
+        ctx.arc(sx + pt / 2, sy + pt - r, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     // Activity glyph above the dwarf.
     if (pt >= 8) {
       const job = sim.job.get(id);

@@ -145,6 +145,30 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     return null;
   }
 
+  // 4.7 Treat a sick patient on a hospital cot. Sits above farm tending
+  //     and other work — a plague spreads faster than a fallow plot
+  //     starves the colony. Only fires for dwarves with at least
+  //     Apprentice-level medicine; the patient must already be on a
+  //     Hospital cot (their own findSleepTarget routed them there); and
+  //     no other medic is already on the way. Walks adjacent to the
+  //     patient and stays until the disease clears.
+  if (age >= MIN_WORK_AGE) {
+    const selfDw = sim.dwarf.get(e);
+    if (selfDw && (selfDw.skills.medicine ?? 1) >= MEDIC_MIN_SKILL) {
+      const patient = findPatientForTreatment(sim, e, pos.x, pos.y);
+      if (patient !== -1) {
+        const ppos = sim.position.get(patient)!;
+        return {
+          kind: "treat" as JobKind,
+          targetX: ppos.x,
+          targetY: ppos.y,
+          progress: 0,
+          partnerId: patient,
+        };
+      }
+    }
+  }
+
   // 5. Tend a farm cell that's getting close to fallow. Higher priority
   //    than mining because a colony with no food loses fast — but lower
   //    than survival needs above. Children skip it. Gated by the Farming
@@ -304,6 +328,53 @@ const GRAVE_VISIT_MORALE_THRESHOLD = 65;
 /** One in-game season between visits — once a quarter is the
  * natural mourning rhythm. */
 const GRAVE_VISIT_COOLDOWN_TICKS = 60 * 24 * 6; // ~6 in-game days
+/** Minimum medicine skill to count as a medic. Apprentice-tier (4) is
+ * the bar — a colony usually has at least one capable healer once it
+ * grows past the founders. Below this, a dwarf stays out of the
+ * hospital and the patient lies on the cot recovering passively. */
+const MEDIC_MIN_SKILL = 4;
+
+/** Find a sick dwarf lying on a Hospital cot who isn't already being
+ * treated by another medic. Returns the patient's entity id, or -1 if
+ * none is available. The medic walks adjacent to the patient and
+ * begins a `treat` job — the disease system credits the medic's
+ * supervised progress while they stay put. */
+function findPatientForTreatment(
+  sim: SimWorld,
+  medic: EntityId,
+  sx: number,
+  sy: number,
+): EntityId {
+  // Patients already claimed by an in-flight treat job.
+  const claimed = new Set<EntityId>();
+  const jEnts = sim.job.entities;
+  for (let i = 0; i < jEnts.length; i++) {
+    const j = sim.job.get(jEnts[i]);
+    if (!j || j.kind !== "treat") continue;
+    if (j.partnerId !== undefined && jEnts[i] !== medic) {
+      claimed.add(j.partnerId);
+    }
+  }
+  let best = -1;
+  let bestDist = Infinity;
+  const sick = sim.disease.entities;
+  for (let i = 0; i < sick.length; i++) {
+    const id = sick[i];
+    if (id === medic) continue; // a medic can't treat themselves
+    if (claimed.has(id)) continue;
+    const ppos = sim.position.get(id);
+    if (!ppos) continue;
+    if (sim.grid.getTile(ppos.x, ppos.y) !== TileType.HospitalBed) continue;
+    const dx = ppos.x - sx;
+    const dy = ppos.y - sy;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist || (d === bestDist && id < best)) {
+      best = id;
+      bestDist = d;
+    }
+  }
+  return best;
+}
 
 /**
  * Find the nearest walkable cavity tile inside a *neglected* completed room

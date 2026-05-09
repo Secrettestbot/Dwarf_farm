@@ -11,6 +11,7 @@ import { EntityId } from "../sim/ecs/world";
 import { TRAITS_BY_ID } from "../sim/dwarves/traits";
 import { SKILLS_BY_ID, skillTierLabel, SkillId } from "../sim/dwarves/skills";
 import { progressInLevel } from "../sim/dwarves/skillProgress";
+import { grudgeCount } from "../sim/sim";
 
 const ACTIVITY_LABEL: Record<string, string> = {
   mine: "mining",
@@ -18,6 +19,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
   socialise: "talking with another dwarf",
   wander: "wandering",
   visit_grave: "standing at a grave",
+  treat: "treating a patient",
 };
 
 export class DwarfInspector {
@@ -138,6 +140,7 @@ export class DwarfInspector {
     const diseaseLine = disease
       ? `<div style="margin-top:4px;font-size:11px;color:#ff7060;">Ill: ${diseaseLabel(disease.kind)}</div>`
       : "";
+    const grudgesLine = grudgesFor(sim, this.targetId);
 
     const health = sim.health.get(this.targetId);
     const hpHtml = health
@@ -172,6 +175,7 @@ export class DwarfInspector {
       ${kingLine}
       ${mayorLine}
       ${diseaseLine}
+      ${grudgesLine}
       ${militaryLine}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${hpHtml}
@@ -321,6 +325,33 @@ function diseaseLabel(kind: string): string {
   if (kind === "deep_fever") return "deep fever";
   if (kind === "wound_sickness") return "wound sickness";
   return kind;
+}
+
+/** Render the inspected dwarf's strongest grudges as a one-line
+ * social tag in the inspector. Hidden when nobody holds a grudge
+ * with this dwarf. The intensity word ("annoyed by", "feuding
+ * with", "blood enemy") tracks the count so the player can see a
+ * dispute escalate at a glance. */
+function grudgesFor(sim: import("../sim/world/simWorld").SimWorld, self: number): string {
+  const entries: Array<{ name: string; count: number }> = [];
+  for (const [key] of sim.grudges) {
+    const [a, b] = key.split(":").map(Number);
+    if (a !== self && b !== self) continue;
+    const otherId = a === self ? b : a;
+    const count = grudgeCount(sim, self, otherId);
+    if (count <= 0) continue;
+    const dw = sim.dwarf.get(otherId);
+    if (!dw) continue;
+    entries.push({ name: dw.name, count });
+  }
+  if (entries.length === 0) return "";
+  entries.sort((x, y) => y.count - x.count || x.name.localeCompare(y.name));
+  const top = entries.slice(0, 3);
+  const parts = top.map((e) => {
+    const word = e.count >= 6 ? "blood enemy of" : e.count >= 3 ? "feuding with" : "annoyed by";
+    return `${word} <span style="color:#ddd;">${escapeHtml(e.name)}</span>`;
+  });
+  return `<div style="margin-top:4px;font-size:11px;color:#c08080;">${parts.join("; ")}</div>`;
 }
 
 function moraleLabel(v: number): string {
