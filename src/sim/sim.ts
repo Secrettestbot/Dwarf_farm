@@ -883,16 +883,26 @@ function diseaseSystem(sim: SimWorld): void {
       const eff = dw ? effectsFor(dw.traitIds) : null;
       const drain = Math.max(1, Math.round(def.drain * (eff && eff.needDecay > 1 ? 0.5 : 1)));
       hp.hp = Math.max(0, hp.hp - drain);
-      // Recovery: if the dwarf is resting on a Hospital cot and a
-      // skilled medic is on duty, accumulate treatProgress. Below
-      // the bed bar they recover much more slowly — basically only
-      // by trait-driven natural healing.
+      // If the disease drove HP to zero, the dwarf dies of it. The
+      // chronicle gets a specific cause line; killDwarf handles
+      // burial + memorial as usual.
+      if (hp.hp <= 0) {
+        killDwarf(sim, id, def.label);
+        continue;
+      }
+      // Recovery: if the dwarf is on a Hospital cot (the room marker
+      // for medical care) and not actively walking somewhere else,
+      // they are considered "in treatment" — a medic on duty applies
+      // their skill toward the cure. Sleeping in a regular bed gives
+      // a small recovery bonus too.
       const pos = sim.position.get(id);
       const job = sim.job.get(id);
+      const path = sim.pathing.get(id);
       const onCot = pos ? sim.grid.getTile(pos.x, pos.y) === TileType.HospitalBed : false;
       const sleeping = job?.kind === "sleep";
+      const stationary = !path || path.pathIndex >= path.path.length - 1;
       let progress = 0;
-      if (onCot && sleeping) {
+      if (onCot && stationary) {
         const medic = findBestMedic(sim);
         if (medic !== -1 && medic !== id) {
           const medDw = sim.dwarf.get(medic);
@@ -901,6 +911,9 @@ function diseaseSystem(sim: SimWorld): void {
           progress = 1 + Math.floor((medSkill - 1) / 4);
           // Award medicine XP for active treatment.
           awardSkillXp(sim, medic, "medicine", 1);
+        } else {
+          // Lying on the cot without a medic is still better than nothing.
+          progress = 1;
         }
       } else if (sleeping) {
         // A bed (any kind) helps a little even without a medic.
@@ -1039,6 +1052,12 @@ function argumentSystem(sim: SimWorld): void {
             "crisis",
             `${aDw.name} strikes ${vDw.name} in their fury. The colony watches in silence.`,
           );
+          // If the victim dropped to zero HP, the brawl killed them.
+          // killDwarf records it with a specific cause so the
+          // chronicle reads as homicide rather than vague death.
+          if (vHp && vHp.hp <= 0) {
+            killDwarf(sim, victim, `struck dead by ${aDw.name}`);
+          }
         }
         continue;
       }
@@ -1142,6 +1161,15 @@ function passiveTraitSystem(sim: SimWorld): void {
         if (!n) continue;
         n.morale = Math.min(100, n.morale + 1);
       }
+    } else {
+      // Mayor passed away. Strip the title with a chronicle line; the
+      // next yearly tick of mayorSystem picks a successor.
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${sim.mayorName} is dead. The Mayor's seat is empty until the next year's recognition.`,
+      );
+      sim.mayorName = "";
     }
   }
   // King aura: a stronger fortress-wide bump than the mayor. The

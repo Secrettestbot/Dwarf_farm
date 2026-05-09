@@ -110,7 +110,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   const health = sim.health.get(e);
   const wounded = health !== undefined && health.hp < health.maxHp * WOUNDED_HP_RATIO;
   if ((needs && needs.sleep <= SLEEP_CRITICAL) || wounded) {
-    const sleepSpot = findSleepTarget(sim, pos.x, pos.y);
+    const sleepSpot = findSleepTarget(sim, pos.x, pos.y, e);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
     }
@@ -124,7 +124,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   const isNight = hour < NIGHT_END_HOUR || hour >= NIGHT_START_HOUR;
   const restThreshold = NIGHT_REST_THRESHOLD * (sim.sliders.rest * 1.4 + 0.3);
   if (isNight && needs && needs.sleep <= restThreshold) {
-    const sleepSpot = findSleepTarget(sim, pos.x, pos.y);
+    const sleepSpot = findSleepTarget(sim, pos.x, pos.y, e);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
     }
@@ -409,7 +409,20 @@ function findRoomTarget(
 }
 
 /** Best tile to sleep at: a bedroom anywhere first, then nearby walkable. */
-function findSleepTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+function findSleepTarget(sim: SimWorld, sx: number, sy: number, e?: EntityId): { x: number; y: number } | null {
+  // A sick or wounded dwarf prefers a Hospital cot if one is
+  // reachable — that's where their disease can be cured by a medic
+  // or their wound healed at the boosted rate. Healthy dwarves go
+  // to a bedroom as before.
+  if (e !== undefined) {
+    const ill = sim.disease.has(e);
+    const hp = sim.health.get(e);
+    const wounded = hp !== undefined && hp.hp < hp.maxHp * WOUNDED_HP_RATIO;
+    if (ill || wounded) {
+      const cot = findRoomTarget(sim, "hospital", sx, sy);
+      if (cot) return cot;
+    }
+  }
   return findRoomTarget(sim, "bedroom", sx, sy) ?? findRestSpot(sim, sx, sy);
 }
 

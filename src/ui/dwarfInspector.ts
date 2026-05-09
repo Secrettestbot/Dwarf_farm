@@ -191,7 +191,24 @@ export class DwarfInspector {
         if (!next || !next.trim()) return;
         const trimmed = next.trim().slice(0, 40);
         if (trimmed === target.name) return;
+        const oldName = target.name;
         target.name = trimmed;
+        // Update cached name references so the rename doesn't leave
+        // dangling lookups that would falsely report the mayor /
+        // king dead next tick. Pet ownerName is updated for tame
+        // pets pointing at this dwarf so chronicle lines read with
+        // the new name. Historical records (parentNames, graves,
+        // artifacts, books) intentionally stay locked to who the
+        // dwarf was at the time.
+        if (sim.mayorName === oldName) sim.mayorName = trimmed;
+        if (sim.kingName === oldName) sim.kingName = trimmed;
+        const petEnts = sim.pet.entities;
+        for (let i = 0; i < petEnts.length; i++) {
+          const pet = sim.pet.get(petEnts[i]);
+          if (pet && pet.ownerId === this.targetId) {
+            pet.ownerName = trimmed;
+          }
+        }
         // Re-render so the new name lands without waiting for the
         // next per-frame update tick.
         this.update(sim);
