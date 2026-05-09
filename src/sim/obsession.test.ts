@@ -11,10 +11,14 @@ describe("Obsessive (GDD §6.5)", () => {
     const id = sim.spawnDwarf({
       name: "Fixated", x: w.spawn.x, y: w.spawn.y, age: 30, traitIds: ["obsessive"],
     });
-    // 2% per day means ~7 obsessions per in-game year on average;
-    // give it a few years to land at least one regardless of seed.
+    // 2% per day means ~7 obsessions per in-game year on average. The
+    // pre-existing 144-day window gave ~6% chance of no obsession by
+    // pure variance, which would flake any time another system shifted
+    // aiRng consumption (e.g. the planner adding a new corridor
+    // weighting). 2 in-game years (730 days) drives P(no obsession)
+    // below 10^-6 — well under the regression noise floor.
     let entered = false;
-    for (let i = 0; i < TICKS_PER_DAY * 24 * 6 && !entered; i++) {
+    for (let i = 0; i < TICKS_PER_DAY * 365 * 2 && !entered; i++) {
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
       const hp = sim.health.get(id);
