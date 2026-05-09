@@ -2308,8 +2308,11 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
   const dw = sim.dwarf.get(e);
   const skill = dw?.skills.scholarship ?? 1;
   const traitBonus = dw ? effectsFor(dw.traitIds).scholarshipBonus : 0;
-  // 1 base + 0.04 per effective level above novice.
-  const ticksThisStep = 1 + Math.max(0, skill + traitBonus - 1) * 0.04;
+  // 1 base + 0.04 per effective level above novice. Plus 1% per
+  // book on the library's shelves — the colony's accumulated
+  // tradition speeds each new study slightly.
+  const libraryBonus = 1 + sim.books.length * 0.01;
+  const ticksThisStep = (1 + Math.max(0, skill + traitBonus - 1) * 0.04) * libraryBonus;
   sim.research.progress += ticksThisStep;
   awardSkillXp(sim, e, "scholarship", 1);
   const topic = TOPICS_BY_ID[sim.research.current];
@@ -2322,10 +2325,47 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
       "milestone",
       `Research complete: ${topic.name}. The colony's understanding deepens.`,
     );
+    // Book: the scholar who finished the topic writes a treatise on
+    // it. The library accumulates these volumes; future research
+    // gets a small speed bonus per book on the shelves.
+    if (dw) {
+      const title = coinBookTitle(sim, topic.name);
+      sim.books.push({
+        title,
+        topicId: topic.id,
+        authorName: dw.name,
+        writtenAtTick: sim.tick,
+      });
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} writes ${title}, a treatise on ${topic.name.toLowerCase()}. The library has ${sim.books.length} ${sim.books.length === 1 ? "volume" : "volumes"} now.`,
+      );
+    }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
   }
+}
+
+/** Generate a book title for a completed research topic. Pattern is
+ * adjective + topic-derived noun ("On the Foundations of Iron",
+ * "The Quiet Cuts", "Notes on the Deep Hammer"). */
+const BOOK_TITLE_PREFIXES = [
+  "On the", "The", "Notes on", "Treatise on", "Of the", "A Study of",
+];
+const BOOK_TITLE_ADJECTIVES = [
+  "Quiet", "Deep", "First", "Last", "Old", "Bright", "Sharp",
+  "Patient", "Careful", "Hidden", "Plain",
+];
+function coinBookTitle(sim: SimWorld, topicName: string): string {
+  const prefix = BOOK_TITLE_PREFIXES[sim.aiRng.nextRange(0, BOOK_TITLE_PREFIXES.length)];
+  const adj = BOOK_TITLE_ADJECTIVES[sim.aiRng.nextRange(0, BOOK_TITLE_ADJECTIVES.length)];
+  // Pull the topic's last meaningful word (e.g. "Stonecutting" from
+  // "Basic Stonecutting") to use as the noun.
+  const words = topicName.split(/[\s:&]+/).filter(Boolean);
+  const noun = words[words.length - 1] ?? "Craft";
+  return `${prefix} ${adj} ${noun}`;
 }
 
 /** Soldier engagement: stand adjacent to the target hostile tick after

@@ -254,6 +254,13 @@ export interface SaveV1 {
     createdTick: number;
   }>;
   artifactsNextId?: number;
+  /** Library registry — books the colony's scholars have written. */
+  books?: Array<{
+    title: string;
+    topicId: string;
+    authorName: string;
+    writtenAtTick: number;
+  }>;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

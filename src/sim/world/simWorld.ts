@@ -42,6 +42,16 @@ export interface Artifact {
   createdTick: number;
 }
 
+/** A book written by a scholar in the library when a research topic
+ * completes. The colony's accumulated body of work — future
+ * scholarship draws on it. */
+export interface Book {
+  title: string;
+  topicId: string;
+  authorName: string;
+  writtenAtTick: number;
+}
+
 export interface Stockpile {
   /** Generic ore tally — any TileType.Ore mined. Later sessions split into
    * iron / copper / silver / gold etc. */
@@ -250,6 +260,13 @@ export class SimWorld {
    * itself doesn't gate on artifacts. */
   artifacts: Artifact[] = [];
   artifactsNextId = 1;
+
+  /** Library registry — when research completes, the scholar who
+   * finished it writes a book about the topic. Pure history: future
+   * scholars who study at a desk get a small XP boost based on the
+   * library's size, and the inspector shows a "Library: N books"
+   * line. */
+  books: Book[] = [];
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */
