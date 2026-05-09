@@ -1162,6 +1162,11 @@ function bumpAllMorale(sim: SimWorld, amount: number): void {
 
 function farmSystem(sim: SimWorld): void {
   if (sim.tick % FARM_TICK_INTERVAL !== 0) return;
+  // Underground Agriculture (Tier 2): once researched, the farm yield
+  // chance climbs 50%. The same untended-cell rule still applies, so
+  // the boost only lands where the colony's actually doing the work.
+  const undergroundAg = sim.research.completed.includes("underground_agriculture");
+  const yieldChance = FARM_YIELD_CHANCE * (undergroundAg ? 1.5 : 1);
   for (const b of sim.planner.blueprints) {
     if (b.kind !== "farm") continue;
     if (b.status !== "complete") continue;
@@ -1175,7 +1180,7 @@ function farmSystem(sim: SimWorld): void {
       // dwarf returns to work them.
       const tendedAt = b.cellTendedAt[i];
       if (tendedAt < 0 || sim.tick - tendedAt > FARM_TEND_VALIDITY_TICKS) continue;
-      if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE) {
+      if (sim.aiRng.nextFloat() < yieldChance) {
         // Drop a raw food item on the cell. A hauler routes it to a
         // kitchen (cooked meals), brewery (ale), or stockpile in
         // priority order. Cap stacking on a single cell so an
@@ -2075,6 +2080,12 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     // forge stocks the armoury). Otherwise credit the global counter
     // — food, drink, and other counter-only resources still flow that
     // way until they earn their own ItemKinds.
+    // Steel Alloying (Tier 2) lifts the smelter's bar yield from 1 to
+    // 2 per ore — the colony has learned to fold its bars properly.
+    let outputQty = recipe.outputQty;
+    if (blueprintKind === "smelter" && sim.research.completed.includes("steel_alloying")) {
+      outputQty *= 2;
+    }
     const outAsItem = outputAsItemKind(recipe.outputKind);
     if (outAsItem) {
       // Roll output quality from the crafter's skill — Skilled+ smiths
@@ -2084,13 +2095,22 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       // Elders craft to a higher tier — the slower-but-wiser side of
       // the GDD §6.1 lifecycle. +1 quality on every output.
       const elderBias = isElder(sim, e) ? 1 : 0;
+      // Research-driven quality bonuses: Tier-3 Weaponsmithing lifts
+      // forge output by a full tier, Tier-4 Advanced Metallurgy adds
+      // another to smelter and forge bars. Stacking is intentional —
+      // a dwarf at the legendary forge with both topics complete
+      // produces masterworks the same way an elder does.
+      let researchBias = 0;
+      const completed = sim.research.completed;
+      if (blueprintKind === "forge" && completed.includes("weaponsmithing")) researchBias++;
+      if ((blueprintKind === "forge" || blueprintKind === "smelter") && completed.includes("advanced_metallurgy")) researchBias++;
       const baseQuality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
-      const quality = Math.max(0, Math.min(4, baseQuality + traitBias + elderBias));
-      for (let i = 0; i < recipe.outputQty; i++) {
+      const quality = Math.max(0, Math.min(4, baseQuality + traitBias + elderBias + researchBias));
+      for (let i = 0; i < outputQty; i++) {
         sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y, quality });
       }
     } else {
-      sim.stockpile[recipe.outputKind] += recipe.outputQty;
+      sim.stockpile[recipe.outputKind] += outputQty;
     }
     awardSkillXp(sim, e, recipe.skill, 1);
     // Workshop-firsts as named GDD milestones — Iron Mountain (first

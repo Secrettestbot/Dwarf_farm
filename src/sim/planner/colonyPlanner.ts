@@ -306,12 +306,19 @@ export class ColonyPlanner {
   }
 
   private needsKitchen(ctx: PlannerContext): boolean {
+    // Tier 1 Basic Cooking gates the Kitchen — the colony has to know
+    // how to cook before the architect lays out a kitchen. Founders'
+    // starter cache feeds them through the early research window.
     if (ctx.population < 5) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_cooking")) return false;
     return this.maintainedAndActiveOfKind("kitchen", ctx.tick) === 0;
   }
 
   private needsBrewery(ctx: PlannerContext): boolean {
+    // Tier 1 Basic Brewing gates the Brewery. Same reasoning as the
+    // kitchen — the founders' cellar lasts until research lands.
     if (ctx.population < 5) return false;
+    if (!(ctx.research?.completed ?? []).includes("basic_brewing")) return false;
     return this.maintainedAndActiveOfKind("brewery", ctx.tick) === 0;
   }
 
