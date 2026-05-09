@@ -68,6 +68,17 @@ describe("trait rolling", () => {
     }
   });
 
+  it("guarantees every rolled trait is mechanical — no flavour-only picks", () => {
+    const rng = Rng.fromSeed(13);
+    for (let trial = 0; trial < 50; trial++) {
+      const traits = rollTraits(rng.fork(`t${trial}`), 4);
+      for (const t of traits) {
+        // mechanical defaults to true (only flavour-only traits set false).
+        expect(t.mechanical !== false).toBe(true);
+      }
+    }
+  });
+
   it("suggestSwaps returns 3 unique alternatives that don't conflict with retained traits", () => {
     const rng = Rng.fromSeed(11);
     const baseline = rollTraits(rng.fork("base"), 3);

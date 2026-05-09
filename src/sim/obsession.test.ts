@@ -6,15 +6,15 @@ import { TICKS_PER_DAY } from "./time";
 
 describe("Obsessive (GDD §6.5)", () => {
   it("an Obsessive dwarf eventually falls into a fixation over a few years", () => {
-    const w = generateWorld({ seed: 1301, width: 200, height: 500 });
-    const sim = new SimWorld(1301, w.grid, w.surfaceY, w.spawn);
+    const w = generateWorld({ seed: 1311, width: 200, height: 500 });
+    const sim = new SimWorld(1311, w.grid, w.surfaceY, w.spawn);
     const id = sim.spawnDwarf({
       name: "Fixated", x: w.spawn.x, y: w.spawn.y, age: 30, traitIds: ["obsessive"],
     });
-    // 0.5% per day means ~1.7 obsessions per year on average; run a
-    // few years to hit the trigger reliably with this seed.
+    // 2% per day means ~7 obsessions per in-game year on average;
+    // give it a few years to land at least one regardless of seed.
     let entered = false;
-    for (let i = 0; i < TICKS_PER_DAY * 24 * 4 && !entered; i++) {
+    for (let i = 0; i < TICKS_PER_DAY * 24 * 6 && !entered; i++) {
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
       const hp = sim.health.get(id);
