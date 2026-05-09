@@ -1,5 +1,5 @@
 import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
-import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying, Squad, Equipment, Fury, Obsession } from "../ecs/components";
+import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying, Squad, Equipment, Fury, Obsession, Tantrum } from "../ecs/components";
 import { effectsFor } from "../dwarves/traitEffects";
 import { Rng } from "../rng";
 import { TileGrid } from "./grid";
@@ -137,6 +137,7 @@ export class SimWorld {
   readonly equipment: ComponentStore<Equipment>;
   readonly fury: ComponentStore<Fury>;
   readonly obsession: ComponentStore<Obsession>;
+  readonly tantrum: ComponentStore<Tantrum>;
 
   // Forked RNG streams.
   readonly aiRng: Rng;
@@ -282,6 +283,7 @@ export class SimWorld {
     this.equipment = new ComponentStore(maxEntities);
     this.fury = new ComponentStore(maxEntities);
     this.obsession = new ComponentStore(maxEntities);
+    this.tantrum = new ComponentStore(maxEntities);
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");
@@ -309,6 +311,10 @@ export class SimWorld {
      * founder or migrant). Defaults to false — birthDwarf overrides it
      * to true. Round-trips through save. */
     bornInColony?: boolean;
+    /** Names of mother and father — stored on the Dwarf for the
+     * inspector to render the family tree. Founders / migrants leave
+     * this undefined. */
+    parentNames?: [string, string];
   }): EntityId {
     const e = this.ecs.create();
     this.position.set(e, { x: spec.x, y: spec.y });
@@ -324,6 +330,7 @@ export class SimWorld {
       partnerId: null,
       lastJobTick: 0,
       bornInColony: spec.bornInColony ?? false,
+      parentNames: spec.parentNames,
     });
     const effects = effectsFor(spec.traitIds ?? []);
     const maxHp = Math.max(20, Math.round(DWARF_BASE_MAX_HP * effects.hpScale));

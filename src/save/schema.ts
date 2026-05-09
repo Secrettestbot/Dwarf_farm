@@ -44,6 +44,8 @@ export interface SavedDwarf {
   lostPartnerGrave?: { x: number; y: number };
   /** Tick of the last grave visit. */
   lastGraveVisitTick?: number;
+  /** Mother + father names, set for colony-born dwarves. */
+  parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
     kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
@@ -74,6 +76,9 @@ export interface SavedDwarf {
   /** Active Obsessive fixation, if any. Round-trips so a saved
    * fortress reopens with the dwarf still grinding the same skill. */
   obsession?: { skillId: string; endsAtTick: number };
+  /** Active tantrum (broken-morale state), if any. Round-trips so
+   * a save mid-breakdown restores the same state. */
+  tantrum?: { startedAtTick: number; endsAtTick: number };
 }
 
 /** A loose item on the floor — dropped by mining or by a workshop,

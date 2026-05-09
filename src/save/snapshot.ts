@@ -64,6 +64,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     const squad = sim.squad.get(id);
     const equipment = sim.equipment.get(id);
     const obsession = sim.obsession.get(id);
+    const tantrum = sim.tantrum.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -78,6 +79,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       lastJobTick: dw.lastJobTick,
       lostPartnerGrave: dw.lostPartnerGrave ? { ...dw.lostPartnerGrave } : undefined,
       lastGraveVisitTick: dw.lastGraveVisitTick,
+      parentNames: dw.parentNames ? [dw.parentNames[0], dw.parentNames[1]] : undefined,
       health: h
         ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick, wasSevereWound: h.wasSevereWound }
         : undefined,
@@ -101,6 +103,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
       equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
       obsession: obsession ? { skillId: obsession.skillId, endsAtTick: obsession.endsAtTick } : undefined,
+      tantrum: tantrum ? { startedAtTick: tantrum.startedAtTick, endsAtTick: tantrum.endsAtTick } : undefined,
     });
   });
 
@@ -290,6 +293,7 @@ export function restore(save: SaveV1): SimWorld {
       age: d.age,
       initialNeeds: d.needs,
       bornInColony: d.bornInColony ?? false,
+      parentNames: d.parentNames ? [d.parentNames[0], d.parentNames[1]] : undefined,
     });
     const restoredDw = sim.dwarf.get(e)!;
     restoredDw.lastJobTick = d.lastJobTick ?? 0;
@@ -338,6 +342,9 @@ export function restore(save: SaveV1): SimWorld {
     }
     if (d.obsession) {
       sim.obsession.set(e, { skillId: d.obsession.skillId, endsAtTick: d.obsession.endsAtTick });
+    }
+    if (d.tantrum) {
+      sim.tantrum.set(e, { startedAtTick: d.tantrum.startedAtTick, endsAtTick: d.tantrum.endsAtTick });
     }
   }
 

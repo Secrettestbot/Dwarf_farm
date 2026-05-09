@@ -46,6 +46,14 @@ export interface Dwarf {
    * stand at the headstone every hour — once per in-game season is
    * the natural rhythm. */
   lastGraveVisitTick?: number;
+  /** Names of this dwarf's mother and father. Set by birthDwarf for
+   * colony-born children; undefined for founders + migrants whose
+   * lineage isn't recorded. Names (not entity ids) because parents
+   * may die and entity ids get reused, while names are stable
+   * within a colony's run. The dwarf inspector uses this to render
+   * a small family tree (parents alive / deceased, plus siblings
+   * computed by matching parentNames). */
+  parentNames?: [string, string];
 }
 
 export interface Pathing {
@@ -172,6 +180,21 @@ export interface Obsession {
    * incoming skill matches. */
   skillId: string;
   /** Tick at which the obsession ends and the component is removed. */
+  endsAtTick: number;
+}
+
+/** Tantrum (GDD §6.4 broken-morale state): a dwarf with sustained
+ * very-low morale snaps and refuses productive work for several
+ * in-game days. While set, chooseTask skips the work branches —
+ * they can still eat, drink, sleep, and wander — and the chronicle
+ * notes the breakdown. The component clears once morale rises back
+ * above a recovery threshold or the timer elapses. */
+export interface Tantrum {
+  /** Tick at which the tantrum began. Used to enforce a minimum
+   * duration so a one-tick morale spike doesn't immediately undo
+   * the breakdown. */
+  startedAtTick: number;
+  /** Tick at which the tantrum naturally ends regardless of morale. */
   endsAtTick: number;
 }
 

@@ -132,6 +132,19 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   const age = sim.ageOf(e);
 
+  // 4.5 Tantrum: a dwarf in breakdown skips every work branch below.
+  //     Survival needs above already fired (eat / drink / sleep /
+  //     wounded / shelter / engage). Below this point we go straight
+  //     to wander — the broken dwarf just paces.
+  const inTantrum = sim.tantrum.has(e);
+  if (inTantrum) {
+    const wanderTarget = pickWanderTarget(sim, pos.x, pos.y);
+    if (wanderTarget) {
+      return { kind: "wander" as JobKind, targetX: wanderTarget.x, targetY: wanderTarget.y, progress: 0 };
+    }
+    return null;
+  }
+
   // 5. Tend a farm cell that's getting close to fallow. Higher priority
   //    than mining because a colony with no food loses fast — but lower
   //    than survival needs above. Children skip it. Gated by the Farming

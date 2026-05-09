@@ -115,6 +115,7 @@ export function tick(sim: SimWorld): void {
   specialTraitSystem(sim);
   passiveTraitSystem(sim);
   furyEndSystem(sim);
+  tantrumSystem(sim);
   engravingSystem(sim);
   floodSystem(sim);
   depthMilestoneSystem(sim);
@@ -306,6 +307,79 @@ function furyEndSystem(sim: SimWorld): void {
       f.used = true;
     }
     sim.fury.remove(id);
+  }
+}
+
+// ---- Tantrums (GDD §6.4 broken state) --------------------------------
+//
+// A dwarf whose morale stays at the bottom of the gauge eventually
+// breaks: they stop taking productive work, wander aimlessly, and
+// grieve openly. Sleep, eat, drink, and shelter override (survival
+// can't be skipped) but mining, hauling, crafting, etc., are gated
+// out by the chooseTask check on sim.tantrum. The breakdown lasts
+// at least TANTRUM_MIN_DURATION; recovery requires morale climbing
+// back above TANTRUM_RECOVERY_MORALE.
+
+/** Below this morale value, the daily roll has a chance of starting
+ * a tantrum. */
+const TANTRUM_TRIGGER_MORALE = 8;
+/** Daily probability per qualifying dwarf. Tuned so a colony in
+ * sustained crisis sees frequent breakdowns; one bad day rarely
+ * triggers. */
+const TANTRUM_DAILY_CHANCE = 0.25;
+/** Minimum tantrum duration in ticks. Even if morale spikes, the
+ * dwarf needs this long to settle. */
+const TANTRUM_MIN_DURATION = TICKS_PER_DAY;
+/** Maximum tantrum duration. After this they snap out regardless. */
+const TANTRUM_MAX_DURATION = TICKS_PER_DAY * 4;
+/** Once the dwarf's morale is back above this, they recover (after
+ * the minimum duration has elapsed). */
+const TANTRUM_RECOVERY_MORALE = 40;
+
+function tantrumSystem(sim: SimWorld): void {
+  // Recovery / expiration loop — runs every tick.
+  const onTantrum = sim.tantrum.entities.slice();
+  for (const id of onTantrum) {
+    const t = sim.tantrum.get(id);
+    if (!t) continue;
+    const minMet = sim.tick - t.startedAtTick >= TANTRUM_MIN_DURATION;
+    const maxMet = sim.tick >= t.endsAtTick;
+    const needs = sim.needs.get(id);
+    const recovered = minMet && needs && needs.morale >= TANTRUM_RECOVERY_MORALE;
+    if (maxMet || recovered) {
+      const dw = sim.dwarf.get(id);
+      if (dw) {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `${dw.name} comes back to themselves. The breakdown has passed.`,
+        );
+      }
+      sim.tantrum.remove(id);
+    }
+  }
+  // Trigger roll — once per in-game day.
+  if (sim.tick === 0 || sim.tick % TICKS_PER_DAY !== 0) return;
+  const dwarves = sim.dwarf.entities;
+  for (let i = 0; i < dwarves.length; i++) {
+    const id = dwarves[i];
+    if (sim.tantrum.has(id)) continue;
+    const needs = sim.needs.get(id);
+    if (!needs) continue;
+    if (needs.morale > TANTRUM_TRIGGER_MORALE) continue;
+    if (sim.aiRng.nextFloat() >= TANTRUM_DAILY_CHANCE) continue;
+    sim.tantrum.set(id, {
+      startedAtTick: sim.tick,
+      endsAtTick: sim.tick + TANTRUM_MIN_DURATION + sim.aiRng.nextRange(0, TANTRUM_MAX_DURATION - TANTRUM_MIN_DURATION + 1),
+    });
+    const dw = sim.dwarf.get(id);
+    if (dw) {
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `${dw.name} has broken. They wander the halls muttering, refusing all work.`,
+      );
+    }
   }
 }
 
@@ -1489,7 +1563,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession, sim.tantrum]);
 }
 
 /** Find an empty Grave plot in any complete Cemetery and turn it
@@ -1740,6 +1814,7 @@ function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void
     profession: "Child",
     age: 0,
     bornInColony: true,
+    parentNames: [mother.name, father.name],
   });
   void childId;
   sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));

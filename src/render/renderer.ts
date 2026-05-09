@@ -208,6 +208,37 @@ export function renderWorld(
     }
   }
 
+  // Throne room artifact display: when artifacts exist and a throne
+  // room is built, paint the most recent artifact's name above the
+  // throne tile so the colony's history is visible at a glance.
+  if (sim.artifacts.length > 0 && pt >= 8) {
+    let throneX = -1;
+    let throneY = -1;
+    outer: for (const b of sim.planner.blueprints) {
+      if (b.kind !== "throne_room" || b.status !== "complete") continue;
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        const x = c & 0xffff;
+        const y = (c >>> 16) & 0xffff;
+        if (grid.getTile(x, y) === TileType.Throne) {
+          throneX = x;
+          throneY = y;
+          break outer;
+        }
+      }
+    }
+    if (throneX >= 0 && grid.isSeen(throneX, throneY)) {
+      const tx = (throneX - camera.x) * pt + viewW / 2;
+      const ty = (throneY - camera.y) * pt + viewH / 2;
+      const recent = sim.artifacts[sim.artifacts.length - 1];
+      ctx.fillStyle = "#e0c080";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(recent.name, tx + pt / 2, ty - 4);
+      ctx.textAlign = "start";
+    }
+  }
+
   // Hostiles below dwarves so dwarves draw over them in melee.
   const hostileEnts = sim.hostile.entities;
   for (let i = 0; i < hostileEnts.length; i++) {
