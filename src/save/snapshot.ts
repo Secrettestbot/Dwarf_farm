@@ -177,6 +177,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     hollowKingAware: sim.hollowKingAware,
     hollowKingNightmares: sim.hollowKingNightmares,
     hollowKingLastSiegeTick: sim.hollowKingLastSiegeTick,
+    hollowKingSpawned: sim.hollowKingSpawned,
     voidShadesSlain: sim.voidShadesSlain,
   };
 }
@@ -390,6 +391,7 @@ export function restore(save: SaveV1): SimWorld {
   if (save.hollowKingAware) sim.hollowKingAware = true;
   if (save.hollowKingNightmares !== undefined) sim.hollowKingNightmares = save.hollowKingNightmares;
   if (save.hollowKingLastSiegeTick !== undefined) sim.hollowKingLastSiegeTick = save.hollowKingLastSiegeTick;
+  if (save.hollowKingSpawned) sim.hollowKingSpawned = true;
   if (save.voidShadesSlain !== undefined) sim.voidShadesSlain = save.voidShadesSlain;
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them

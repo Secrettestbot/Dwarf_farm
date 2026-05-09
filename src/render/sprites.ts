@@ -464,12 +464,35 @@ const VOID_SHADE_PIXELS: string[] = [
   "0000000000000000",
 ];
 
+// The Hollow King: hulking, crowned, and wrong. Fills almost the
+// entire 16×16 cell — palette 5 = dusk-purple body, 9 = wine for the
+// crown's accent, 1 = dark outline.
+const HOLLOW_KING_PIXELS: string[] = [
+  "0001500000510000",
+  "0015190000915100",
+  "0015999999951500",
+  "0015999999951500",
+  "0115555555555110",
+  "1555555555555551",
+  "1559155555515951",
+  "1559155555515951",
+  "1555555555555551",
+  "1555515555155551",
+  "1555599999955551",
+  "0155555555555510",
+  "0015551115555100",
+  "0001550000551000",
+  "0001100000110000",
+  "0010000000010000",
+];
+
 const HOSTILE_PIXELS: Record<string, string[]> = {
   cave_rat: CAVE_RAT_PIXELS,
   cave_spider: CAVE_SPIDER_PIXELS,
   goblin_scout: GOBLIN_SCOUT_PIXELS,
   cave_troll: CAVE_TROLL_PIXELS,
   void_shade: VOID_SHADE_PIXELS,
+  hollow_king: HOLLOW_KING_PIXELS,
 };
 
 export function getHostileSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {

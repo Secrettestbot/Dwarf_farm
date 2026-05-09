@@ -5,7 +5,7 @@
 // to bring the combat / hp / death-from-violence loop online; deeper kinds
 // drop in as a data-only addition once the rest is solid.
 
-export type HostileKind = "cave_rat" | "cave_spider" | "goblin_scout" | "cave_troll" | "void_shade";
+export type HostileKind = "cave_rat" | "cave_spider" | "goblin_scout" | "cave_troll" | "void_shade" | "hollow_king";
 
 export interface HostileDef {
   id: HostileKind;
@@ -94,6 +94,22 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 18,
     minDepth: 0,
     pursueRange: 25,
+  },
+  // The Hollow King himself (§9.4). Spawns at most once, and only after
+  // The King's Name research is complete — the colony has to learn his
+  // true name before he can be brought to a fight. Massively higher HP
+  // and damage than any other hostile; defeating him is the GDD's
+  // ultimate "Legend Run" milestone.
+  hollow_king: {
+    id: "hollow_king",
+    name: "the Hollow King",
+    spawnArticle: "the Hollow King",
+    maxHp: 800,
+    damage: 28,
+    attackCooldown: 60,
+    moveCooldown: 30,
+    minDepth: 1601,
+    pursueRange: 40,
   },
 };
 

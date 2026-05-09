@@ -141,6 +141,10 @@ export class SimWorld {
   /** Tick at which the most recent void-shade siege fired. Cooldown
    * keeps the King from sieging continuously. */
   hollowKingLastSiegeTick = 0;
+  /** Set once the Hollow King has manifested as a hostile entity —
+   * the colony researched his true name (Tier 6) and called him to a
+   * fight. Prevents the King from being summoned twice. */
+  hollowKingSpawned = false;
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */

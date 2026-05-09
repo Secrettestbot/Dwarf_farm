@@ -183,21 +183,18 @@ describe("narrative milestones (GDD §10.2)", () => {
     expect(sim.narrativeMilestones.has("the_grand_citadel")).toBe(true);
   });
 
-  it("The Hollow King Falls fires after enough void shades are slain", () => {
+  it("The Siege Endured fires after enough void shades are slain", () => {
     const w = generateWorld({ seed: 823, width: 200, height: 2000 });
     const sim = new SimWorld(823, w.grid, w.surfaceY, w.spawn);
     sim.spawnDwarf({ name: "Slayer", x: w.spawn.x, y: w.spawn.y, age: 30 });
     sim.dwarf.get(sim.dwarf.entities[0])!.skills.military = 18;
     sim.squad.set(sim.dwarf.entities[0], { draftedAtTick: 0 });
     sim.equipment.set(sim.dwarf.entities[0], { weapon: true });
-    // Run void-shade encounters by hand: spawn one adjacent to the
-    // soldier each iteration and let combat resolve.
     for (let n = 0; n < 25; n++) {
       sim.spawnHostile({ kind: "void_shade", x: w.spawn.x + 1, y: w.spawn.y });
       sim.health.set(sim.hostile.entities[sim.hostile.entities.length - 1], {
         hp: 1, maxHp: 90, lastAttackTick: -1000,
       });
-      // Pin the dwarf's HP and needs so they don't die mid-fight.
       const eid = sim.dwarf.entities[0];
       const hp = sim.health.get(eid)!;
       hp.hp = hp.maxHp;
@@ -205,9 +202,63 @@ describe("narrative milestones (GDD §10.2)", () => {
       const need = sim.needs.get(eid)!;
       need.hunger = 100; need.thirst = 100; need.sleep = 100; need.social = 100;
       tick(sim);
+      if (sim.narrativeMilestones.has("the_siege_endured")) break;
+    }
+    expect(sim.narrativeMilestones.has("the_siege_endured")).toBe(true);
+    // The King-Falls milestone must NOT fire just from killing shades.
+    expect(sim.narrativeMilestones.has("the_hollow_king_falls")).toBe(false);
+  });
+
+  it("The Hollow King Falls fires only when the King himself is killed", () => {
+    const w = generateWorld({ seed: 825, width: 200, height: 2000 });
+    const sim = new SimWorld(825, w.grid, w.surfaceY, w.spawn);
+    sim.spawnDwarf({ name: "Champion", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    const eid = sim.dwarf.entities[0];
+    sim.dwarf.get(eid)!.skills.military = 18;
+    sim.squad.set(eid, { draftedAtTick: 0 });
+    sim.equipment.set(eid, { weapon: true });
+    // Manifest the King by hand right next to the champion. (The
+    // research-gated spawn path is exercised separately below.)
+    sim.spawnHostile({ kind: "hollow_king", x: w.spawn.x + 1, y: w.spawn.y });
+    const kingEnt = sim.hostile.entities[sim.hostile.entities.length - 1];
+    sim.health.set(kingEnt, { hp: 1, maxHp: 800, lastAttackTick: -1000 });
+    sim.hollowKingSpawned = true;
+    // Pin the dwarf so the King's blow doesn't kill them on the
+    // counter-strike.
+    const hp = sim.health.get(eid)!;
+    hp.hp = 10000; hp.maxHp = 10000; hp.lastAttackTick = -1000;
+    const need = sim.needs.get(eid)!;
+    need.hunger = 100; need.thirst = 100; need.sleep = 100; need.social = 100;
+    for (let i = 0; i < 200; i++) {
+      tick(sim);
       if (sim.narrativeMilestones.has("the_hollow_king_falls")) break;
+      hp.hp = hp.maxHp;
     }
     expect(sim.narrativeMilestones.has("the_hollow_king_falls")).toBe(true);
+  });
+
+  it("The Hollow King manifests once The King's Name is researched", () => {
+    const w = generateWorld({ seed: 827, width: 200, height: 2000 });
+    const sim = new SimWorld(827, w.grid, w.surfaceY, w.spawn);
+    // Carve a reachable strip into the Underworld so the spawn site
+    // search succeeds. The reachable mask reads from the planner; we
+    // hand-set a connected corridor instead of a real dig.
+    for (let y = sim.spawn.y; y <= sim.spawn.y + 1700; y++) {
+      sim.grid.setTile(sim.spawn.x, y, 7 /* CorridorFloor */);
+    }
+    // Spawn a dwarf in the Underworld so hollowKingAware flips, and
+    // mark the research complete.
+    sim.spawnDwarf({ name: "Voidwalker", x: sim.spawn.x, y: sim.spawn.y + 1700, age: 30 });
+    sim.research.completed.push("the_kings_name");
+    // Run a few ticks: the awakening + manifest run on consecutive
+    // ticks of the same hollowKingSystem-driven flow.
+    for (let i = 0; i < 5; i++) tick(sim);
+    expect(sim.hollowKingSpawned).toBe(true);
+    let kingPresent = false;
+    for (const ent of sim.hostile.entities) {
+      if (sim.hostile.get(ent)?.kind === "hollow_king") kingPresent = true;
+    }
+    expect(kingPresent).toBe(true);
   });
 
   it("Legends of the Deep fires when every drafted soldier has a Legendary skill", () => {

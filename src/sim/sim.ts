@@ -74,6 +74,7 @@ export function tick(sim: SimWorld): void {
   farmSystem(sim);
   tradeSystem(sim);
   hollowKingSystem(sim);
+  hollowKingManifestSystem(sim);
   depthMilestoneSystem(sim);
   plannerMilestoneSystem(sim);
   visibilitySystem(sim);
@@ -102,9 +103,10 @@ const HOLLOW_KING_SIEGE_INTERVAL_TICKS = TICKS_PER_DAY * 4;
 /** How many shades show up at once. Three is a meaningful fight for a
  * mid-game military but not auto-fatal for a prepared one. */
 const HOLLOW_KING_SHADES_PER_SIEGE = 3;
-/** Cumulative void-shade kills the colony needs to end the siege —
- * the GDD's "Survive the Underworld campaign" milestone. With three
- * shades per siege every four in-game days, twenty kills represents
+/** Cumulative void-shade kills the colony needs to fire The Siege
+ * Endured milestone. Defeating the King himself is reserved for
+ * actually putting the hollow_king hostile down. With three shades
+ * per siege every four in-game days, twenty kills represents
  * surviving roughly a season of sustained attacks. */
 const HOLLOW_KING_VICTORY_THRESHOLD = 20;
 
@@ -152,6 +154,41 @@ function hollowKingSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
   spawnVoidShadeSiege(sim);
   sim.hollowKingLastSiegeTick = sim.tick;
+}
+
+/** Phase 3: the King himself. Once the colony researches "The King's
+ * Name" (Tier 6), the King manifests as a hostile entity — only then
+ * can he be brought down. One-shot per fortress: hollowKingSpawned
+ * latches true so a re-load doesn't summon a second King. */
+function hollowKingManifestSystem(sim: SimWorld): void {
+  if (sim.hollowKingSpawned) return;
+  if (!sim.research.completed.includes("the_kings_name")) return;
+  if (!sim.hollowKingAware) return;
+  // Place him at the deepest reachable Underworld tile, away from the
+  // dwarves so the colony has to march out and find him.
+  const reachable = sim.planner.exposeReachable(sim);
+  if (!reachable) return;
+  const grid = sim.grid;
+  const w = grid.width;
+  let candidate: { x: number; y: number } | null = null;
+  let candidateY = -1;
+  for (let i = 0; i < reachable.length; i++) {
+    if (reachable[i] !== 1) continue;
+    const y = (i / w) | 0;
+    if (y - sim.spawn.y < HOLLOW_KING_DEPTH) continue;
+    if (y > candidateY) {
+      candidateY = y;
+      candidate = { x: i % w, y };
+    }
+  }
+  if (!candidate) return;
+  sim.spawnHostile({ kind: "hollow_king", x: candidate.x, y: candidate.y });
+  sim.hollowKingSpawned = true;
+  sim.events.add(
+    sim.tick,
+    "crisis",
+    "The scholars speak the King's true name. Far below, something colossal stands up out of the dark to answer.",
+  );
 }
 
 function deliverNightmare(sim: SimWorld): void {
@@ -2077,17 +2114,26 @@ function combatSystem(sim: SimWorld): void {
           "crisis",
           narrateHostileSlain(sim.aiRng, dwarfName, def.name),
         );
-        // Track void-shade kills toward The Hollow King Falls milestone
-        // — the GDD's "Survive the Underworld campaign" beat.
+        // Track void-shade kills toward The Siege Endured milestone —
+        // surviving the King's emissaries. Defeating the King himself
+        // is a separate beat, gated on the actual hollow_king hostile
+        // (spawned by Tier-6 research) being put down.
         if (hostile.kind === "void_shade") {
           sim.voidShadesSlain++;
           if (sim.voidShadesSlain >= HOLLOW_KING_VICTORY_THRESHOLD) {
             fireMilestone(
               sim,
-              "the_hollow_king_falls",
-              "The Hollow King Falls. The colony has cut down enough of the King's emissaries to end the siege. The dreams stop.",
+              "the_siege_endured",
+              "The Siege Endured. The colony has put down enough of the King's emissaries that the night feels quieter. The dreams thin out.",
             );
           }
+        }
+        if (hostile.kind === "hollow_king") {
+          fireMilestone(
+            sim,
+            "the_hollow_king_falls",
+            "The Hollow King Falls. The King is dead. The mountain is the dwarves' alone, for as long as anyone remembers.",
+          );
         }
         sim.ecs.destroy(h, [sim.position, sim.hostile, sim.health]);
       }
