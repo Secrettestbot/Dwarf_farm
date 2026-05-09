@@ -55,6 +55,20 @@ export interface TraitEffects {
    * dwarf within LEADER_AURA_RADIUS. Natural Leader sets +1, Antagonistic
    * sets -1. */
   auraMorale: number;
+  /** Night-Owl flag: true means the dwarf works full speed at night
+   * and 20% slower during day. The actual workSpeed bonus is applied
+   * at the use site, not folded into the static workSpeed field, so
+   * it can read the current in-game hour. */
+  nightOwl: boolean;
+  /** Empathetic flag: morale drifts toward the average of nearby
+   * dwarves' moods. */
+  empathetic: boolean;
+  /** Phobia: Open Spaces — morale penalty in rooms larger than the
+   * GDD threshold (10×10). */
+  phobiaOpen: boolean;
+  /** Ambidextrous: equipped soldiers gain a small extra damage bonus
+   * — wielding two weapons in combat per the GDD. */
+  ambidextrous: boolean;
 }
 
 export function defaultEffects(): TraitEffects {
@@ -76,6 +90,10 @@ export function defaultEffects(): TraitEffects {
     distractChance: 0,
     tradeBonus: 0,
     auraMorale: 0,
+    nightOwl: false,
+    empathetic: false,
+    phobiaOpen: false,
+    ambidextrous: false,
   };
 }
 
@@ -184,6 +202,18 @@ function applyTraitEffects(e: TraitEffects, id: string): void {
       // Better trade outcomes (GDD §6.5 — also lifts tavern morale,
       // which lands when the tavern arrives).
       e.tradeBonus = 0.15;
+      break;
+    case "night_owl":
+      e.nightOwl = true;
+      break;
+    case "empathetic":
+      e.empathetic = true;
+      break;
+    case "phobia_open":
+      e.phobiaOpen = true;
+      break;
+    case "ambidextrous":
+      e.ambidextrous = true;
       break;
     case "iron_constitution":
       e.needDecay *= 1.3; // 30% slower decay

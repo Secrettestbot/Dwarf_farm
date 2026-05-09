@@ -5,7 +5,7 @@ import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing } from "./ecs/components";
 import { EntityId } from "./ecs/world";
 import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival } from "./events/narrator";
-import { TICKS_PER_YEAR, TICKS_PER_DAY } from "./time";
+import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
 import { levelFromXp } from "./dwarves/skillProgress";
@@ -267,6 +267,65 @@ function passiveTraitSystem(sim: SimWorld): void {
     if (pos.y - sim.spawn.y < 300) continue;
     const n = sim.needs.get(id);
     if (n) n.morale = Math.max(0, n.morale - 2);
+  }
+  // Phobia: Open Spaces pass — being in a room larger than ~10×10
+  // tiles costs morale (GDD §6.5). Counts cavity area, not bounding
+  // rect, so a long thin corridor doesn't trigger.
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw || !effectsFor(dw.traitIds).phobiaOpen) continue;
+    const pos = sim.position.get(id);
+    if (!pos) continue;
+    let inLargeRoom = false;
+    for (const b of sim.planner.blueprints) {
+      if (b.status !== "complete") continue;
+      if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+      if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+      if (b.cavity.length > 100) inLargeRoom = true;
+      break;
+    }
+    if (!inLargeRoom) continue;
+    const n = sim.needs.get(id);
+    if (n) n.morale = Math.max(0, n.morale - 2);
+  }
+  // Empathetic pass — morale drifts toward the average of nearby
+  // dwarves' moods. Single-pass: read everyone's current morale,
+  // compute deltas, then write. (Snapshotting first keeps the math
+  // order-independent so it's deterministic.)
+  const empaths: EntityId[] = [];
+  for (const id of ents) {
+    const dw = sim.dwarf.get(id);
+    if (!dw || !effectsFor(dw.traitIds).empathetic) continue;
+    empaths.push(id);
+  }
+  if (empaths.length > 0) {
+    const moraleSnapshot = new Map<EntityId, number>();
+    for (const id of ents) {
+      const n = sim.needs.get(id);
+      if (n) moraleSnapshot.set(id, n.morale);
+    }
+    for (const id of empaths) {
+      const pos = sim.position.get(id);
+      if (!pos) continue;
+      let sum = 0; let count = 0;
+      for (const other of ents) {
+        if (other === id) continue;
+        const op = sim.position.get(other);
+        if (!op) continue;
+        const dx = op.x - pos.x;
+        const dy = op.y - pos.y;
+        if (dx * dx + dy * dy > LEADER_AURA_RADIUS * LEADER_AURA_RADIUS) continue;
+        const m = moraleSnapshot.get(other);
+        if (m === undefined) continue;
+        sum += m; count++;
+      }
+      if (count === 0) continue;
+      const avg = sum / count;
+      const my = moraleSnapshot.get(id) ?? 50;
+      const drift = Math.sign(avg - my);
+      const n = sim.needs.get(id);
+      if (n) n.morale = Math.max(0, Math.min(100, n.morale + drift));
+    }
   }
 }
 
@@ -1813,7 +1872,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     }
   }
   const dw = sim.dwarf.get(e);
-  const traitSpeed = dw ? effectsFor(dw.traitIds).workSpeed : 1;
+  const traitSpeed = effectiveWorkSpeed(sim, e);
   job.progress += traitSpeed;
   // Skill scales work speed: each level above Novice shaves 4% off ticks.
   const skillLevel = dw?.skills[recipe.skill] ?? 1;
@@ -1873,6 +1932,22 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "drink") return "drink";
   if (resource === "meals") return "meal";
   return null;
+}
+
+/** Trait-modulated work speed at the current in-game hour. Folds in
+ * the static trait workSpeed plus any time-of-day flags (Night Owl
+ * gets full speed at night, 0.8× during the day per GDD §6.5). */
+function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
+  const dw = sim.dwarf.get(dwarfId);
+  if (!dw) return 1;
+  const eff = effectsFor(dw.traitIds);
+  let speed = eff.workSpeed;
+  if (eff.nightOwl) {
+    const hour = (sim.tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
+    const isNight = hour < 6 || hour >= 22;
+    speed *= isNight ? 1.0 : 0.8;
+  }
+  return speed;
 }
 
 /** Roll a quality tier (0..4: basic / Fine / Superior / Exceptional /
@@ -2017,8 +2092,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   // Trait-driven work pace — Diligent / Lazy / Efficient / Perfectionist
   // scale how fast progress accrues per tick.
-  const dwM = sim.dwarf.get(e);
-  const mineSpeed = dwM ? effectsFor(dwM.traitIds).workSpeed : 1;
+  const mineSpeed = effectiveWorkSpeed(sim, e);
   job.progress += mineSpeed;
   if (job.progress >= MINE_TICKS) {
     // What was the rock made of? Determines stockpile credit.
@@ -2636,12 +2710,14 @@ function combatSystem(sim: SimWorld): void {
       const equipped = equipment?.weapon === true;
       const weaponQuality = equipment?.weaponQuality ?? 0;
       const inFury = sim.fury.has(target);
+      const ambidextrous = dwarf ? effectsFor(dwarf.traitIds).ambidextrous : false;
       const damage =
         DWARF_BASE_DAMAGE +
         Math.floor((military - 1) / 2) +
         (isSoldier ? 5 : 0) +
         (equipped ? 8 : 0) +
         (equipped ? weaponQuality * 2 : 0) + // Fine +2, Masterwork +8 (§6.3).
+        (equipped && ambidextrous ? 4 : 0) + // Two-weapon flourish (GDD §6.5).
         (inFury ? 30 : 0); // The Fury: huge bonus, hostiles fall fast.
       hHealth.hp -= damage;
       if (hHealth.hp <= 0) {

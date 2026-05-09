@@ -109,6 +109,35 @@ describe("more wired traits (GDD §6.5)", () => {
     expect(sim.needs.get(bystander)!.morale).toBeLessThan(80);
   });
 
+  it("Night Owl, Empathetic, Phobia: Open Spaces, Ambidextrous each set their flag", () => {
+    expect(effectsFor(["night_owl"]).nightOwl).toBe(true);
+    expect(effectsFor(["empathetic"]).empathetic).toBe(true);
+    expect(effectsFor(["phobia_open"]).phobiaOpen).toBe(true);
+    expect(effectsFor(["ambidextrous"]).ambidextrous).toBe(true);
+  });
+
+  it("an Empathetic dwarf's morale drifts toward their neighbours' average", () => {
+    const w = generateWorld({ seed: 1213, width: 200, height: 500 });
+    const sim = new SimWorld(1213, w.grid, w.surfaceY, w.spawn);
+    const empath = sim.spawnDwarf({
+      name: "Mirror", x: w.spawn.x, y: w.spawn.y, age: 30, traitIds: ["empathetic"],
+    });
+    sim.spawnDwarf({ name: "Cheery1", x: w.spawn.x + 1, y: w.spawn.y, age: 30 });
+    sim.spawnDwarf({ name: "Cheery2", x: w.spawn.x + 2, y: w.spawn.y, age: 30 });
+    sim.needs.get(empath)!.morale = 30;
+    // Pin neighbours at 90 morale each tick so the average is high.
+    for (let i = 0; i < 60; i++) {
+      const ents = sim.dwarf.entities;
+      for (const id of ents) {
+        if (id === empath) continue;
+        const n = sim.needs.get(id);
+        if (n) n.morale = 90;
+      }
+      tick(sim);
+    }
+    expect(sim.needs.get(empath)!.morale).toBeGreaterThan(30);
+  });
+
   it("a Slow dwarf takes fewer steps than the path length over a fixed window", () => {
     const w = generateWorld({ seed: 1209, width: 200, height: 500 });
     const sim = new SimWorld(1209, w.grid, w.surfaceY, w.spawn);
