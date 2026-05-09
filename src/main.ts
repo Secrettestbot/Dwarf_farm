@@ -157,13 +157,19 @@ async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Pro
         screen.setProgress(msg.ticksDone, msg.ticksDone + msg.ticksRemaining);
       } else if (msg.type === "DONE") {
         screen.setProgress(ticksToRun, ticksToRun);
-        screen.setStatus("Done. Resuming.");
+        screen.setStatus("Done. Building digest…");
         worker.terminate();
-        setTimeout(() => {
+        // Restore + show the GDD §3.2 digest of what happened. The
+        // chronicle entries from the catch-up window land in the
+        // restored sim; we filter to just the new ones (tick > the
+        // pre-catchup tick from the original save).
+        const sim = restore(msg.save);
+        const beforeTick = save.tick;
+        const digestEvents = sim.events.events.filter((e) => e.tick > beforeTick);
+        screen.showDigest(digestEvents, () => {
           screen.close();
-          const sim = restore(msg.save);
           resolve(sim);
-        }, 200);
+        });
       } else if (msg.type === "ERROR") {
         screen.close();
         worker.terminate();
