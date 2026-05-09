@@ -1397,6 +1397,14 @@ function awardSkillXp(sim: SimWorld, e: EntityId, skill: SkillId, amount: number
   // Obsessive: 2× XP gain on the fixation skill (GDD §6.5).
   const ob = sim.obsession.get(e);
   if (ob && ob.skillId === skill) amount *= 2;
+  // Mentoring (GDD §6.1 elder phase): a young dwarf earning XP in a
+  // skill gets a small boost when an elder in the same skill is in
+  // the colony. Caps at 1.25× so the elders matter without trivialising
+  // the grind.
+  const learnerAge = sim.ageOf(e);
+  if (learnerAge < 30 && (dw.skills[skill] ?? 1) < 13) {
+    if (hasElderMentor(sim, skill)) amount *= 1.25;
+  }
   const oldXp = dw.skillXp[skill] ?? 0;
   const newXp = oldXp + amount;
   dw.skillXp[skill] = newXp;
@@ -2073,8 +2081,11 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       // produce Fine bars, Legendary smiths produce Masterworks (GDD §6.3).
       // A Perfectionist's roll lands one tier higher.
       const traitBias = dw ? effectsFor(dw.traitIds).qualityBias : 0;
+      // Elders craft to a higher tier — the slower-but-wiser side of
+      // the GDD §6.1 lifecycle. +1 quality on every output.
+      const elderBias = isElder(sim, e) ? 1 : 0;
       const baseQuality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
-      const quality = Math.max(0, Math.min(4, baseQuality + traitBias));
+      const quality = Math.max(0, Math.min(4, baseQuality + traitBias + elderBias));
       for (let i = 0; i < recipe.outputQty; i++) {
         sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y, quality });
       }
@@ -2120,9 +2131,34 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   return null;
 }
 
+/** Age (in years) at which a dwarf enters the Elder phase — slower
+ * but wiser per GDD §6.1. Elders craft to a higher tier on average
+ * but lose a notch of work speed. */
+const ELDER_AGE = 90;
+
+function isElder(sim: SimWorld, e: EntityId): boolean {
+  return sim.ageOf(e) >= ELDER_AGE;
+}
+
+/** True iff there's a living Elder in the colony at Skilled+ in the
+ * given skill. Mentoring boost in awardSkillXp gates on this so the
+ * elder phase actually transmits expertise to the next generation. */
+function hasElderMentor(sim: SimWorld, skill: SkillId): boolean {
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const id = ents[i];
+    const dw = sim.dwarf.get(id);
+    if (!dw) continue;
+    if (sim.ageOf(id) < ELDER_AGE) continue;
+    if ((dw.skills[skill] ?? 1) >= 9) return true; // Skilled or higher
+  }
+  return false;
+}
+
 /** Trait-modulated work speed at the current in-game hour. Folds in
  * the static trait workSpeed plus any time-of-day flags (Night Owl
- * gets full speed at night, 0.8× during the day per GDD §6.5). */
+ * gets full speed at night, 0.8× during the day per GDD §6.5). Elders
+ * also work 15% slower — the cost of the wisdom bonus. */
 function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
   const dw = sim.dwarf.get(dwarfId);
   if (!dw) return 1;
@@ -2132,6 +2168,9 @@ function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
     const hour = (sim.tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
     const isNight = hour < 6 || hour >= 22;
     speed *= isNight ? 1.0 : 0.8;
+  }
+  if (isElder(sim, dwarfId)) {
+    speed *= 0.85;
   }
   return speed;
 }
