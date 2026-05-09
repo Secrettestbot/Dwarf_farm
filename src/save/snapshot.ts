@@ -76,6 +76,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       bornInColony: dw.bornInColony,
       partnerIndex,
       lastJobTick: dw.lastJobTick,
+      lostPartnerGrave: dw.lostPartnerGrave ? { ...dw.lostPartnerGrave } : undefined,
+      lastGraveVisitTick: dw.lastGraveVisitTick,
       health: h
         ? { hp: h.hp, maxHp: h.maxHp, lastAttackTick: h.lastAttackTick, wasSevereWound: h.wasSevereWound }
         : undefined,
@@ -289,7 +291,10 @@ export function restore(save: SaveV1): SimWorld {
       initialNeeds: d.needs,
       bornInColony: d.bornInColony ?? false,
     });
-    sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
+    const restoredDw = sim.dwarf.get(e)!;
+    restoredDw.lastJobTick = d.lastJobTick ?? 0;
+    if (d.lostPartnerGrave) restoredDw.lostPartnerGrave = { ...d.lostPartnerGrave };
+    if (d.lastGraveVisitTick !== undefined) restoredDw.lastGraveVisitTick = d.lastGraveVisitTick;
     spawnedEntities.push(e);
   }
   // Re-apply in-flight job + pathing components, plus partnerships, so the

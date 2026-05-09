@@ -17,6 +17,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
   sleep: "sleeping",
   socialise: "talking with another dwarf",
   wander: "wandering",
+  visit_grave: "standing at a grave",
 };
 
 export class DwarfInspector {

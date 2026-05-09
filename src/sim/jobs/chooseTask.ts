@@ -246,6 +246,35 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 8.5 Visit a buried partner's grave. Survivors with a recorded
+  //     lostPartnerGrave occasionally walk to the headstone to think,
+  //     pay respects, mourn quietly. Gated on morale (only when
+  //     they're not feeling great) and a once-per-season cooldown
+  //     so the dwarf doesn't loiter at the cemetery indefinitely.
+  if (
+    age >= MIN_WORK_AGE &&
+    sim.dwarf.get(e)?.lostPartnerGrave &&
+    needs && needs.morale < GRAVE_VISIT_MORALE_THRESHOLD
+  ) {
+    const dw = sim.dwarf.get(e)!;
+    const last = dw.lastGraveVisitTick ?? -GRAVE_VISIT_COOLDOWN_TICKS;
+    if (sim.tick - last >= GRAVE_VISIT_COOLDOWN_TICKS) {
+      const grave = dw.lostPartnerGrave!;
+      // Verify the headstone is still there — if the cemetery was
+      // dug out or somehow lost the tile, skip the visit and the
+      // next chooseTask runs without trying again. (Grave tiles
+      // never decay back, but defensive code is cheap.)
+      if (sim.grid.getTile(grave.x, grave.y) === TileType.Headstone) {
+        return {
+          kind: "visit_grave" as JobKind,
+          targetX: grave.x,
+          targetY: grave.y,
+          progress: 0,
+        };
+      }
+    }
+  }
+
   // 9. Wander: pick a random reachable walkable tile.
   const wanderTarget = pickWanderTarget(sim, pos.x, pos.y);
   if (wanderTarget) {
@@ -254,6 +283,14 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   return null;
 }
+
+/** Below this morale threshold, a survivor with a recorded lost
+ * partner walks to the grave. Above it, they're keeping their grief
+ * to themselves. */
+const GRAVE_VISIT_MORALE_THRESHOLD = 65;
+/** One in-game season between visits — once a quarter is the
+ * natural mourning rhythm. */
+const GRAVE_VISIT_COOLDOWN_TICKS = 60 * 24 * 6; // ~6 in-game days
 
 /**
  * Find the nearest walkable cavity tile inside a *neglected* completed room

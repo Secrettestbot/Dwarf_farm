@@ -40,9 +40,13 @@ export interface SavedDwarf {
     decayAccumThirst?: number;
     decayAccumMorale?: number;
   };
+  /** Coordinates of a buried former partner, or undefined if none. */
+  lostPartnerGrave?: { x: number; y: number };
+  /** Tick of the last grave visit. */
+  lastGraveVisitTick?: number;
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
     targetX: number;
     targetY: number;
     progress: number;

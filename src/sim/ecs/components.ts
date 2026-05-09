@@ -36,6 +36,16 @@ export interface Dwarf {
    * fortress. Optional in saved data: older saves treat everyone as
    * not-born-in-colony, which is the conservative default. */
   bornInColony: boolean;
+  /** Grave coordinates of a former partner, or null. Set in killDwarf
+   * when the partner is buried in a Cemetery; consulted in chooseTask
+   * so the survivor pays their respects when morale dips. Cleared
+   * when the survivor pairs with someone new (their grief has eased
+   * enough to bond again). */
+  lostPartnerGrave?: { x: number; y: number };
+  /** Tick of the last grave visit. Cooldown so the survivor doesn't
+   * stand at the headstone every hour — once per in-game season is
+   * the natural rhythm. */
+  lastGraveVisitTick?: number;
 }
 
 export interface Pathing {
@@ -165,7 +175,7 @@ export interface Obsession {
   endsAtTick: number;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump";
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
 
 export interface JobAssignment {
   kind: JobKind;

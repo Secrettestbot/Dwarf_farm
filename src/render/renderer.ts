@@ -59,6 +59,7 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   engage: { glyph: "⚔", color: "#e0c080" },
   research: { glyph: "📖", color: "#8aa9ff" },
   pump: { glyph: "≈", color: "#80b0d0" },
+  visit_grave: { glyph: "†", color: "#9a8a72" },
 };
 
 export function renderWorld(

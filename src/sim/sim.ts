@@ -1523,6 +1523,16 @@ function buryDwarf(sim: SimWorld, dw: import("./ecs/components").Dwarf, age: num
     deathTick: sim.tick,
     cause,
   });
+  // If this dwarf had a partner who's still alive, record the grave
+  // location on the survivor so chooseTask can route them to pay
+  // respects when their morale dips. The partnerId reference is
+  // already cleared by the bereavement branch above; we passed `dw`
+  // (the deceased's component) into this helper so the partnerId
+  // there is the survivor's id.
+  if (dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId)) {
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (partner) partner.lostPartnerGrave = { x: plot.x, y: plot.y };
+  }
   sim.events.add(
     sim.tick,
     "social",
@@ -2095,7 +2105,64 @@ function workSystem(sim: SimWorld): void {
       case "pump":
         progressPump(sim, e, job, pos);
         break;
+      case "visit_grave":
+        progressVisitGrave(sim, e, job, pos);
+        break;
     }
+  }
+}
+
+/** Stand at a buried partner's headstone for a measured moment of
+ * mourning. Morale ticks up a small amount — grief processed in
+ * proximity to the dead — and the chronicle records the visit on
+ * arrival. The dwarf moves on after the visit completes. */
+const VISIT_GRAVE_TICKS = 60; // one in-game hour
+const VISIT_GRAVE_MORALE_BUMP = 8;
+function progressVisitGrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  const dx = Math.abs(pos.x - job.targetX);
+  const dy = Math.abs(pos.y - job.targetY);
+  if (dx > 1 || dy > 1) {
+    // Not yet adjacent — pathing system is still walking us. Wait.
+    return;
+  }
+  const tile = sim.grid.getTile(job.targetX, job.targetY);
+  if (tile !== TileType.Headstone) {
+    // Grave got dug up or the cemetery was destroyed somehow. Bail.
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  if (job.progress === 0) {
+    // First tick — log the visit. Look up the buried name from the
+    // colony registry so the line reads as personal rather than
+    // generic.
+    const dw = sim.dwarf.get(e);
+    let buriedName: string | null = null;
+    for (const g of sim.graves) {
+      if (g.x === job.targetX && g.y === job.targetY) {
+        buriedName = g.name;
+        break;
+      }
+    }
+    if (dw && buriedName) {
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} stands at ${buriedName}'s grave for a long while. The mountain is quiet.`,
+      );
+    }
+  }
+  job.progress++;
+  if (job.progress >= VISIT_GRAVE_TICKS) {
+    const needs = sim.needs.get(e);
+    if (needs) {
+      needs.morale = Math.min(100, needs.morale + VISIT_GRAVE_MORALE_BUMP);
+    }
+    const dw = sim.dwarf.get(e);
+    if (dw) dw.lastGraveVisitTick = sim.tick;
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
   }
 }
 
