@@ -830,9 +830,12 @@ function visibilitySystem(sim: SimWorld): void {
   const grid = sim.grid;
   const dwarves = sim.dwarf.entities;
   for (let i = 0; i < dwarves.length; i++) {
-    const pos = sim.position.get(dwarves[i]);
+    const id = dwarves[i];
+    const pos = sim.position.get(id);
     if (!pos) continue;
-    const r = VISIBILITY_RADIUS;
+    // Eagle-Eyed dwarves see further into the fog (GDD §6.5).
+    const dw = sim.dwarf.get(id);
+    const r = dw ? effectsFor(dw.traitIds).visibilityRadius : VISIBILITY_RADIUS;
     const x0 = Math.max(0, pos.x - r);
     const y0 = Math.max(0, pos.y - r);
     const x1 = Math.min(grid.width - 1, pos.x + r);
@@ -993,6 +996,14 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
         "social",
         narrateBereavement(sim.aiRng, partner.name, dw.name, yearsTogether),
       );
+      // Bereavement morale hit, scaled by traits — Loyal grieves
+      // hard, Fickle barely notices (GDD §6.5).
+      const partnerNeeds = sim.needs.get(dw.partnerId);
+      if (partnerNeeds) {
+        const scale = effectsFor(partner.traitIds).bereavementScale;
+        const hit = Math.round(15 * scale);
+        partnerNeeds.morale = Math.max(0, partnerNeeds.morale - hit);
+      }
       partner.partnerId = null;
     }
   }

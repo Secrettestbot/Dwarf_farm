@@ -26,6 +26,12 @@ export interface TraitEffects {
    * Perfectionist's roll lands one tier above the table; -1 would be
    * a sloppy hand. Clamped to the 0..4 range at use site. */
   qualityBias: number;
+  /** Visibility radius in tiles around a dwarf — an Eagle-Eyed scout
+   * sees further into the fog. Read by visibilitySystem each tick. */
+  visibilityRadius: number;
+  /** Bereavement morale hit multiplier. Loyal dwarves take a much
+   * bigger hit when a bonded dwarf dies; Fickle ones barely notice. */
+  bereavementScale: number;
 }
 
 export function defaultEffects(): TraitEffects {
@@ -39,6 +45,8 @@ export function defaultEffects(): TraitEffects {
     smithingBonus: 0,
     scholarshipBonus: 0,
     qualityBias: 0,
+    visibilityRadius: 5,
+    bereavementScale: 1,
   };
 }
 
@@ -83,12 +91,31 @@ function applyTraitEffects(e: TraitEffects, id: string): void {
     case "solitary":
       e.socialMoraleScale = 0;
       break;
+    // Build size — Strong/Slight scale work pace and (later) carry
+    // capacity. workSpeed is the most direct hook today.
+    case "strong":
+      e.workSpeed *= 1.10;
+      break;
+    case "slight":
+      e.workSpeed *= 0.85;
+      break;
     // Constitution
     case "tough":
       e.hpScale *= 1.5;
       break;
     case "frail":
       e.hpScale *= 0.7;
+      break;
+    // Loyalty — affects how hard a partner's death hits the survivor.
+    case "loyal":
+      e.bereavementScale = 2;
+      break;
+    case "fickle":
+      e.bereavementScale = 0.25;
+      break;
+    // Senses
+    case "eagle_eyed":
+      e.visibilityRadius = 8;
       break;
     case "iron_constitution":
       e.needDecay *= 1.3; // 30% slower decay

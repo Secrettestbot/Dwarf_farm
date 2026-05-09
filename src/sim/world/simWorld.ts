@@ -283,7 +283,9 @@ export class SimWorld {
   }
 
   /** Reveal the fog-of-war mask around every living dwarf. Used at game
-   * start so the spawn cavern is visible before the first tick fires. */
+   * start so the spawn cavern is visible before the first tick fires.
+   * Per-dwarf radius is read by the live visibility system; this
+   * helper takes a flat radius for the one-shot reveal. */
   revealAroundDwarves(radius = 5): void {
     const grid = this.grid;
     const ents = this.dwarf.entities;
