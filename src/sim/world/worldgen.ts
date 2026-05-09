@@ -66,9 +66,12 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
           // Stone pockets.
           if (noise2(surfaceSeed + 11, x * 0.13, y * 0.13) > 0.55) t = TileType.Stone;
         } else if (y < 300) {
-          // Shallow earth: stone with occasional ore.
+          // Shallow earth: stone with occasional ore. Pockets of
+          // aquifer rock sit in here per GDD §5.2 — water-saturated
+          // stone the dwarves should be wary of mining.
           t = TileType.Stone;
           if (noise2(oreSeed, x * 0.18, y * 0.18) > 0.62) t = TileType.Ore;
+          if (noise2(oreSeed + 89, x * 0.12, y * 0.12) > 0.78) t = TileType.Aquifer;
         } else if (y < 700) {
           // Deep rock: granite with rare ore and the first silver veins.
           t = TileType.Granite;

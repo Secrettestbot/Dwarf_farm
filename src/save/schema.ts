@@ -198,6 +198,10 @@ export interface SaveV1 {
   hollowKingSpawned?: boolean;
   /** Cumulative void-shade kills toward The Siege Endured milestone. */
   voidShadesSlain?: number;
+  /** Tick at which the colony first breached an aquifer, or null if
+   * no breach has happened yet. Drives the flood spread + Aquifer
+   * Survived milestone window. */
+  aquiferBreachTick?: number;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

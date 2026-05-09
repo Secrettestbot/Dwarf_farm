@@ -77,6 +77,12 @@ export const enum TileType {
    * "The Grand Citadel"). Walkable; rendered as a deep purple to read
    * as ceremonial. Decorative for now — the chair sits where it sits. */
   Throne = 31,
+  /** Aquifer rock — Shallow Earth pocket of stone saturated with
+   * water (GDD §5.2 "aquifer pockets — risky to breach without a
+   * pump room"). Mineable like ore; striking it spawns Water that
+   * spreads into adjacent corridors. The Aquifer Survived milestone
+   * fires once the colony lives through the flood. */
+  Aquifer = 32,
 }
 
 export interface TileInfo {
@@ -120,6 +126,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.ArmouryRack]: { name: "armoury rack", walkable: true, solid: false, color: 0x8090a8 },
   [TileType.Silver]: { name: "silver vein", walkable: false, solid: true, color: 0xd0d8e8 },
   [TileType.Throne]: { name: "throne", walkable: true, solid: false, color: 0x6040a0 },
+  [TileType.Aquifer]: { name: "aquifer", walkable: false, solid: true, color: 0x3a5078 },
 };
 
 export function tileIsGem(t: number): boolean {

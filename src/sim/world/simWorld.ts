@@ -145,6 +145,11 @@ export class SimWorld {
    * the colony researched his true name (Tier 6) and called him to a
    * fight. Prevents the King from being summoned twice. */
   hollowKingSpawned = false;
+  /** Tick at which an aquifer was first breached (GDD §5.2). Drives
+   * the flood-spread system and the Aquifer Survived milestone — if
+   * the colony lives a week past breach without abandoning, the
+   * milestone fires. -1 means no breach has happened yet. */
+  aquiferBreachTick = -1;
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */

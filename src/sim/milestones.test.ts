@@ -156,6 +156,40 @@ describe("narrative milestones (GDD §10.2)", () => {
     expect(fired).toBe(true);
   });
 
+  it("The Aquifer Survived fires after living a week past a breach", () => {
+    const w = generateWorld({ seed: 831, width: 200, height: 500 });
+    const sim = new SimWorld(831, w.grid, w.surfaceY, w.spawn);
+    sim.spawnDwarf({ name: "Survivor", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    // Hand-trigger the breach: place water at a known tile and stamp
+    // the breach clock. Saves a thousand ticks of digging through a
+    // procedurally-placed aquifer.
+    sim.grid.setTile(w.spawn.x + 1, w.spawn.y, TileType.Water);
+    sim.aquiferBreachTick = sim.tick;
+    const e = sim.dwarf.entities[0];
+    // Run more than a week of in-game time. Pin needs so the dwarf
+    // doesn't die — the milestone requires at least one survivor.
+    for (let i = 0; i < 24 * 60 * 8; i++) {
+      const n = sim.needs.get(e);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (sim.narrativeMilestones.has("the_aquifer_survived")) break;
+    }
+    expect(sim.narrativeMilestones.has("the_aquifer_survived")).toBe(true);
+  });
+
+  it("The Aquifer Survived does not fire if no breach has happened", () => {
+    const w = generateWorld({ seed: 833, width: 200, height: 500 });
+    const sim = new SimWorld(833, w.grid, w.surfaceY, w.spawn);
+    sim.spawnDwarf({ name: "Untouched", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    const e = sim.dwarf.entities[0];
+    for (let i = 0; i < 24 * 60 * 8; i++) {
+      const n = sim.needs.get(e);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+    }
+    expect(sim.narrativeMilestones.has("the_aquifer_survived")).toBe(false);
+  });
+
   it("The Grand Citadel fires once a throne room is complete", () => {
     const w = generateWorld({ seed: 821, width: 200, height: 500 });
     const sim = new SimWorld(821, w.grid, w.surfaceY, w.spawn);

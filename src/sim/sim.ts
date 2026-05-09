@@ -75,9 +75,84 @@ export function tick(sim: SimWorld): void {
   tradeSystem(sim);
   hollowKingSystem(sim);
   hollowKingManifestSystem(sim);
+  floodSystem(sim);
   depthMilestoneSystem(sim);
   plannerMilestoneSystem(sim);
   visibilitySystem(sim);
+}
+
+// ---- Aquifer flooding (GDD §5.2) -------------------------------------
+//
+// Once an aquifer is breached, water spreads from the source into
+// adjacent walkable cells over the following in-game days. The spread
+// is capped (a real aquifer doesn't drown the entire fortress; only the
+// rooms next to the breach). Once the colony has lived through a week
+// without dying out, the Aquifer Survived milestone fires.
+
+const FLOOD_TICK_INTERVAL = 30; // try a spread step every half in-game hour
+const FLOOD_MAX_TILES = 60; // cap the total water tiles spawned per breach
+const AQUIFER_SURVIVED_TICKS = 24 * 60 * 7; // a week of in-game time
+const FLOOD_DX = [1, -1, 0, 0];
+const FLOOD_DY = [0, 0, 1, -1];
+
+function floodSystem(sim: SimWorld): void {
+  if (sim.aquiferBreachTick < 0) return;
+  if (sim.tick % FLOOD_TICK_INTERVAL !== 0) return;
+  const grid = sim.grid;
+  // Count current water and pick a random water tile to spread from.
+  // For determinism we pick by aiRng over the candidate list.
+  let waterCount = 0;
+  type Cell = { x: number; y: number };
+  const sources: Cell[] = [];
+  // Sample only the visible viewport — at full world size scanning
+  // every tile is wasteful. The flood started at the breach tile; we
+  // walk outward along seen tiles.
+  // Cheaper: scan the full grid once but cap the work.
+  const w = grid.width;
+  const h = grid.height;
+  for (let y = 0; y < h && waterCount <= FLOOD_MAX_TILES; y++) {
+    for (let x = 0; x < w && waterCount <= FLOOD_MAX_TILES; x++) {
+      if (grid.getTile(x, y) === TileType.Water) {
+        waterCount++;
+        sources.push({ x, y });
+      }
+    }
+  }
+  if (waterCount >= FLOOD_MAX_TILES) {
+    // Saturation reached. Flood holds at this footprint until the
+    // Survived milestone fires.
+    if (sim.tick - sim.aquiferBreachTick >= AQUIFER_SURVIVED_TICKS && sim.dwarf.size() > 0) {
+      fireMilestone(
+        sim,
+        "the_aquifer_survived",
+        "The Aquifer Survived. The flood has stopped rising. The colony stands above the waterline.",
+      );
+    }
+    return;
+  }
+  // Pick a deterministic source and try to spread to one of its
+  // walkable neighbours.
+  if (sources.length === 0) return;
+  const src = sources[sim.aiRng.nextRange(0, sources.length)];
+  const order = sim.aiRng.nextRange(0, 4);
+  for (let i = 0; i < 4; i++) {
+    const k = (order + i) % 4;
+    const nx = src.x + FLOOD_DX[k];
+    const ny = src.y + FLOOD_DY[k];
+    if (!grid.inBounds(nx, ny)) continue;
+    if (!grid.isWalkable(nx, ny)) continue;
+    grid.setTile(nx, ny, TileType.Water);
+    return;
+  }
+  // Source had no spread targets — happens if the breach tile is
+  // already surrounded by stone. Wait for the next pick.
+  if (sim.tick - sim.aquiferBreachTick >= AQUIFER_SURVIVED_TICKS && sim.dwarf.size() > 0) {
+    fireMilestone(
+      sim,
+      "the_aquifer_survived",
+      "The Aquifer Survived. The flood found nowhere to spread. The colony stands above the waterline.",
+    );
+  }
 }
 
 // ---- Hollow King arc (GDD §9.4) --------------------------------------
@@ -1560,6 +1635,26 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (job.progress >= MINE_TICKS) {
     // What was the rock made of? Determines stockpile credit.
     const tileType = sim.grid.getTile(job.targetX, job.targetY);
+    // Aquifer breach: replace with water rather than corridor floor,
+    // mark the colony's aquifer-clock for the Survived milestone, and
+    // log a chronicle line. The flood system spreads water from here
+    // into adjacent walkable cells over the next several days.
+    if (tileType === TileType.Aquifer) {
+      sim.grid.setTile(job.targetX, job.targetY, TileType.Water);
+      sim.grid.setDesignation(job.targetX, job.targetY, 0);
+      sim.releaseMineTarget(job.targetX, job.targetY);
+      const dw = sim.dwarf.get(e)!;
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `${dw.name} struck an aquifer. Water bursts into the tunnel.`,
+      );
+      if (sim.aquiferBreachTick < 0) sim.aquiferBreachTick = sim.tick;
+      sim.dwarf.get(e)!.lastJobTick = sim.tick;
+      sim.job.remove(e);
+      sim.pathing.remove(e);
+      return;
+    }
     sim.grid.setTile(job.targetX, job.targetY, TileType.CorridorFloor);
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
     sim.releaseMineTarget(job.targetX, job.targetY);
