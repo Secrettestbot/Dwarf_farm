@@ -115,6 +115,10 @@ export const enum TileType {
   /** Loom — workstation in a Loom Workshop (GDD §10.2 Tier 1 Rope &
    * Fibre). Spins rope into cloth. */
   LoomStation = 41,
+  /** Hospital cot — heals faster than a regular bed and credits the
+   * colony's best-skilled medic with medicine XP every tick a wounded
+   * dwarf rests on it (GDD §10.2 Tier 2 Medical Practice). */
+  HospitalBed = 42,
 }
 
 export interface TileInfo {
@@ -168,6 +172,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.KilnStation]: { name: "kiln", walkable: true, solid: false, color: 0xb86040 },
   [TileType.TannerStation]: { name: "tanner's bench", walkable: true, solid: false, color: 0x886040 },
   [TileType.LoomStation]: { name: "loom", walkable: true, solid: false, color: 0xd0c8b0 },
+  [TileType.HospitalBed]: { name: "hospital cot", walkable: true, solid: false, color: 0xd0a0a0 },
 };
 
 export function tileIsGem(t: number): boolean {
@@ -184,11 +189,11 @@ export function tileIsWorkshopStation(t: number): boolean {
 }
 
 export function tileIsBed(t: number): boolean {
-  return t === TileType.Bed;
+  return t === TileType.Bed || t === TileType.HospitalBed;
 }
 
 export function tileIsFurniture(t: number): boolean {
-  return t === TileType.Bed || t === TileType.Table || t === TileType.Bin;
+  return t === TileType.Bed || t === TileType.HospitalBed || t === TileType.Table || t === TileType.Bin;
 }
 
 export function tileWalkable(t: number): boolean {

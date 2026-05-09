@@ -2521,9 +2521,29 @@ function progressWander(sim: SimWorld, e: EntityId, job: JobAssignment): void {
 // ---- Recovery ----------------------------------------------------------
 
 const HEAL_TICK_INTERVAL = 30;
+const HEAL_RATE_HOSPITAL = 5; // tended wound on a hospital cot
 const HEAL_RATE_BED = 3;
 const HEAL_RATE_RESTING = 2; // sleeping anywhere
 const HEAL_RATE_IDLE = 1;    // wandering / socialising
+
+/** Return the entity id of the dwarf with the highest medicine skill,
+ * tie-broken by entity id for determinism. -1 if no dwarves exist. */
+function findBestMedic(sim: SimWorld): EntityId {
+  let best: EntityId = -1;
+  let bestSkill = 0;
+  const ents = sim.dwarf.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const dw = sim.dwarf.get(e);
+    if (!dw) continue;
+    const skill = dw.skills.medicine ?? 1;
+    if (best === -1 || skill > bestSkill || (skill === bestSkill && e < best)) {
+      best = e;
+      bestSkill = skill;
+    }
+  }
+  return best;
+}
 
 /**
  * Passive recovery. Dwarves regain HP slowly — faster while sleeping,
@@ -2555,9 +2575,18 @@ function healingSystem(sim: SimWorld): void {
     if (inCombat) continue;
 
     let healing = 0;
+    let onHospitalBed = false;
     const job = sim.job.get(e);
     if (job?.kind === "sleep") {
-      healing = sim.grid.getTile(pos.x, pos.y) === TileType.Bed ? HEAL_RATE_BED : HEAL_RATE_RESTING;
+      const tile = sim.grid.getTile(pos.x, pos.y);
+      if (tile === TileType.HospitalBed) {
+        healing = HEAL_RATE_HOSPITAL;
+        onHospitalBed = true;
+      } else if (tile === TileType.Bed) {
+        healing = HEAL_RATE_BED;
+      } else {
+        healing = HEAL_RATE_RESTING;
+      }
     } else if (!job || job.kind === "wander" || job.kind === "socialise") {
       healing = HEAL_RATE_IDLE;
     }
@@ -2565,6 +2594,16 @@ function healingSystem(sim: SimWorld): void {
     if (healing === 0) continue;
 
     hp.hp = Math.min(hp.maxHp, hp.hp + healing);
+    // Hospital tending: credit the colony's best-skilled medic with
+    // medicine XP every healing tick a wound is treated on a cot.
+    // The dwarf with the highest medicine skill is "on duty" — if no
+    // dwarf has any medicine skill yet, none of them gains XP this
+    // tick (someone has to start somewhere; running wounded through a
+    // cot doesn't teach anyone medicine in the abstract).
+    if (onHospitalBed) {
+      const medic = findBestMedic(sim);
+      if (medic !== -1 && medic !== e) awardSkillXp(sim, medic, "medicine", 1);
+    }
     // Severe-recovery announcement: combat sets `wasSevereWound` when HP
     // dropped below 30%; we clear it (and write to the chronicle) the
     // first time the dwarf returns to full HP.

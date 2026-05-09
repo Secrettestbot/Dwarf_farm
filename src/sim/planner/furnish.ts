@@ -56,6 +56,9 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "loom":
       furnishWorkshop(grid, b, TileType.LoomStation);
       break;
+    case "hospital":
+      furnishHospital(grid, b);
+      break;
     case "library":
       furnishLibrary(grid, b);
       break;
@@ -130,6 +133,16 @@ function furnishFarm(grid: TileGrid, b: Blueprint): void {
   // planner doesn't know the current tick, so the farmSystem fills in
   // the actual planted-at tick on its first run over the farm.
   b.cellTendedAt = new Int32Array(b.cavity.length).fill(-1);
+}
+
+/** Hospital: two cots along the back wall so two wounded dwarves can
+ * be treated at once without colliding. */
+function furnishHospital(grid: TileGrid, b: Blueprint): void {
+  const y = b.originY;
+  const x1 = b.originX + 1;
+  const x2 = b.originX + b.width - 2;
+  if (cavityContains(b, x1, y)) grid.setTile(x1, y, TileType.HospitalBed);
+  if (x2 !== x1 && cavityContains(b, x2, y)) grid.setTile(x2, y, TileType.HospitalBed);
 }
 
 /** Bedroom: one bed, tucked into the upper-left corner of the cavity. */

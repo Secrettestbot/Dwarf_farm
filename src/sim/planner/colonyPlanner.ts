@@ -114,6 +114,10 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Loom: 3×3 workshop. Tier 1 Rope & Fibre gates it; rope accumulates
   // off the colony's farm cells, cloth comes back out.
   loom: { w: 3, h: 3, priority: 2 },
+  // Hospital: 4×3 ward with two cots. Tier 2 Medical Practice gates it;
+  // wounded dwarves heal substantially faster on the cots and the
+  // colony's medic earns medicine XP every tick a wound is tended.
+  hospital: { w: 4, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -237,6 +241,7 @@ export class ColonyPlanner {
     if (this.needsKiln(ctx) && this.placeRoom(ctx, "kiln")) return true;
     if (this.needsTannery(ctx) && this.placeRoom(ctx, "tannery")) return true;
     if (this.needsLoom(ctx) && this.placeRoom(ctx, "loom")) return true;
+    if (this.needsHospital(ctx) && this.placeRoom(ctx, "hospital")) return true;
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -426,6 +431,14 @@ export class ColonyPlanner {
     if (ctx.population < 6) return false;
     if (!(ctx.research?.completed ?? []).includes("rope_and_fibre")) return false;
     return this.maintainedAndActiveOfKind("loom", ctx.tick) === 0;
+  }
+
+  private needsHospital(ctx: PlannerContext): boolean {
+    // Hospital lands once Tier 2 Medical Practice is researched and the
+    // colony's large enough to spare a medic.
+    if (ctx.population < 10) return false;
+    if (!(ctx.research?.completed ?? []).includes("medical_practice")) return false;
+    return this.maintainedAndActiveOfKind("hospital", ctx.tick) === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's
