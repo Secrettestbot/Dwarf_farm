@@ -2900,6 +2900,35 @@ function hostileSpawnSystem(sim: SimWorld): void {
     "crisis",
     narrateHostileSpawn(sim.aiRng, def.spawnArticle, pick.y, sim.spawn.y),
   );
+  // Goblin patrols: a scout never really comes alone. With moderate
+  // probability the original spawn is reinforced by 1–2 extra scouts
+  // within a short radius, producing patrol formations the colony's
+  // standing guard has to actually engage as a unit (GDD §9.3).
+  // After Military Tactics research the patrols swell further. Gated
+  // on population so a one-dwarf colony isn't crushed by a 3-goblin
+  // patrol on day one — the GDD's narrative beat is that patrols
+  // arrive when the colony is worth raiding.
+  if (kind === "goblin_scout" && dwarves >= 6) {
+    const tactics = sim.research.completed.includes("military_tactics");
+    const patrolChance = tactics ? 0.85 : 0.55;
+    if (sim.aiRng.nextFloat() < patrolChance) {
+      const extras = (tactics ? 2 : 1) + sim.aiRng.nextRange(0, 2);
+      for (let i = 0; i < extras; i++) {
+        // Sample a nearby tile from the candidate set — keep them in
+        // line-of-sight of the original.
+        let attempts = 8;
+        while (attempts-- > 0) {
+          const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+          const dx = c.x - pick.x;
+          const dy = c.y - pick.y;
+          if (dx * dx + dy * dy > 25) continue; // patrol cohesion radius
+          if (c.x === pick.x && c.y === pick.y) continue;
+          sim.spawnHostile({ kind, x: c.x, y: c.y });
+          break;
+        }
+      }
+    }
+  }
 }
 
 /** Weighted random hostile kind. Each kind only enters the pool once
