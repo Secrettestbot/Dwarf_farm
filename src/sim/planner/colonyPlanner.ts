@@ -126,6 +126,10 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Water Wheel: 2×2 mechanism placed adjacent to Water tiles. No
   // recipe, just a passive speed bonus to nearby workshops.
   water_wheel: { w: 2, h: 2, priority: 3 },
+  // Cemetery: 5×5 plot of grave-floor tiles. Buried dwarves get a
+  // headstone slotted into one of the empty plots; the chronicle
+  // records who lies under each.
+  cemetery: { w: 5, h: 5, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -253,6 +257,7 @@ export class ColonyPlanner {
     if (this.needsTavern(ctx) && this.placeRoom(ctx, "tavern")) return true;
     if (this.needsMagmaForge(ctx) && this.placeRoom(ctx, "magma_forge")) return true;
     if (this.needsWaterWheel(ctx) && this.placeRoom(ctx, "water_wheel")) return true;
+    if (this.needsCemetery(ctx) && this.placeRoom(ctx, "cemetery")) return true;
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -499,6 +504,15 @@ export class ColonyPlanner {
     if (!(ctx.research?.completed ?? []).includes("carpentry_mechanisms")) return false;
     if (!this.hasReachableTileOfKind(ctx, TileType.Water, 4)) return false;
     return this.maintainedAndActiveOfKind("water_wheel", ctx.tick) === 0;
+  }
+
+  private needsCemetery(ctx: PlannerContext): boolean {
+    // Cemetery: lands once the colony's stable enough to set ground
+    // aside for the dead. Pop ≥ 6 — small enough to land before the
+    // first old-age deaths, large enough that a one-dwarf founder
+    // colony isn't carving graves first thing. No research gate.
+    if (ctx.population < 6) return false;
+    return this.maintainedAndActiveOfKind("cemetery", ctx.tick) === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's

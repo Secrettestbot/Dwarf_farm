@@ -1422,6 +1422,12 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.grid.setTile(pos.x, pos.y, TileType.Memorial);
   }
   sim.events.add(sim.tick, "social", narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause));
+  // Burial: if a Cemetery exists with an empty Grave plot, mark a
+  // Headstone there and register the dead dwarf in the colony's
+  // gravestones registry. The Memorial tile on the spot they fell
+  // still stays (the place they fell is its own kind of marker), but
+  // the cemetery is where survivors visit.
+  buryDwarf(sim, dw, age, cause);
   // If this dwarf had a partner, clear the survivor's partnerId and log a
   // bereavement event. The relationship's length is approximated as
   // min(both ages) - 18 (i.e. years they could have been bonded as adults),
@@ -1456,6 +1462,44 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   }
   // Remove from the ECS, which strips all component stores.
   sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession]);
+}
+
+/** Find an empty Grave plot in any complete Cemetery and turn it
+ * into a Headstone holding this dwarf's record. The colony's
+ * `graves` registry stores the deceased's details so the chronicle
+ * + future visit-grave job can reference them. Falls through quietly
+ * if no cemetery exists or every plot is already filled — the
+ * Memorial tile on the death spot is still there as a fallback. */
+function buryDwarf(sim: SimWorld, dw: import("./ecs/components").Dwarf, age: number, cause: string): void {
+  let plot: { x: number; y: number } | null = null;
+  outer: for (const b of sim.planner.blueprints) {
+    if (b.kind !== "cemetery" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === TileType.Grave) {
+        plot = { x, y };
+        break outer;
+      }
+    }
+  }
+  if (!plot) return;
+  sim.grid.setTile(plot.x, plot.y, TileType.Headstone);
+  sim.graves.push({
+    x: plot.x,
+    y: plot.y,
+    name: dw.name,
+    profession: dw.profession,
+    ageAtDeath: age,
+    deathTick: sim.tick,
+    cause,
+  });
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${dw.name} is laid to rest in the cemetery. Aged ${age} years.`,
+  );
 }
 
 // ---- Partnership + reproduction ----------------------------------------

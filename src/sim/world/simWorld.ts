@@ -15,6 +15,19 @@ import { ResearchState, defaultResearch } from "../research";
 
 const DWARF_BASE_MAX_HP = 100;
 
+/** A buried dwarf in the colony cemetery. The Headstone tile at
+ * (x, y) renders the gravestone visually; this record is what the
+ * inspector + chronicle use when a survivor visits or remembers. */
+export interface Grave {
+  x: number;
+  y: number;
+  name: string;
+  profession: string;
+  ageAtDeath: number;
+  deathTick: number;
+  cause: string;
+}
+
 export interface Stockpile {
   /** Generic ore tally — any TileType.Ore mined. Later sessions split into
    * iron / copper / silver / gold etc. */
@@ -208,6 +221,12 @@ export class SimWorld {
   /** Origin kingdom of the caravan currently on site, for inspector
    * display. Empty when no caravan is present. */
   caravanOrigin = "";
+
+  /** Cemetery registry — every dwarf interred in a Headstone tile,
+   * with the details a survivor would speak at the grave. Round-trips
+   * through save so a reload restores the colony's full memorial roll
+   * call. */
+  graves: Grave[] = [];
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */

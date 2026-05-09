@@ -50,6 +50,7 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   tavern: "tavern",
   magma_forge: "magma forge",
   water_wheel: "water wheel",
+  cemetery: "cemetery",
 };
 
 export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): string {
@@ -131,6 +132,8 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A magma forge is sketched ${where}. The colony has tapped the deep heat.`;
     case "water_wheel":
       return `A water wheel is laid out ${where}. The river will turn the workshops.`;
+    case "cemetery":
+      return `A cemetery is laid out ${where}. The colony makes room for its dead.`;
   }
 }
 
@@ -209,6 +212,8 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The magma forge roars to life ${where}. The first masterwork tool comes off the anvil.`;
     case "water_wheel":
       return `The water wheel begins to turn. The workshops nearby pick up speed.`;
+    case "cemetery":
+      return `The cemetery is finished ${where}. The first plots wait, quiet.`;
   }
 }
 

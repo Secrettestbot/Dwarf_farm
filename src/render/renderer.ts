@@ -32,6 +32,7 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   tavern: { fill: "rgba(200, 160, 100, 0.14)", stroke: "rgba(220, 180, 110, 0.7)" },
   magma_forge: { fill: "rgba(220, 80, 40, 0.18)", stroke: "rgba(240, 110, 60, 0.8)" },
   water_wheel: { fill: "rgba(80, 110, 160, 0.16)", stroke: "rgba(100, 140, 200, 0.75)" },
+  cemetery: { fill: "rgba(120, 110, 100, 0.16)", stroke: "rgba(160, 150, 140, 0.7)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -251,5 +252,6 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "tavern": return "tavern";
     case "magma_forge": return "magma forge";
     case "water_wheel": return "wheel";
+    case "cemetery": return "cemetery";
   }
 }

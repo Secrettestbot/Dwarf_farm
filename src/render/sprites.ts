@@ -63,7 +63,52 @@ const TILE_PIXELS: Partial<Record<TileType, string[]>> = {
   [TileType.Tree]: treeSprite(),
   [TileType.Door]: doorSprite(false),
   [TileType.DoorBarred]: doorSprite(true),
+  [TileType.Grave]: gravePlotSprite(),
+  [TileType.Headstone]: headstoneSprite(),
 };
+
+/** Empty grave plot — a darker patch of disturbed earth with a small
+ * sunken outline. Reads as "ready for an interment". */
+function gravePlotSprite(): string[] {
+  const base = noisyFill(2, 3); // dark earth
+  // Sunken rectangle in the middle.
+  for (let y = 5; y <= 12; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const c = (y === 5 || y === 12 || x === 4 || x === 11) ? "1" : "2";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Headstone — an upright marker over an occupied plot. Stone slab
+ * with a darker base, slightly weathered. */
+function headstoneSprite(): string[] {
+  const base = noisyFill(2, 3); // dark earth around it
+  // Plot outline, like the empty grave.
+  for (let y = 9; y <= 13; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const c = (y === 9 || y === 13 || x === 4 || x === 11) ? "1" : "2";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Headstone slab at top — rows 2-8, columns 6-9.
+  for (let y = 2; y <= 8; y++) {
+    let row = base[y];
+    for (let x = 6; x <= 9; x++) {
+      const c = (y === 2 || y === 8 || x === 6 || x === 9) ? "1" : "B";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Engraved cross-mark on the slab.
+  base[5] = base[5].substring(0, 7) + "1" + base[5].substring(8);
+  return base;
+}
 
 /** Door: a wooden plank silhouette with a small handle. Barred
  * version paints heavy reinforcement bars over the same plank shape

@@ -195,6 +195,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     caravan: sim.caravanLeavesTick > 0
       ? { x: sim.caravanX, y: sim.caravanY, leavesTick: sim.caravanLeavesTick, origin: sim.caravanOrigin }
       : undefined,
+    graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
   };
 }
 
@@ -428,6 +429,9 @@ export function restore(save: SaveV1): SimWorld {
     sim.caravanY = save.caravan.y;
     sim.caravanLeavesTick = save.caravan.leavesTick;
     sim.caravanOrigin = save.caravan.origin;
+  }
+  if (save.graves) {
+    for (const g of save.graves) sim.graves.push({ ...g });
   }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them

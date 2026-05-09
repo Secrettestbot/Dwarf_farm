@@ -222,6 +222,18 @@ export interface SaveV1 {
   /** Caravan-on-site marker. Round-trips so a save mid-trade-visit
    * restores with the wagons still parked. */
   caravan?: { x: number; y: number; leavesTick: number; origin: string };
+  /** Cemetery registry — every dwarf interred in a Headstone tile.
+   * Round-trips so a reload restores the colony's full memorial
+   * roll call. */
+  graves?: Array<{
+    x: number;
+    y: number;
+    name: string;
+    profession: string;
+    ageAtDeath: number;
+    deathTick: number;
+    cause: string;
+  }>;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

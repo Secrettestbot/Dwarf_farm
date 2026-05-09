@@ -151,6 +151,14 @@ export const enum TileType {
    * via a passive aura — the GDD's hand-wave for "the colony has
    * mechanical power". */
   WaterWheel = 50,
+  /** Empty grave plot — the floor of a Cemetery room before anyone is
+   * buried in it. Walkable so survivors can walk between plots. */
+  Grave = 51,
+  /** Occupied grave — a Cemetery plot that holds a buried dwarf.
+   * The colony's `graves` registry stores who's interred there
+   * (name, profession, age, tick of death). Walkable so visitors can
+   * stand at the headstone. */
+  Headstone = 52,
 }
 
 export interface TileInfo {
@@ -213,6 +221,8 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.DoorBarred]: { name: "barred door", walkable: false, solid: false, color: 0x4a3a28 },
   [TileType.MagmaForgeStation]: { name: "magma forge", walkable: true, solid: false, color: 0xe04020 },
   [TileType.WaterWheel]: { name: "water wheel", walkable: true, solid: false, color: 0x506080 },
+  [TileType.Grave]: { name: "grave plot", walkable: true, solid: false, color: 0x504838 },
+  [TileType.Headstone]: { name: "headstone", walkable: true, solid: false, color: 0x9a8a72 },
 };
 
 export function tileIsGem(t: number): boolean {

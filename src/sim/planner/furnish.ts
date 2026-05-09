@@ -75,6 +75,9 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "water_wheel":
       furnishWaterWheel(grid, b);
       break;
+    case "cemetery":
+      furnishCemetery(grid, b);
+      break;
     case "library":
       furnishLibrary(grid, b);
       break;
@@ -149,6 +152,18 @@ function furnishFarm(grid: TileGrid, b: Blueprint): void {
   // planner doesn't know the current tick, so the farmSystem fills in
   // the actual planted-at tick on its first run over the farm.
   b.cellTendedAt = new Int32Array(b.cavity.length).fill(-1);
+}
+
+/** Cemetery: every cavity cell becomes an empty grave plot. When a
+ * dwarf dies and a Cemetery exists, killDwarf swaps the next free
+ * plot to a Headstone and registers the dead dwarf in sim.graves. */
+function furnishCemetery(grid: TileGrid, b: Blueprint): void {
+  for (let i = 0; i < b.cavity.length; i++) {
+    const c = b.cavity[i];
+    const x = c & 0xffff;
+    const y = (c >>> 16) & 0xffff;
+    grid.setTile(x, y, TileType.Grave);
+  }
 }
 
 /** Water Wheel: the cavity itself becomes WaterWheel tiles. There's
