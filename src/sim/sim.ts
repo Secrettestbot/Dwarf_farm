@@ -75,6 +75,7 @@ export function tick(sim: SimWorld): void {
   tradeSystem(sim);
   hollowKingSystem(sim);
   depthMilestoneSystem(sim);
+  plannerMilestoneSystem(sim);
   visibilitySystem(sim);
 }
 
@@ -101,6 +102,11 @@ const HOLLOW_KING_SIEGE_INTERVAL_TICKS = TICKS_PER_DAY * 4;
 /** How many shades show up at once. Three is a meaningful fight for a
  * mid-game military but not auto-fatal for a prepared one. */
 const HOLLOW_KING_SHADES_PER_SIEGE = 3;
+/** Cumulative void-shade kills the colony needs to end the siege —
+ * the GDD's "Survive the Underworld campaign" milestone. With three
+ * shades per siege every four in-game days, twenty kills represents
+ * surviving roughly a season of sustained attacks. */
+const HOLLOW_KING_VICTORY_THRESHOLD = 20;
 
 function hollowKingSystem(sim: SimWorld): void {
   if (!sim.hollowKingAware) {
@@ -467,6 +473,23 @@ function fireMilestone(sim: SimWorld, id: string, text: string): void {
   if (sim.narrativeMilestones.has(id)) return;
   sim.narrativeMilestones.add(id);
   sim.events.add(sim.tick, "milestone", text);
+}
+
+/** Idempotent check for milestones gated on planner state — currently
+ * just the Grand Citadel (throne room exists and is complete). Cheap,
+ * runs every tick, the first qualifying state fires the milestone and
+ * subsequent ticks no-op via the narrativeMilestones set. */
+function plannerMilestoneSystem(sim: SimWorld): void {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind === "throne_room" && b.status === "complete") {
+      fireMilestone(
+        sim,
+        "the_grand_citadel",
+        "The Grand Citadel. The throne room is finished — the colony has its hall.",
+      );
+      return;
+    }
+  }
 }
 
 /** Watch the deepest dwarf and fire layer-crossing milestones the
@@ -2054,6 +2077,18 @@ function combatSystem(sim: SimWorld): void {
           "crisis",
           narrateHostileSlain(sim.aiRng, dwarfName, def.name),
         );
+        // Track void-shade kills toward The Hollow King Falls milestone
+        // — the GDD's "Survive the Underworld campaign" beat.
+        if (hostile.kind === "void_shade") {
+          sim.voidShadesSlain++;
+          if (sim.voidShadesSlain >= HOLLOW_KING_VICTORY_THRESHOLD) {
+            fireMilestone(
+              sim,
+              "the_hollow_king_falls",
+              "The Hollow King Falls. The colony has cut down enough of the King's emissaries to end the siege. The dreams stop.",
+            );
+          }
+        }
         sim.ecs.destroy(h, [sim.position, sim.hostile, sim.health]);
       }
     }

@@ -19,6 +19,7 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   trade_depot: { fill: "rgba(180, 200, 220, 0.10)", stroke: "rgba(200, 220, 240, 0.65)" },
   library: { fill: "rgba(120, 160, 220, 0.10)", stroke: "rgba(150, 180, 240, 0.65)" },
   armoury: { fill: "rgba(180, 180, 220, 0.10)", stroke: "rgba(200, 200, 240, 0.65)" },
+  throne_room: { fill: "rgba(160, 100, 200, 0.12)", stroke: "rgba(180, 120, 230, 0.7)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -188,5 +189,6 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "trade_depot": return "depot";
     case "library": return "library";
     case "armoury": return "armoury";
+    case "throne_room": return "throne";
   }
 }

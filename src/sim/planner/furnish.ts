@@ -44,12 +44,23 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "armoury":
       furnishArmoury(grid, b);
       break;
+    case "throne_room":
+      furnishThroneRoom(grid, b);
+      break;
     // Corridors, mines, and stairwells stay bare — they're passages or
     // active workspaces, not rooms. Real ore mines later get an extraction
     // marker; for now leaving them as plain CorridorFloor.
     default:
       break;
   }
+}
+
+/** Throne Room: a single throne tile dead-centre. Decorative for now —
+ * the chair sits where it sits and the milestone fires on completion. */
+function furnishThroneRoom(grid: TileGrid, b: Blueprint): void {
+  const cx = b.originX + Math.floor(b.width / 2);
+  const cy = b.originY + Math.floor(b.height / 2);
+  if (cavityContains(b, cx, cy)) grid.setTile(cx, cy, TileType.Throne);
 }
 
 /** Armoury: rack tiles along the back wall, evenly spaced. Visual only —

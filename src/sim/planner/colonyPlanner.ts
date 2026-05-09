@@ -80,6 +80,10 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // tools the smiths produced; the draft system equips soldiers from
   // the global tools counter when this room exists.
   armoury: { w: 4, h: 3, priority: 2 },
+  // Throne Room: 5×4 ceremonial space with a single throne tile. The
+  // colony only earns this once it has the surplus to spare on
+  // ornament — gated on population in the architect.
+  throne_room: { w: 5, h: 4, priority: 1 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -195,6 +199,7 @@ export class ColonyPlanner {
     if (this.needsTradeDepot(ctx) && this.placeRoom(ctx, "trade_depot")) return true;
     if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
     if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
+    if (this.needsThroneRoom(ctx) && this.placeRoom(ctx, "throne_room")) return true;
 
     // 2.9 Stairwell — every few completed rooms the architect drops a
     //     vertical 2×6 shaft so the colony actually descends instead of
@@ -300,6 +305,17 @@ export class ColonyPlanner {
     if (ctx.population < 7) return false;
     if (!(ctx.research?.completed ?? []).includes("armoury_basics")) return false;
     return this.maintainedAndActiveOfKind("armoury", ctx.tick) === 0;
+  }
+
+  private needsThroneRoom(ctx: PlannerContext): boolean {
+    // The throne room is the GDD's "Grand Citadel" milestone target —
+    // a fortress reaches it once it has the surplus to spare. Gated on
+    // a real population (so a five-dwarf colony doesn't cosplay royalty)
+    // and on Masonry & Mortaring (Tier 2) — the masons need to know
+    // how to lay a proper hall. One per fortress.
+    if (ctx.population < 30) return false;
+    if (!(ctx.research?.completed ?? []).includes("masonry_and_mortaring")) return false;
+    return this.maintainedAndActiveOfKind("throne_room", ctx.tick) === 0;
   }
 
   /**

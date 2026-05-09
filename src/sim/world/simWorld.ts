@@ -141,6 +141,10 @@ export class SimWorld {
   /** Tick at which the most recent void-shade siege fired. Cooldown
    * keeps the King from sieging continuously. */
   hollowKingLastSiegeTick = 0;
+  /** Number of void shades the colony has put down since the King
+   * woke. The Hollow King Falls milestone fires once enough have been
+   * cut down — survival, in this game, is the win condition. */
+  voidShadesSlain = 0;
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;

@@ -156,6 +156,60 @@ describe("narrative milestones (GDD §10.2)", () => {
     expect(fired).toBe(true);
   });
 
+  it("The Grand Citadel fires once a throne room is complete", () => {
+    const w = generateWorld({ seed: 821, width: 200, height: 500 });
+    const sim = new SimWorld(821, w.grid, w.surfaceY, w.spawn);
+    // Plant a synthetic completed throne room. The blueprint kind +
+    // status flip is what the milestone watcher looks for.
+    const cavity: number[] = [];
+    for (let yy = w.spawn.y; yy < w.spawn.y + 4; yy++) {
+      for (let xx = w.spawn.x + 1; xx < w.spawn.x + 6; xx++) {
+        cavity.push((yy << 16) | xx);
+      }
+    }
+    sim.planner.blueprints.push({
+      id: 9500,
+      kind: "throne_room",
+      originX: w.spawn.x + 1,
+      originY: w.spawn.y,
+      width: 5,
+      height: 4,
+      cavity: new Int32Array(cavity),
+      status: "complete",
+      priority: 1,
+      createdTick: 0,
+    });
+    tick(sim);
+    expect(sim.narrativeMilestones.has("the_grand_citadel")).toBe(true);
+  });
+
+  it("The Hollow King Falls fires after enough void shades are slain", () => {
+    const w = generateWorld({ seed: 823, width: 200, height: 2000 });
+    const sim = new SimWorld(823, w.grid, w.surfaceY, w.spawn);
+    sim.spawnDwarf({ name: "Slayer", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.dwarf.get(sim.dwarf.entities[0])!.skills.military = 18;
+    sim.squad.set(sim.dwarf.entities[0], { draftedAtTick: 0 });
+    sim.equipment.set(sim.dwarf.entities[0], { weapon: true });
+    // Run void-shade encounters by hand: spawn one adjacent to the
+    // soldier each iteration and let combat resolve.
+    for (let n = 0; n < 25; n++) {
+      sim.spawnHostile({ kind: "void_shade", x: w.spawn.x + 1, y: w.spawn.y });
+      sim.health.set(sim.hostile.entities[sim.hostile.entities.length - 1], {
+        hp: 1, maxHp: 90, lastAttackTick: -1000,
+      });
+      // Pin the dwarf's HP and needs so they don't die mid-fight.
+      const eid = sim.dwarf.entities[0];
+      const hp = sim.health.get(eid)!;
+      hp.hp = hp.maxHp;
+      hp.lastAttackTick = -1000;
+      const need = sim.needs.get(eid)!;
+      need.hunger = 100; need.thirst = 100; need.sleep = 100; need.social = 100;
+      tick(sim);
+      if (sim.narrativeMilestones.has("the_hollow_king_falls")) break;
+    }
+    expect(sim.narrativeMilestones.has("the_hollow_king_falls")).toBe(true);
+  });
+
   it("Legends of the Deep fires when every drafted soldier has a Legendary skill", () => {
     const w = generateWorld({ seed: 815, width: 200, height: 500 });
     const sim = new SimWorld(815, w.grid, w.surfaceY, w.spawn);

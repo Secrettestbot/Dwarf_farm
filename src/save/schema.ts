@@ -193,6 +193,9 @@ export interface SaveV1 {
   hollowKingNightmares?: number;
   /** Tick of the last void-shade siege. Drives the siege cooldown. */
   hollowKingLastSiegeTick?: number;
+  /** Cumulative void-shade kills toward the Hollow King Falls
+   * milestone. Optional for back-compat. */
+  voidShadesSlain?: number;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

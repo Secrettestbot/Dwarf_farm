@@ -73,6 +73,10 @@ export const enum TileType {
    * future commit can split it into its own item kind once silver-as-
    * trade-good has a downstream consumer. */
   Silver = 30,
+  /** Throne — centerpiece of the Throne Room (GDD §10.2 milestone
+   * "The Grand Citadel"). Walkable; rendered as a deep purple to read
+   * as ceremonial. Decorative for now — the chair sits where it sits. */
+  Throne = 31,
 }
 
 export interface TileInfo {
@@ -115,6 +119,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.SoulCrystal]: { name: "soul-crystal", walkable: false, solid: true, color: 0x7090e0 },
   [TileType.ArmouryRack]: { name: "armoury rack", walkable: true, solid: false, color: 0x8090a8 },
   [TileType.Silver]: { name: "silver vein", walkable: false, solid: true, color: 0xd0d8e8 },
+  [TileType.Throne]: { name: "throne", walkable: true, solid: false, color: 0x6040a0 },
 };
 
 export function tileIsGem(t: number): boolean {

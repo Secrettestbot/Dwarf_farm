@@ -85,6 +85,8 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A library is laid out ${where}. The scholars stir.`;
     case "armoury":
       return `An armoury is mapped out ${where}. The smiths sharpen their plans.`;
+    case "throne_room":
+      return `A throne room is sketched ${where}. The colony plans for ceremony.`;
   }
 }
 
@@ -137,6 +139,8 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The library is opened ${where}. The first books are placed on the desks.`;
     case "armoury":
       return `The armoury opens ${where}. The first weapons go on the racks.`;
+    case "throne_room":
+      return `The throne room stands finished ${where}. The hall awaits its first procession.`;
   }
 }
 
