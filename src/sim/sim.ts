@@ -2433,6 +2433,27 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         "the_silver_halls",
         `The Silver Halls. ${dw.name} has cut silver from the deep rock.`,
       );
+    } else if (tileType === TileType.Gold) {
+      itemKind = "ore";
+      const dw = sim.dwarf.get(e)!;
+      sim.events.add(
+        sim.tick,
+        "discovery",
+        `${dw.name} strikes gold, ${depthPhraseFor(job.targetY, sim.spawn.y)}.`,
+      );
+      fireMilestone(
+        sim,
+        "the_gilded_halls",
+        `The Gilded Halls. ${dw.name} has cut gold from the deep rock.`,
+      );
+    } else if (tileType === TileType.Coal) {
+      // Coal drops as ore for now; future smelter / forge tiers will
+      // route it as fuel separately.
+      itemKind = "ore";
+    } else if (tileType === TileType.CaveMushroom) {
+      // Mushroom drops as food. The colony has another mouth to feed
+      // and the mountain quietly answers.
+      itemKind = "food";
     } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
       itemKind = "stone";
     } else if (tileType === TileType.Dirt || tileType === TileType.Sand) {

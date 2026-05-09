@@ -123,6 +123,18 @@ export const enum TileType {
    * here while pouring; visiting dwarves get a morale bump for stopping
    * by. */
   TavernCounter = 43,
+  /** Gold vein — Deep Rock content (GDD §5.2 "silver, gold, coal
+   * seams"). Mined like ore; drops a gold ore item and fires the
+   * Gilded Halls milestone the first time the colony strikes one. */
+  Gold = 44,
+  /** Coal seam — Deep Rock fuel material (GDD §5.2). Mined like ore;
+   * drops a generic ore item for now. Future smelter / forge tiers
+   * will route coal as fuel separately. */
+  Coal = 45,
+  /** Cave mushroom cluster — naturally lit edible fungus growing in
+   * cavern floors (GDD §5.2 "mushroom forests"). Mineable; drops a
+   * food item the colony can eat or cook. */
+  CaveMushroom = 46,
 }
 
 export interface TileInfo {
@@ -178,6 +190,9 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.LoomStation]: { name: "loom", walkable: true, solid: false, color: 0xd0c8b0 },
   [TileType.HospitalBed]: { name: "hospital cot", walkable: true, solid: false, color: 0xd0a0a0 },
   [TileType.TavernCounter]: { name: "tavern counter", walkable: true, solid: false, color: 0x9a6a3a },
+  [TileType.Gold]: { name: "gold vein", walkable: false, solid: true, color: 0xe8c860 },
+  [TileType.Coal]: { name: "coal seam", walkable: false, solid: true, color: 0x202028 },
+  [TileType.CaveMushroom]: { name: "cave mushrooms", walkable: false, solid: true, color: 0xc8a8d8 },
 };
 
 export function tileIsGem(t: number): boolean {
