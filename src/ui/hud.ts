@@ -20,6 +20,8 @@ export interface HudHandlers {
   onShowHistory(): void;
   /** Open the research panel — research tree status. */
   onShowResearch(): void;
+  /** Open the population panel — every living dwarf. */
+  onShowPopulation(): void;
   /** Player wants to rename the fortress; the host pops a prompt
    * and, on a non-empty answer, calls `setFortressName`. */
   onRenameFortress(): void;
@@ -154,6 +156,14 @@ export class Hud {
     researchButton.title = "Browse the colony's research progress";
     researchButton.addEventListener("click", () => handlers.onShowResearch());
     tools.appendChild(researchButton);
+
+    // Population — every living dwarf, click to inspect + camera-jump.
+    const populationButton = document.createElement("button");
+    populationButton.className = "btn";
+    populationButton.textContent = "Population";
+    populationButton.title = "Browse the colony's living dwarves";
+    populationButton.addEventListener("click", () => handlers.onShowPopulation());
+    tools.appendChild(populationButton);
 
     // Tutorial replay — opens the new-player overlay any time.
     const helpButton = document.createElement("button");

@@ -23,6 +23,7 @@ import { playEventSound } from "./audio/sound";
 import { showTutorial, tutorialAlreadySeen } from "./ui/tutorial";
 import { HistoryPanel } from "./ui/historyPanel";
 import { ResearchPanel } from "./ui/researchPanel";
+import { PopulationPanel } from "./ui/populationPanel";
 import { NotificationCenter } from "./ui/notificationCenter";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
@@ -202,6 +203,10 @@ function runGame(active: ActiveFortress, camera: Camera) {
   const historyPanel = new HistoryPanel(uiHost);
   const researchPanel = new ResearchPanel(uiHost);
   const notifications = new NotificationCenter(uiHost, camera);
+  // Population panel needs the inspector to wire row-click → inspect.
+  // Inspector is constructed below; declare here so HUD click handlers
+  // can close over the variable (closures resolve at click time).
+  let populationPanel: PopulationPanel | null = null;
 
   let panStart: { mx: number; my: number; cx: number; cy: number } | null = null;
   let isPanning = false;
@@ -224,6 +229,9 @@ function runGame(active: ActiveFortress, camera: Camera) {
     onShowResearch: () => {
       researchPanel.open(active.sim);
     },
+    onShowPopulation: () => {
+      if (populationPanel) populationPanel.open(active.sim);
+    },
     onRenameFortress: () => {
       const next = window.prompt("Rename the fortress:", active.fortressName);
       if (next && next.trim()) {
@@ -234,6 +242,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
   });
   const eventPanel = new EventLogPanel(uiHost);
   const inspector = new DwarfInspector(uiHost);
+  populationPanel = new PopulationPanel(uiHost, inspector, camera);
   const sliders = new SliderPanel(uiHost, sim);
   void sliders;
   const emergency = new EmergencyPanel(uiHost, sim);
