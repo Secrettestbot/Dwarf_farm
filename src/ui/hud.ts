@@ -14,6 +14,8 @@ export interface HudHandlers {
   worldSeed(): number;
   /** Re-open the tutorial overlay. */
   onShowTutorial(): void;
+  /** Open the history panel — artifacts, books, graves. */
+  onShowHistory(): void;
 }
 
 export class Hud {
@@ -117,6 +119,15 @@ export class Hud {
       refreshMute();
     });
     tools.appendChild(muteButton);
+
+    // History — opens a browseable panel of artifacts / books /
+    // graves so the player doesn't have to scroll the chronicle.
+    const historyButton = document.createElement("button");
+    historyButton.className = "btn";
+    historyButton.textContent = "History";
+    historyButton.title = "Browse the colony's artifacts, books, and graves";
+    historyButton.addEventListener("click", () => handlers.onShowHistory());
+    tools.appendChild(historyButton);
 
     // Tutorial replay — opens the new-player overlay any time.
     const helpButton = document.createElement("button");

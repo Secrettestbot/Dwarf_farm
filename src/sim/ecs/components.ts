@@ -198,6 +198,35 @@ export interface Tantrum {
   endsAtTick: number;
 }
 
+/** Domesticated or domesticatable creature — pets the colony has
+ * adopted (or is in the process of adopting). A wild Pet has no
+ * owner and accumulates tameProgress when a dwarf with sufficient
+ * farming skill stands adjacent. Once tamed, the pet follows its
+ * owner around and helps the colony — cave dogs hunt small
+ * hostiles (rats, spiders, bats) so the miners don't have to.
+ *
+ * Rarity is enforced at the spawn site: wild pets only appear
+ * roughly once per in-game year. The colony will rarely have more
+ * than two or three at a time. */
+export interface Pet {
+  kind: PetKind;
+  /** Owner dwarf entity id once tamed, else -1 for a wild pet. */
+  ownerId: number;
+  /** Owner's name — preserved when the entity reference dies so
+   * the chronicle still reads correctly when the owner passes. */
+  ownerName?: string;
+  /** Cumulative ticks of taming progress. Once it crosses
+   * PET_TAME_THRESHOLD the pet flips from wild to tame. */
+  tameProgress: number;
+  /** Tick at which the pet was tamed, or -1 if still wild. */
+  tamedAtTick: number;
+  /** Tick of the last attack this pet made. Used as a per-pet
+   * cooldown so they don't tear through hostiles every tick. */
+  lastAttackTick: number;
+}
+
+export type PetKind = "cave_dog";
+
 export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
 
 export interface JobAssignment {

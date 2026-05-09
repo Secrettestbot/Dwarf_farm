@@ -134,8 +134,8 @@ describe("narrative milestones (GDD §10.2)", () => {
   });
 
   it("Three Generations fires when both parents were themselves born in-colony", () => {
-    const w = generateWorld({ seed: 813, width: 200, height: 500 });
-    const sim = new SimWorld(813, w.grid, w.surfaceY, w.spawn);
+    const w = generateWorld({ seed: 817, width: 200, height: 500 });
+    const sim = new SimWorld(817, w.grid, w.surfaceY, w.spawn);
     // Hand-spawn two adults flagged as in-colony births. Pair them, run
     // a year, expect a child + the milestone.
     const m = sim.spawnDwarf({ name: "Mother", x: w.spawn.x, y: w.spawn.y, age: 25, bornInColony: true });

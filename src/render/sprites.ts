@@ -610,6 +610,38 @@ const HOLLOW_KING_PIXELS: string[] = [
   "0010000000010000",
 ];
 
+// Cave dog: low quadruped silhouette, dirt-brown body. Used for
+// the pet system — wild and tame both render with this sprite,
+// with a small claim pip overlaid in the renderer for tame pets.
+const CAVE_DOG_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000111000",
+  "00000111111144110",
+  "0001144444444411",
+  "0014444444444411",
+  "0144444444444141",
+  "1444444444444401",
+  "1411111141111100",
+  "0010100000110100",
+  "0010100000110100",
+  "0010000000010000",
+  "0000000000000000",
+];
+
+export function getPetSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {
+  const key = `pet:${kind}`;
+  let s = cache.get(key);
+  if (!s) {
+    s = paintFromRows(kind === "cave_dog" ? CAVE_DOG_PIXELS : CAVE_DOG_PIXELS);
+    cache.set(key, s);
+  }
+  return s;
+}
+
 // Cave bat: small flying silhouette in dusk-purple wings.
 const CAVE_BAT_PIXELS: string[] = [
   "0000000000000000",

@@ -102,6 +102,22 @@ export interface SavedHostile {
   lastMoveTick: number;
 }
 
+/** Saved pet entity — wild or tame. ownerIndex is an index into
+ * the dwarves[] array (matching the same encoding partnerIndex
+ * uses); -1 means wild or owner-deceased. */
+export interface SavedPet {
+  kind: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  ownerIndex: number;
+  ownerName?: string;
+  tameProgress: number;
+  tamedAtTick: number;
+  lastAttackTick: number;
+}
+
 export interface SavedBlueprint {
   id: number;
   kind: string;
@@ -196,6 +212,7 @@ export interface SaveV1 {
   lastYearAnnounced?: number;
   populationMilestones?: number[];
   hostiles?: SavedHostile[];
+  pets?: SavedPet[];
   /** Player priority sliders. Optional for back-compat with v2 saves —
    * older saves restore to the neutral defaults. */
   sliders?: SliderState;

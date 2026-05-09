@@ -1,7 +1,7 @@
 import { Camera } from "./camera";
 import { SimWorld } from "../sim/world/simWorld";
 import { TileType } from "../sim/world/tiles";
-import { getDwarfSprite, getHostileSprite, getTileSpriteAtLayer, layerOf, SPRITE_TILE_SIZE } from "./sprites";
+import { getDwarfSprite, getHostileSprite, getPetSprite, getTileSpriteAtLayer, layerOf, SPRITE_TILE_SIZE } from "./sprites";
 import { BlueprintKind } from "../sim/planner/blueprint";
 import { seasonOf } from "../sim/time";
 
@@ -236,6 +236,37 @@ export function renderWorld(
       ctx.textAlign = "center";
       ctx.fillText(recent.name, tx + pt / 2, ty - 4);
       ctx.textAlign = "start";
+    }
+  }
+
+  // Pets — drawn between hostiles and dwarves so a tamed dog
+  // standing next to its owner renders behind the dwarf. Wild pets
+  // get a small "?" tag, tame pets a coloured collar pip.
+  const petEnts = sim.pet.entities;
+  for (let i = 0; i < petEnts.length; i++) {
+    const id = petEnts[i];
+    const p = sim.position.get(id);
+    const pet = sim.pet.get(id);
+    if (!p || !pet) continue;
+    if (!grid.isSeen(p.x, p.y)) continue;
+    const sprite = getPetSprite(pet.kind);
+    const sx = (p.x - camera.x) * pt + viewW / 2;
+    const sy = (p.y - camera.y) * pt + viewH / 2;
+    ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
+    if (pt >= 8) {
+      if (pet.tamedAtTick < 0) {
+        // Wild pet — white "wild" tag above.
+        ctx.fillStyle = "#cccccc";
+        ctx.font = "9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("wild", sx + pt / 2, sy - 2);
+        ctx.textAlign = "start";
+      } else {
+        // Tame pet — small green collar pip in the corner.
+        ctx.fillStyle = "#a8e090";
+        const ps = Math.max(2, Math.floor(pt * 0.18));
+        ctx.fillRect(sx + pt - ps - 1, sy + 1, ps, ps);
+      }
     }
   }
 

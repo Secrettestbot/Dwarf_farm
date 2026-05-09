@@ -1,6 +1,6 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, GameMode } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
@@ -183,6 +183,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     populationMilestones: Array.from(sim.populationMilestones),
     narrativeMilestones: Array.from(sim.narrativeMilestones),
     hostiles: collectHostiles(sim),
+    pets: collectPets(sim, entityToIndex),
     sliders: { ...sim.sliders },
     emergency: { ...sim.emergency },
     items: collectItems(sim),
@@ -216,6 +217,32 @@ function collectItems(sim: SimWorld): import("./schema").SavedItem[] {
     const p = sim.position.get(e);
     if (!it || !p) continue;
     out.push({ kind: it.kind, x: p.x, y: p.y, quality: it.quality });
+  }
+  return out;
+}
+
+function collectPets(sim: SimWorld, entityToIndex: Map<number, number>): SavedPet[] {
+  const out: SavedPet[] = [];
+  const ents = sim.pet.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const pet = sim.pet.get(e);
+    const p = sim.position.get(e);
+    const hp = sim.health.get(e);
+    if (!pet || !p || !hp) continue;
+    const ownerIndex = pet.ownerId !== -1 ? (entityToIndex.get(pet.ownerId) ?? -1) : -1;
+    out.push({
+      kind: pet.kind,
+      x: p.x,
+      y: p.y,
+      hp: hp.hp,
+      maxHp: hp.maxHp,
+      ownerIndex,
+      ownerName: pet.ownerName,
+      tameProgress: pet.tameProgress,
+      tamedAtTick: pet.tamedAtTick,
+      lastAttackTick: pet.lastAttackTick,
+    });
   }
   return out;
 }
@@ -482,6 +509,25 @@ export function restore(save: SaveV1): SimWorld {
         hp: h.hp,
         lastAttackTick: h.lastAttackTick,
         lastMoveTick: h.lastMoveTick,
+      });
+    }
+  }
+  // Restore pets — wild and tame both. ownerIndex maps back through
+  // the dwarf-restoration array so the owner's entity id is correct
+  // even though the save format doesn't carry raw ids.
+  if (save.pets) {
+    for (const p of save.pets) {
+      const ownerId = p.ownerIndex >= 0 ? spawnedEntities[p.ownerIndex] ?? -1 : -1;
+      sim.spawnPet({
+        kind: p.kind as import("../sim/ecs/components").PetKind,
+        x: p.x,
+        y: p.y,
+        hp: p.hp,
+        maxHp: p.maxHp,
+        ownerId,
+        ownerName: p.ownerName,
+        tameProgress: p.tameProgress,
+        tamedAtTick: p.tamedAtTick,
       });
     }
   }

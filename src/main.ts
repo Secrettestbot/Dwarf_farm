@@ -21,6 +21,7 @@ import { Founder } from "./sim/dwarves/founders";
 import { narrateFounding } from "./sim/events/narrator";
 import { playEventSound } from "./audio/sound";
 import { showTutorial, tutorialAlreadySeen } from "./ui/tutorial";
+import { HistoryPanel } from "./ui/historyPanel";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
 // 200×500 world for speed; live play uses the full size.
@@ -196,6 +197,8 @@ function runGame(active: ActiveFortress, camera: Camera) {
   const minimap = new Minimap(sim.grid.width, sim.grid.height);
   minimap.refresh(sim, performance.now(), true);
 
+  const historyPanel = new HistoryPanel(uiHost);
+
   let panStart: { mx: number; my: number; cx: number; cy: number } | null = null;
   let isPanning = false;
 
@@ -210,6 +213,9 @@ function runGame(active: ActiveFortress, camera: Camera) {
     worldSeed: () => sim.seed,
     onShowTutorial: () => {
       void showTutorial(uiHost);
+    },
+    onShowHistory: () => {
+      historyPanel.open(active.sim);
     },
   });
   const eventPanel = new EventLogPanel(uiHost);
@@ -248,9 +254,14 @@ function runGame(active: ActiveFortress, camera: Camera) {
       const id = findDwarfNear(active.sim, tx, ty);
       if (id !== null) {
         inspector.open(id);
-      } else {
-        // Click on empty space closes the inspector.
+      } else if (showGraveTooltip(active.sim, tx, ty, e.clientX, e.clientY)) {
+        // Headstone — tooltip handled separately. Close the dwarf
+        // inspector so the two UIs don't overlap.
         inspector.close();
+      } else {
+        // Click on empty space closes the inspector + any tooltip.
+        inspector.close();
+        hideGraveTooltip();
       }
     }
     panStart = null;
@@ -332,6 +343,43 @@ function runGame(active: ActiveFortress, camera: Camera) {
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+}
+
+/** Find a grave at (tx, ty) and show a small floating tooltip with
+ * the buried dwarf's epitaph. Returns true if a grave was found. */
+function showGraveTooltip(sim: SimWorld, tx: number, ty: number, screenX: number, screenY: number): boolean {
+  const grave = sim.graves.find((g) => g.x === tx && g.y === ty);
+  if (!grave) return false;
+  let tooltip = document.getElementById("grave-tooltip") as HTMLDivElement | null;
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "grave-tooltip";
+    tooltip.style.cssText =
+      "position:fixed;background:#1a1410;border:1px solid #4a4030;padding:8px 12px;color:#cdb88a;font-family:monospace;font-size:11px;line-height:1.4;z-index:30;pointer-events:none;max-width:240px;";
+    uiHost.appendChild(tooltip);
+  }
+  const yearOfDeath = Math.floor(grave.deathTick / 34560) + 1;
+  tooltip.innerHTML = `
+    <div style="color:#e0c080;font-size:12px;">${escapeHtml(grave.name)}</div>
+    <div style="color:#999;">${escapeHtml(grave.profession)}, aged ${grave.ageAtDeath}</div>
+    <div style="color:#888;margin-top:4px;">${escapeHtml(grave.cause)}</div>
+    <div style="color:#666;font-size:10px;margin-top:4px;">Year ${yearOfDeath}</div>
+  `;
+  tooltip.style.left = `${Math.min(screenX + 12, window.innerWidth - 260)}px`;
+  tooltip.style.top = `${Math.min(screenY + 12, window.innerHeight - 100)}px`;
+  tooltip.style.display = "block";
+  return true;
+}
+
+function hideGraveTooltip(): void {
+  const tooltip = document.getElementById("grave-tooltip");
+  if (tooltip) tooltip.style.display = "none";
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
+  );
 }
 
 /** Click tolerance: try the exact tile first, then 1-tile neighbors. */
