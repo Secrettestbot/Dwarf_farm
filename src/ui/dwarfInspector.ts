@@ -107,9 +107,13 @@ export class DwarfInspector {
       : "idle";
 
     const isSoldier = sim.squad.has(this.targetId);
-    const equipped = sim.equipment.get(this.targetId)?.weapon === true;
+    const equip = sim.equipment.get(this.targetId);
+    const equipped = equip?.weapon === true;
+    const wq = equip?.weaponQuality ?? 0;
+    const QLABELS = ["", "Fine ", "Superior ", "Exceptional ", "Masterwork "];
+    const armedText = equipped ? ` · armed${wq > 0 ? ` (${QLABELS[wq]}weapon)` : ""}` : " · unarmed";
     const militaryLine = isSoldier
-      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">⚔ Standing guard${equipped ? " · armed" : " · unarmed"}</div>`
+      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">⚔ Standing guard${armedText}</div>`
       : "";
 
     const health = sim.health.get(this.targetId);

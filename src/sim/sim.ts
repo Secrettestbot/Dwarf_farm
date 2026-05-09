@@ -632,24 +632,35 @@ function draftSystem(sim: SimWorld): void {
     //      caught up).
     if (!sim.equipment.has(c.id)) {
       let armed = false;
-      // Look for a tool on a rack.
+      let weaponQuality = 0;
+      // Look for the highest-quality tool on a rack — a Masterwork
+      // sword goes to a soldier before a basic one (GDD §6.3).
       const ents = sim.item.entities;
-      for (let i = 0; i < ents.length && !armed; i++) {
+      let bestEnt = -1;
+      let bestQ = -1;
+      for (let i = 0; i < ents.length; i++) {
         const ie = ents[i];
         const it = sim.item.get(ie);
         const p = sim.position.get(ie);
         if (!it || !p) continue;
         if (it.kind !== "tools") continue;
         if (sim.grid.getTile(p.x, p.y) !== TileType.ArmouryRack) continue;
-        sim.destroyItem(ie);
+        const q = it.quality ?? 0;
+        if (q > bestQ) { bestQ = q; bestEnt = ie; }
+      }
+      if (bestEnt !== -1) {
+        weaponQuality = bestQ;
+        sim.destroyItem(bestEnt);
         armed = true;
       }
       if (!armed && sim.stockpile.tools > 0) {
+        // Counter fallback can't preserve quality — bars and tools in
+        // the global counter are mixed grade. Treat as basic.
         sim.stockpile.tools--;
         armed = true;
       }
       if (armed) {
-        sim.equipment.set(c.id, { weapon: true });
+        sim.equipment.set(c.id, { weapon: true, weaponQuality });
         const dw = sim.dwarf.get(c.id);
         if (dw) {
           sim.events.add(
@@ -950,7 +961,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   // the alive-check in findHaulTarget.
   const carrying = sim.carrying.get(e);
   if (carrying) {
-    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
+    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
   }
   // Remove from the ECS, which strips all component stores.
   sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury]);
@@ -1678,8 +1689,11 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     // way until they earn their own ItemKinds.
     const outAsItem = outputAsItemKind(recipe.outputKind);
     if (outAsItem) {
+      // Roll output quality from the crafter's skill — Skilled+ smiths
+      // produce Fine bars, Legendary smiths produce Masterworks (GDD §6.3).
+      const quality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
       for (let i = 0; i < recipe.outputQty; i++) {
-        sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y });
+        sim.spawnItem({ kind: outAsItem, x: pos.x, y: pos.y, quality });
       }
     } else {
       sim.stockpile[recipe.outputKind] += recipe.outputQty;
@@ -1721,6 +1735,41 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   return null;
 }
 
+/** Roll a quality tier (0..4: basic / Fine / Superior / Exceptional /
+ * Masterwork) for a crafted item from the crafter's skill level (GDD
+ * §6.3). The distribution is intentionally generous — Skilled smiths
+ * regularly turn out Fine work, Legendary ones occasionally produce
+ * a Masterwork. Deterministic via aiRng. */
+function rollCraftQuality(sim: SimWorld, skill: number): number {
+  const r = sim.aiRng.nextFloat();
+  if (skill >= 17) {
+    // Legendary: regular Exceptional, chance of Masterwork.
+    if (r < 0.30) return 4;
+    if (r < 0.90) return 3;
+    return 2;
+  }
+  if (skill >= 13) {
+    // Expert: regular Superior, rare Exceptional.
+    if (r < 0.10) return 3;
+    if (r < 0.70) return 2;
+    return 1;
+  }
+  if (skill >= 9) {
+    // Skilled: regular Fine, rare Superior.
+    if (r < 0.10) return 2;
+    if (r < 0.70) return 1;
+    return 0;
+  }
+  if (skill >= 5) {
+    // Adequate: small chance of Fine.
+    return r < 0.20 ? 1 : 0;
+  }
+  // Novice: baseline.
+  return 0;
+}
+
+export const QUALITY_LABELS = ["basic", "Fine", "Superior", "Exceptional", "Masterwork"] as const;
+
 /** Two-phase hauling. progress=0 is the pickup leg: the dwarf has walked
  * to a loose item and grabs it. progress=1 is the delivery leg: the
  * dwarf has walked to a stockpile cell and credits the global counter.
@@ -1742,7 +1791,7 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       const p = sim.position.get(ie);
       if (!it || !p) continue;
       if (p.x !== pos.x || p.y !== pos.y) continue;
-      sim.carrying.set(e, { kind: it.kind });
+      sim.carrying.set(e, { kind: it.kind, quality: it.quality });
       sim.destroyItem(ie);
       break;
     }
@@ -1773,12 +1822,12 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     if (recipe.inputKind !== carrying.kind) continue;
     if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
     if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
-    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
+    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
     droppedAsItem = true;
     break;
   }
   if (!droppedAsItem && carrying.kind === "tools" && tile === TileType.ArmouryRack) {
-    sim.spawnItem({ kind: "tools", x: pos.x, y: pos.y });
+    sim.spawnItem({ kind: "tools", x: pos.x, y: pos.y, quality: carrying.quality });
     droppedAsItem = true;
   }
   if (!droppedAsItem) {
@@ -2439,13 +2488,16 @@ function combatSystem(sim: SimWorld): void {
       const dwarf = sim.dwarf.get(target);
       const military = dwarf?.skills.military ?? 1;
       const isSoldier = sim.squad.has(target);
-      const equipped = sim.equipment.get(target)?.weapon === true;
+      const equipment = sim.equipment.get(target);
+      const equipped = equipment?.weapon === true;
+      const weaponQuality = equipment?.weaponQuality ?? 0;
       const inFury = sim.fury.has(target);
       const damage =
         DWARF_BASE_DAMAGE +
         Math.floor((military - 1) / 2) +
         (isSoldier ? 5 : 0) +
         (equipped ? 8 : 0) +
+        (equipped ? weaponQuality * 2 : 0) + // Fine +2, Masterwork +8 (§6.3).
         (inFury ? 30 : 0); // The Fury: huge bonus, hostiles fall fast.
       hHealth.hp -= damage;
       if (hHealth.hp <= 0) {

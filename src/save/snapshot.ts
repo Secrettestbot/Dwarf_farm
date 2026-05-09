@@ -94,9 +94,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
         : undefined,
       job: savedJob,
       pathing: savedPathing,
-      carrying: carrying ? { kind: carrying.kind } : undefined,
+      carrying: carrying ? { kind: carrying.kind, quality: carrying.quality } : undefined,
       squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
-      equipment: equipment ? { weapon: equipment.weapon } : undefined,
+      equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
     });
   });
 
@@ -192,7 +192,7 @@ function collectItems(sim: SimWorld): import("./schema").SavedItem[] {
     const it = sim.item.get(e);
     const p = sim.position.get(e);
     if (!it || !p) continue;
-    out.push({ kind: it.kind, x: p.x, y: p.y });
+    out.push({ kind: it.kind, x: p.x, y: p.y, quality: it.quality });
   }
   return out;
 }
@@ -306,13 +306,13 @@ export function restore(save: SaveV1): SimWorld {
       });
     }
     if (d.carrying) {
-      sim.carrying.set(e, { kind: d.carrying.kind });
+      sim.carrying.set(e, { kind: d.carrying.kind, quality: d.carrying.quality });
     }
     if (d.squad) {
       sim.squad.set(e, { draftedAtTick: d.squad.draftedAtTick });
     }
     if (d.equipment) {
-      sim.equipment.set(e, { weapon: d.equipment.weapon });
+      sim.equipment.set(e, { weapon: d.equipment.weapon, weaponQuality: d.equipment.weaponQuality });
     }
   }
 
@@ -383,7 +383,7 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.items) {
     for (const it of save.items) {
-      sim.spawnItem({ kind: it.kind, x: it.x, y: it.y });
+      sim.spawnItem({ kind: it.kind, x: it.x, y: it.y, quality: it.quality });
     }
   }
   if (save.research) {

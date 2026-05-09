@@ -90,12 +90,21 @@ export interface Item {
   /** Entity id of the dwarf currently en route to pick this item up, or
    * -1 if unclaimed. Prevents two haulers racing for the same crate. */
   claimedBy: number;
+  /** Quality tier in 0..4 (basic, Fine, Superior, Exceptional, Masterwork)
+   * per GDD §6.3. Set by progressCraft from the crafter's skill;
+   * mining drops always come out at quality 0. Round-trips through
+   * save and through hauling. */
+  quality?: number;
 }
 
 /** Component on a dwarf currently carrying something. While set, the dwarf
  * is in the "deliver to stockpile" half of a haul job. */
 export interface Carrying {
   kind: ItemKind;
+  /** Quality tier of the carried item — preserved end-to-end so a
+   * Masterwork bar reaches the forge as a Masterwork bar, not a
+   * baseline one. */
+  quality?: number;
 }
 
 /** Membership in the colony's standing military. Auto-assigned at year
@@ -119,6 +128,10 @@ export interface Equipment {
    * Session 5 terms). Future sessions can add armour, helm, shield,
    * etc., as additional flags. */
   weapon: boolean;
+  /** Quality tier of the weapon in 0..4 (basic → Masterwork) per GDD
+   * §6.3. Each tier above 0 adds +2 damage in combat. Optional for
+   * back-compat with pre-quality saves. */
+  weaponQuality?: number;
 }
 
 /** The Fury (GDD §6.5 special trait): once-per-life berserk rage that

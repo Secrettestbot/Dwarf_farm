@@ -270,10 +270,10 @@ export class SimWorld {
    * Used by the mining work system when a tile is excavated, so the rough
    * stone / ore / dirt becomes a haulable object instead of teleporting
    * straight into the stockpile counter. */
-  spawnItem(spec: { kind: ItemKind; x: number; y: number }): EntityId {
+  spawnItem(spec: { kind: ItemKind; x: number; y: number; quality?: number }): EntityId {
     const e = this.ecs.create();
     this.position.set(e, { x: spec.x, y: spec.y });
-    this.item.set(e, { kind: spec.kind, claimedBy: -1 });
+    this.item.set(e, { kind: spec.kind, claimedBy: -1, quality: spec.quality });
     return e;
   }
 
