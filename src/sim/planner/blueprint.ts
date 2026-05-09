@@ -32,7 +32,9 @@ export type BlueprintKind =
   | "tannery"
   | "loom"
   | "hospital"
-  | "tavern";
+  | "tavern"
+  | "magma_forge"
+  | "water_wheel";
 
 export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   bedroom: "Bedroom",
@@ -60,6 +62,8 @@ export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   loom: "Loom",
   hospital: "Hospital",
   tavern: "Tavern",
+  magma_forge: "Magma Forge",
+  water_wheel: "Water Wheel",
 };
 
 export type BlueprintStatus = "digging" | "complete";
@@ -178,7 +182,8 @@ export function isMaintainable(kind: BlueprintKind): boolean {
     kind === "tannery" ||
     kind === "loom" ||
     kind === "hospital" ||
-    kind === "tavern"
+    kind === "tavern" ||
+    kind === "magma_forge"
   );
 }
 

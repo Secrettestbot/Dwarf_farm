@@ -2124,8 +2124,13 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       // produces masterworks the same way an elder does.
       let researchBias = 0;
       const completed = sim.research.completed;
-      if (blueprintKind === "forge" && completed.includes("weaponsmithing")) researchBias++;
-      if ((blueprintKind === "forge" || blueprintKind === "smelter") && completed.includes("advanced_metallurgy")) researchBias++;
+      if ((blueprintKind === "forge" || blueprintKind === "magma_forge") && completed.includes("weaponsmithing")) researchBias++;
+      if ((blueprintKind === "forge" || blueprintKind === "magma_forge" || blueprintKind === "smelter") && completed.includes("advanced_metallurgy")) researchBias++;
+      // Magma Forge by definition stamps an extra quality tier on
+      // every output — that's the "magma forge craft" of the GDD's
+      // Tier 4 research arc, the metallurgical jump that makes the
+      // Hollow King ultimately killable.
+      if (blueprintKind === "magma_forge") researchBias++;
       const baseQuality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
       const quality = Math.max(0, Math.min(4, baseQuality + traitBias + elderBias + researchBias));
       for (let i = 0; i < outputQty; i++) {
@@ -2199,8 +2204,8 @@ function hasElderMentor(sim: SimWorld, skill: SkillId): boolean {
 
 /** Trait-modulated work speed at the current in-game hour. Folds in
  * the static trait workSpeed plus any time-of-day flags (Night Owl
- * gets full speed at night, 0.8× during the day per GDD §6.5). Elders
- * also work 15% slower — the cost of the wisdom bonus. */
+ * gets full speed at night, 0.8× during the day per GDD §6.5), the
+ * elder slowdown, and a power-driven boost from a nearby water wheel. */
 function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
   const dw = sim.dwarf.get(dwarfId);
   if (!dw) return 1;
@@ -2214,7 +2219,24 @@ function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
   if (isElder(sim, dwarfId)) {
     speed *= 0.85;
   }
+  // Water Wheel aura: a wheel within 8 tiles of the worker adds 30%
+  // to the effective work speed. The GDD's "mechanical power" without
+  // a full power-grid system. Multiple wheels don't stack — one is
+  // enough, the colony's wired up.
+  const pos = sim.position.get(dwarfId);
+  if (pos && hasNearbyWaterWheel(sim, pos.x, pos.y)) speed *= 1.3;
   return speed;
+}
+
+const WATER_WHEEL_AURA = 8;
+function hasNearbyWaterWheel(sim: SimWorld, sx: number, sy: number): boolean {
+  for (let dy = -WATER_WHEEL_AURA; dy <= WATER_WHEEL_AURA; dy++) {
+    for (let dx = -WATER_WHEEL_AURA; dx <= WATER_WHEEL_AURA; dx++) {
+      if (dx * dx + dy * dy > WATER_WHEEL_AURA * WATER_WHEEL_AURA) continue;
+      if (sim.grid.getTile(sx + dx, sy + dy) === TileType.WaterWheel) return true;
+    }
+  }
+  return false;
 }
 
 /** Roll a quality tier (0..4: basic / Fine / Superior / Exceptional /

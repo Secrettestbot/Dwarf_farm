@@ -69,6 +69,12 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "tavern":
       furnishTavern(grid, b);
       break;
+    case "magma_forge":
+      furnishWorkshop(grid, b, TileType.MagmaForgeStation);
+      break;
+    case "water_wheel":
+      furnishWaterWheel(grid, b);
+      break;
     case "library":
       furnishLibrary(grid, b);
       break;
@@ -143,6 +149,18 @@ function furnishFarm(grid: TileGrid, b: Blueprint): void {
   // planner doesn't know the current tick, so the farmSystem fills in
   // the actual planted-at tick on its first run over the farm.
   b.cellTendedAt = new Int32Array(b.cavity.length).fill(-1);
+}
+
+/** Water Wheel: the cavity itself becomes WaterWheel tiles. There's
+ * no station/barkeep — the wheel runs on its own, and the speed
+ * bonus is applied passively in workSystem to nearby workshops. */
+function furnishWaterWheel(grid: TileGrid, b: Blueprint): void {
+  for (let i = 0; i < b.cavity.length; i++) {
+    const c = b.cavity[i];
+    const x = c & 0xffff;
+    const y = (c >>> 16) & 0xffff;
+    grid.setTile(x, y, TileType.WaterWheel);
+  }
 }
 
 /** Tavern: a counter dead-centre for the barkeep, plus a row of

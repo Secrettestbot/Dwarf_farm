@@ -136,6 +136,19 @@ export const RECIPES: Partial<Record<BlueprintKind, Recipe>> = {
     skill: "loom_tanning",
     station: TileType.LoomStation,
   },
+  magma_forge: {
+    // Magma Forge: same input/output as a regular Forge but the magma
+    // heat lets the smith work substantially faster. Quality bonus is
+    // wired separately in progressCraft (researchBias for forges).
+    verb: "forges tools at the magma",
+    inputKind: "bars",
+    inputQty: 1,
+    outputKind: "tools",
+    outputQty: 1,
+    ticks: 50, // vs 90 for a coal forge
+    skill: "smithing",
+    station: TileType.MagmaForgeStation,
+  },
 };
 
 export function recipeFor(kind: BlueprintKind): Recipe | undefined {

@@ -120,6 +120,12 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   hospital: { w: 4, h: 3, priority: 2 },
   // Tavern: 5×4 social hall. The colony's morale-recovery space.
   tavern: { w: 5, h: 4, priority: 2 },
+  // Magma Forge: 3×3 workshop. Tier 4 Magma Forge Craft + a Magma
+  // Vent reachable from the colony.
+  magma_forge: { w: 3, h: 3, priority: 1 },
+  // Water Wheel: 2×2 mechanism placed adjacent to Water tiles. No
+  // recipe, just a passive speed bonus to nearby workshops.
+  water_wheel: { w: 2, h: 2, priority: 3 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -245,6 +251,8 @@ export class ColonyPlanner {
     if (this.needsLoom(ctx) && this.placeRoom(ctx, "loom")) return true;
     if (this.needsHospital(ctx) && this.placeRoom(ctx, "hospital")) return true;
     if (this.needsTavern(ctx) && this.placeRoom(ctx, "tavern")) return true;
+    if (this.needsMagmaForge(ctx) && this.placeRoom(ctx, "magma_forge")) return true;
+    if (this.needsWaterWheel(ctx) && this.placeRoom(ctx, "water_wheel")) return true;
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -456,6 +464,41 @@ export class ColonyPlanner {
     // once the colony's big enough to want a centralised hangout.
     if (ctx.population < 8) return false;
     return this.maintainedAndActiveOfKind("tavern", ctx.tick) === 0;
+  }
+
+  private needsMagmaForge(ctx: PlannerContext): boolean {
+    // Magma Forge: Tier 4 magma_forge_craft research, plus a Magma
+    // Vent has to be sense-able from the colony's reachable space.
+    // Pop ≥ 12 — the late-game industrial commitment.
+    if (ctx.population < 12) return false;
+    if (!(ctx.research?.completed ?? []).includes("magma_forge_craft")) return false;
+    if (!this.hasReachableTileOfKind(ctx, TileType.MagmaVent, 6)) return false;
+    return this.maintainedAndActiveOfKind("magma_forge", ctx.tick) === 0;
+  }
+
+  /** True iff any tile of `kind` exists within `radius` of a
+   * reachable walkable tile. Used by the magma forge / water wheel
+   * gates to confirm the colony actually has the resource the
+   * architect wants to build for. */
+  private hasReachableTileOfKind(ctx: PlannerContext, kind: TileType, radius: number): boolean {
+    const grid = ctx.grid;
+    for (let y = 0; y < grid.height; y++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (grid.getTile(x, y) !== kind) continue;
+        if (this.tileNearReachable(ctx, x, y, radius)) return true;
+      }
+    }
+    return false;
+  }
+
+  private needsWaterWheel(ctx: PlannerContext): boolean {
+    // Water Wheel: Tier 2 carpentry_mechanisms research + a Water
+    // tile reachable from the colony (typically post-aquifer breach
+    // or a controlled-flood corridor).
+    if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("carpentry_mechanisms")) return false;
+    if (!this.hasReachableTileOfKind(ctx, TileType.Water, 4)) return false;
+    return this.maintainedAndActiveOfKind("water_wheel", ctx.tick) === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's

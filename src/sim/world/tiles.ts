@@ -142,6 +142,15 @@ export const enum TileType {
   /** Barred door — non-walkable. Only set during lockdown emergencies;
    * lifting the lockdown swaps every DoorBarred back to Door. */
   DoorBarred = 48,
+  /** Magma Forge — Tier 4 (Magma Forge Craft) workshop tile.
+   * Functionally a forge fed by a tapped magma vent; outputs are
+   * higher quality and produced faster. */
+  MagmaForgeStation = 49,
+  /** Water wheel — Tier 2 (Carpentry: Mechanisms) construction. Sits
+   * adjacent to Water tiles and boosts the speed of nearby workshops
+   * via a passive aura — the GDD's hand-wave for "the colony has
+   * mechanical power". */
+  WaterWheel = 50,
 }
 
 export interface TileInfo {
@@ -202,6 +211,8 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.CaveMushroom]: { name: "cave mushrooms", walkable: false, solid: true, color: 0xc8a8d8 },
   [TileType.Door]: { name: "door", walkable: true, solid: false, color: 0x8a6a3a },
   [TileType.DoorBarred]: { name: "barred door", walkable: false, solid: false, color: 0x4a3a28 },
+  [TileType.MagmaForgeStation]: { name: "magma forge", walkable: true, solid: false, color: 0xe04020 },
+  [TileType.WaterWheel]: { name: "water wheel", walkable: true, solid: false, color: 0x506080 },
 };
 
 export function tileIsGem(t: number): boolean {

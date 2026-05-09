@@ -48,6 +48,8 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   loom: "loom",
   hospital: "hospital",
   tavern: "tavern",
+  magma_forge: "magma forge",
+  water_wheel: "water wheel",
 };
 
 export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): string {
@@ -125,6 +127,10 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `A hospital is laid out ${where}. The wounded will have somewhere to recover.`;
     case "tavern":
       return `A tavern is laid out ${where}. The colony's centre of gravity shifts a little.`;
+    case "magma_forge":
+      return `A magma forge is sketched ${where}. The colony has tapped the deep heat.`;
+    case "water_wheel":
+      return `A water wheel is laid out ${where}. The river will turn the workshops.`;
   }
 }
 
@@ -199,6 +205,10 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `The hospital opens ${where}. The first cot is made up.`;
     case "tavern":
       return `The tavern opens its doors. The first toast is raised.`;
+    case "magma_forge":
+      return `The magma forge roars to life ${where}. The first masterwork tool comes off the anvil.`;
+    case "water_wheel":
+      return `The water wheel begins to turn. The workshops nearby pick up speed.`;
   }
 }
 
