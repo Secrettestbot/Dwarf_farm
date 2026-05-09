@@ -61,7 +61,38 @@ const TILE_PIXELS: Partial<Record<TileType, string[]>> = {
   [TileType.FarmTile]: farmSprite(),
   [TileType.Grass]: grassSprite(),
   [TileType.Tree]: treeSprite(),
+  [TileType.Door]: doorSprite(false),
+  [TileType.DoorBarred]: doorSprite(true),
 };
+
+/** Door: a wooden plank silhouette with a small handle. Barred
+ * version paints heavy reinforcement bars over the same plank shape
+ * so the player can read the lockdown state at a glance. */
+function doorSprite(barred: boolean): string[] {
+  const base = noisyFill(3, 2);
+  // Plank body: rows 1-14, cols 4-11.
+  for (let y = 1; y <= 14; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const c = (y === 1 || y === 14) ? "1" : (x === 4 || x === 11) ? "1" : "5";
+      row = row.substring(0, x) + c + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Handle.
+  base[8] = base[8].substring(0, 9) + "D" + base[8].substring(10);
+  if (barred) {
+    // Two heavy horizontal bars across the plank in dark grey.
+    for (const yBar of [5, 10]) {
+      let row = base[yBar];
+      for (let x = 3; x <= 12; x++) {
+        row = row.substring(0, x) + "8" + row.substring(x + 1);
+      }
+      base[yBar] = row;
+    }
+  }
+  return base;
+}
 
 /** Surface grass: green-tinted earth dotted with brighter sprout pixels.
  * Distinct from the dirt cap so the player can read where the colony's

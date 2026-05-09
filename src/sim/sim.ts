@@ -927,6 +927,28 @@ function emergencySystem(sim: SimWorld): void {
     e.alarmCooldownUntil = sim.tick + ALARM_COOLDOWN_TICKS;
     sim.events.add(sim.tick, "crisis", "The alarm has been lifted. The fortress returns to its work.");
   }
+  // Door bar/unbar transitions: when we enter lockdown, every Door
+  // becomes a DoorBarred (non-walkable); when we leave, the reverse.
+  // doorsBarred tracks the last applied state so we only sweep the
+  // grid on transitions.
+  const wantBarred = e.mode === "lockdown";
+  if ((sim as { _doorsBarred?: boolean })._doorsBarred !== wantBarred) {
+    (sim as { _doorsBarred?: boolean })._doorsBarred = wantBarred;
+    sweepDoors(sim, wantBarred);
+  }
+}
+
+function sweepDoors(sim: SimWorld, barred: boolean): void {
+  const from = barred ? TileType.Door : TileType.DoorBarred;
+  const to = barred ? TileType.DoorBarred : TileType.Door;
+  const grid = sim.grid;
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      if (grid.getTile(x, y) === from) {
+        grid.setTile(x, y, to);
+      }
+    }
+  }
 }
 
 // ---- Narrative milestones (GDD §10.2) ---------------------------------

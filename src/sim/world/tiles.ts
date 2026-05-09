@@ -135,6 +135,13 @@ export const enum TileType {
    * cavern floors (GDD §5.2 "mushroom forests"). Mineable; drops a
    * food item the colony can eat or cook. */
   CaveMushroom = 46,
+  /** Closed-but-walkable door — sits at a room's entrance cell.
+   * Walkable in normal play; the lockdown emergency converts each
+   * Door to DoorBarred so the perimeter actually closes. */
+  Door = 47,
+  /** Barred door — non-walkable. Only set during lockdown emergencies;
+   * lifting the lockdown swaps every DoorBarred back to Door. */
+  DoorBarred = 48,
 }
 
 export interface TileInfo {
@@ -193,6 +200,8 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Gold]: { name: "gold vein", walkable: false, solid: true, color: 0xe8c860 },
   [TileType.Coal]: { name: "coal seam", walkable: false, solid: true, color: 0x202028 },
   [TileType.CaveMushroom]: { name: "cave mushrooms", walkable: false, solid: true, color: 0xc8a8d8 },
+  [TileType.Door]: { name: "door", walkable: true, solid: false, color: 0x8a6a3a },
+  [TileType.DoorBarred]: { name: "barred door", walkable: false, solid: false, color: 0x4a3a28 },
 };
 
 export function tileIsGem(t: number): boolean {

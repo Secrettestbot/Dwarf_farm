@@ -10,9 +10,16 @@
 
 import { TileGrid } from "../world/grid";
 import { TileType } from "../world/tiles";
-import { Blueprint } from "./blueprint";
+import { Blueprint, isMaintainable } from "./blueprint";
 
 export function furnishRoom(grid: TileGrid, b: Blueprint): void {
+  // Enclosed rooms get a door at their entrance cell. Passage kinds
+  // (corridor, mine, lumberyard, stairwell) skip — they're not real
+  // rooms with thresholds. The lockdown emergency turns each Door to
+  // DoorBarred so the colony can actually seal itself when threatened.
+  if (isMaintainable(b.kind)) {
+    placeDoorAtEntrance(grid, b);
+  }
   switch (b.kind) {
     case "bedroom":
       furnishBedroom(grid, b);
@@ -209,4 +216,38 @@ function cavityContains(b: Blueprint, x: number, y: number): boolean {
     if (b.cavity[i] === target) return true;
   }
   return false;
+}
+
+/** Place a Door tile at the cavity cell that has the most walkable
+ * non-cavity neighbours — that's the doorway between the room and the
+ * rest of the colony. If no cell has any external walkable neighbours
+ * (an isolated cavity), no door is placed. Skips cells that already
+ * carry furniture so we don't clobber a station or bed. */
+function placeDoorAtEntrance(grid: TileGrid, b: Blueprint): void {
+  let bestX = -1;
+  let bestY = -1;
+  let bestScore = 0;
+  for (let i = 0; i < b.cavity.length; i++) {
+    const c = b.cavity[i];
+    const x = c & 0xffff;
+    const y = (c >>> 16) & 0xffff;
+    let score = 0;
+    const neighbours = [
+      [x + 1, y],
+      [x - 1, y],
+      [x, y + 1],
+      [x, y - 1],
+    ];
+    for (const [nx, ny] of neighbours) {
+      if (cavityContains(b, nx, ny)) continue;
+      if (grid.isWalkable(nx, ny)) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestX = x;
+      bestY = y;
+    }
+  }
+  if (bestX === -1) return;
+  grid.setTile(bestX, bestY, TileType.Door);
 }
