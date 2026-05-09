@@ -137,6 +137,7 @@ export interface SavedStockpile {
   cut_gems?: number;
   wood?: number;
   planks?: number;
+  pots?: number;
 }
 
 export interface SaveV1 {

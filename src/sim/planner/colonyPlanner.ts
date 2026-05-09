@@ -106,6 +106,9 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Width/height get adjusted to 1×1 in placeLumberyard; the entry here
   // is just for table completeness.
   lumberyard: { w: 1, h: 1, priority: 3 },
+  // Kiln: 3×3 with a fire pit in the centre. Tier 2 Pottery & Kilns
+  // gates it; cheap-to-build but the recipe is slow.
+  kiln: { w: 3, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -226,6 +229,7 @@ export class ColonyPlanner {
     if (this.needsMason(ctx) && this.placeRoom(ctx, "mason")) return true;
     if (this.needsJeweller(ctx) && this.placeRoom(ctx, "jeweller")) return true;
     if (this.needsCarpenter(ctx) && this.placeRoom(ctx, "carpenter")) return true;
+    if (this.needsKiln(ctx) && this.placeRoom(ctx, "kiln")) return true;
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -389,6 +393,15 @@ export class ColonyPlanner {
     if (ctx.population < 6) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_carpentry")) return false;
     return this.maintainedAndActiveOfKind("carpenter", ctx.tick) === 0;
+  }
+
+  private needsKiln(ctx: PlannerContext): boolean {
+    // Kiln is gated on Tier 2 Pottery & Kilns. Pop ≥ 8 — pottery sits
+    // a notch above the basic stone/wood crafts, so the architect waits
+    // until the colony's a bit larger before laying one out.
+    if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("pottery_and_kilns")) return false;
+    return this.maintainedAndActiveOfKind("kiln", ctx.tick) === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's

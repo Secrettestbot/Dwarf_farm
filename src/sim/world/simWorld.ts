@@ -58,6 +58,9 @@ export interface Stockpile {
   /** Sawn planks — Carpenter's Workshop output (GDD §7.1). Future
    * construction material; for now just accumulates. */
   planks: number;
+  /** Fired pottery — Kiln output (GDD §10.2 Tier 2 Pottery & Kilns).
+   * Trade-good with no in-game consumer yet beyond accumulating. */
+  pots: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -122,6 +125,7 @@ export class SimWorld {
     cut_gems: 0,
     wood: 0,
     planks: 0,
+    pots: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-

@@ -106,6 +106,9 @@ export const enum TileType {
   /** Carpenter's bench — workstation in a Carpenter's Workshop (GDD
    * §7.1 / §10.2 Tier 1 Basic Carpentry). Turns logs into planks. */
   CarpenterStation = 38,
+  /** Kiln — fires loose dirt into pottery (GDD §10.2 Tier 2 Pottery
+   * & Kilns). Hot and slow; sits at the centre of a Kiln workshop. */
+  KilnStation = 39,
 }
 
 export interface TileInfo {
@@ -156,6 +159,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Grass]: { name: "grass", walkable: true, solid: false, color: 0x4a8c3a },
   [TileType.Tree]: { name: "tree", walkable: false, solid: true, color: 0x3a6c28 },
   [TileType.CarpenterStation]: { name: "carpenter's bench", walkable: true, solid: false, color: 0xc08a4a },
+  [TileType.KilnStation]: { name: "kiln", walkable: true, solid: false, color: 0xb86040 },
 };
 
 export function tileIsGem(t: number): boolean {

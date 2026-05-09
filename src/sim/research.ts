@@ -91,6 +91,13 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
     cost: 1000,
     prereqs: ["iron_toolmaking", "carpentry_mechanisms"],
   },
+  {
+    id: "pottery_and_kilns",
+    name: "Pottery & Kilns",
+    tier: 2,
+    cost: 800,
+    prereqs: ["basic_stonecutting"],
+  },
 ];
 
 /** GDD Tier 3 — Advanced Craft & Military. Unlocks military depth and

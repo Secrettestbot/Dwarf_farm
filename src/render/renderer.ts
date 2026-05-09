@@ -25,6 +25,7 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   jeweller: { fill: "rgba(180, 130, 220, 0.12)", stroke: "rgba(200, 160, 240, 0.7)" },
   carpenter: { fill: "rgba(180, 130, 70, 0.12)", stroke: "rgba(200, 150, 90, 0.7)" },
   lumberyard: { fill: "rgba(90, 160, 70, 0.18)", stroke: "rgba(120, 200, 100, 0.75)" },
+  kiln: { fill: "rgba(200, 110, 70, 0.14)", stroke: "rgba(220, 130, 80, 0.7)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -202,5 +203,6 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "jeweller": return "jeweller";
     case "carpenter": return "carpenter";
     case "lumberyard": return "tree";
+    case "kiln": return "kiln";
   }
 }

@@ -134,7 +134,8 @@ export class Hud {
       (sp.gems > 0 ? ` · <span style="color:#a8d8e0;">Gems ${sp.gems}</span>` : "") +
       (sp.cut_gems > 0 ? ` · <span style="color:#d8a8f0;">Cut Gems ${sp.cut_gems}</span>` : "") +
       (sp.wood > 0 ? ` · <span style="color:#a87838;">Wood ${sp.wood}</span>` : "") +
-      (sp.planks > 0 ? ` · <span style="color:#c8a070;">Planks ${sp.planks}</span>` : "");
+      (sp.planks > 0 ? ` · <span style="color:#c8a070;">Planks ${sp.planks}</span>` : "") +
+      (sp.pots > 0 ? ` · <span style="color:#c8b090;">Pots ${sp.pots}</span>` : "");
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }
