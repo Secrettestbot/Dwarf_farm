@@ -7,6 +7,10 @@ export interface HudHandlers {
   mode: GameMode;
   onSpeedChange(s: SpeedLevel): void;
   onSave(): void;
+  /** Returns the world seed at click time so the Share-seed button can
+   * read it lazily — the live SimWorld instance can be replaced by
+   * save/restore between HUD construction and the click. */
+  worldSeed(): number;
 }
 
 export class Hud {
@@ -72,6 +76,29 @@ export class Hud {
     saveButton.textContent = "Save";
     saveButton.addEventListener("click", () => handlers.onSave());
     tools.appendChild(saveButton);
+
+    // Share-seed button: copy the world seed to the clipboard so the
+    // player can pass it along, or paste it back into a New Fortress
+    // prompt to relive the same mountain. GDD §13 Phase 4: world seed
+    // sharing.
+    const seedButton = document.createElement("button");
+    seedButton.className = "btn";
+    seedButton.textContent = "Share seed";
+    seedButton.title = "Copy this world's seed to the clipboard";
+    seedButton.addEventListener("click", async () => {
+      const seed = String(handlers.worldSeed());
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(seed);
+        }
+      } catch {
+        // Clipboard may be unavailable (insecure context, denied perms).
+        // Fall through to the visible-text fallback.
+      }
+      seedButton.textContent = `seed: ${seed}`;
+      window.setTimeout(() => { seedButton.textContent = "Share seed"; }, 1800);
+    });
+    tools.appendChild(seedButton);
     top.appendChild(tools);
 
     const help = document.createElement("div");
@@ -99,7 +126,11 @@ export class Hud {
     this.stockpileLabel.innerHTML =
       `<span style="color:#9ad3a3;">Food ${sp.food}</span> · ` +
       `<span style="color:#8aa9ff;">Drink ${sp.drink}</span> · ` +
-      `Ore ${sp.ore} · Stone ${sp.stone}`;
+      (sp.meals > 0 ? `<span style="color:#e0c080;">Meals ${sp.meals}</span> · ` : "") +
+      `Ore ${sp.ore} · Stone ${sp.stone}` +
+      (sp.bars > 0 ? ` · <span style="color:#e0a070;">Bars ${sp.bars}</span>` : "") +
+      (sp.tools > 0 ? ` · <span style="color:#e0c080;">Tools ${sp.tools}</span>` : "") +
+      (sp.gems > 0 ? ` · <span style="color:#a8d8e0;">Gems ${sp.gems}</span>` : "");
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }

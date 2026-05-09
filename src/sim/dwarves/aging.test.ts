@@ -28,7 +28,20 @@ describe("dwarf aging", () => {
   it("ages multiple years correctly", () => {
     const sim = buildSim(3);
     const e = sim.dwarf.entities[0];
-    for (let i = 0; i < TICKS_PER_YEAR * 3 + 10; i++) tick(sim);
+    // Pin Borin's needs each tick — at 3 in-game years he'd otherwise die
+    // of thirst long before the loop ends, the entity slot would be reused
+    // by a migrant via the ECS free list, and `ageOf(e)` would report the
+    // migrant's age. The test is about calendar-driven aging, not survival.
+    for (let i = 0; i < TICKS_PER_YEAR * 3 + 10; i++) {
+      const n = sim.needs.get(e);
+      if (n) {
+        n.hunger = 100;
+        n.thirst = 100;
+        n.sleep = 100;
+        n.social = 100;
+      }
+      tick(sim);
+    }
     expect(sim.ageOf(e)).toBe(28);
   });
 

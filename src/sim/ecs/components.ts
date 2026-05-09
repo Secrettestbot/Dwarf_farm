@@ -29,6 +29,13 @@ export interface Dwarf {
   /** Tick at which this dwarf last finished a job. Used for tie-breaking idle
    * selection in deterministic order. */
   lastJobTick: number;
+  /** True iff this dwarf was born in the colony (mother and father both
+   * present at birth). Founders and migrants are false. Used by the
+   * Three Generations milestone — it fires when a dwarf is born to two
+   * in-colony parents, i.e. all four grandparents lived in the
+   * fortress. Optional in saved data: older saves treat everyone as
+   * not-born-in-colony, which is the conservative default. */
+  bornInColony: boolean;
 }
 
 export interface Pathing {
@@ -57,14 +64,90 @@ export interface Needs {
   /** Thirst — drops fastest; restored by drinking. At 0, the dwarf dies of
    * dehydration. */
   thirst: number;
+  /** Morale — derived state in 0..100. Drifts toward the dwarf's
+   * trait-adjusted baseline plus a bonus / penalty from how well the
+   * other four needs are met. Distressed (below 20) and broken (below
+   * 5) thresholds gate trait behaviours and the future tantrum system.
+   * Displayed in the dwarf inspector so the player can read the colony's
+   * mood at a glance. */
+  morale: number;
   /** Internal accumulators for sub-tick decay. */
   decayAccumSleep: number;
   decayAccumSocial: number;
   decayAccumHunger: number;
   decayAccumThirst: number;
+  decayAccumMorale: number;
 }
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain";
+/** What's loose on the floor — output of mining and (later) workshops, input
+ * to hauling jobs. The kind matches the stockpile counter that the item
+ * eventually credits when a hauler delivers it. Items are entities so
+ * pathfinding and the renderer can locate them by Position. */
+export type ItemKind = "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal";
+
+export interface Item {
+  kind: ItemKind;
+  /** Entity id of the dwarf currently en route to pick this item up, or
+   * -1 if unclaimed. Prevents two haulers racing for the same crate. */
+  claimedBy: number;
+  /** Quality tier in 0..4 (basic, Fine, Superior, Exceptional, Masterwork)
+   * per GDD §6.3. Set by progressCraft from the crafter's skill;
+   * mining drops always come out at quality 0. Round-trips through
+   * save and through hauling. */
+  quality?: number;
+}
+
+/** Component on a dwarf currently carrying something. While set, the dwarf
+ * is in the "deliver to stockpile" half of a haul job. */
+export interface Carrying {
+  kind: ItemKind;
+  /** Quality tier of the carried item — preserved end-to-end so a
+   * Masterwork bar reaches the forge as a Masterwork bar, not a
+   * baseline one. */
+  quality?: number;
+}
+
+/** Membership in the colony's standing military. Auto-assigned at year
+ * boundaries based on the dwarf's Military skill — the top fraction of
+ * the population is drafted, the rest stay civilian. Squad members chase
+ * hostiles instead of fleeing them, deal a flat damage bonus in combat,
+ * and answer the Alarm by mustering at the entrance corridor. */
+export interface Squad {
+  /** Tick at which this dwarf was drafted. Used to age out a soldier
+   * back into civilian life if their skill drops below the cap. */
+  draftedAtTick: number;
+}
+
+/** Personal equipment a dwarf carries — a weapon (or, in later sessions,
+ * armour, shields, etc.). Equipped soldiers deal more damage in combat
+ * than unequipped ones; civilians can be equipped too but rarely have
+ * anything worth picking up. The component sticks with the dwarf for
+ * life — demobilising a soldier doesn't take their weapon back. */
+export interface Equipment {
+  /** True when the dwarf carries a real weapon (a forge tool, in
+   * Session 5 terms). Future sessions can add armour, helm, shield,
+   * etc., as additional flags. */
+  weapon: boolean;
+  /** Quality tier of the weapon in 0..4 (basic → Masterwork) per GDD
+   * §6.3. Each tier above 0 adds +2 damage in combat. Optional for
+   * back-compat with pre-quality saves. */
+  weaponQuality?: number;
+}
+
+/** The Fury (GDD §6.5 special trait): once-per-life berserk rage that
+ * triggers when a bonded dwarf is killed in combat. While set, the
+ * dwarf is effectively unkillable and deals huge damage; the rage
+ * ends naturally when no hostile is in range, then the dwarf
+ * collapses (one-shot, the trait is consumed). */
+export interface Fury {
+  /** Tick at which the rage was triggered. Used for the optional
+   * exhaustion event after the storm passes. */
+  startedAtTick: number;
+  /** Set to true once the trait has fired — prevents a second rage. */
+  used: boolean;
+}
+
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump";
 
 export interface JobAssignment {
   kind: JobKind;

@@ -49,9 +49,18 @@ export class Minimap {
       const tint = LAYER_TINTS[layerOf(wy, surfaceRefY)] ?? LAYER_TINTS[0];
       for (let px = 0; px < this.width; px++) {
         const wx = Math.floor((px / this.width) * sim.grid.width);
+        const off = (py * this.width + px) * 4;
+        // Unseen tiles paint as flat near-black so the minimap doesn't
+        // give away the unmined layout.
+        if (!sim.grid.isSeen(wx, wy)) {
+          data[off] = 5;
+          data[off + 1] = 5;
+          data[off + 2] = 7;
+          data[off + 3] = 255;
+          continue;
+        }
         const t = sim.grid.getTile(wx, wy);
         const col = t === TileType.Air ? 0x000000 : tileColor(t);
-        const off = (py * this.width + px) * 4;
         const r = ((col >> 16) & 0xff) * tint[0];
         const g = ((col >> 8) & 0xff) * tint[1];
         const b = (col & 0xff) * tint[2];

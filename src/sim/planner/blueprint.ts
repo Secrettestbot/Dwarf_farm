@@ -14,7 +14,16 @@ export type BlueprintKind =
   | "corridor"
   | "mine"
   | "farm"
-  | "stairwell";
+  | "stairwell"
+  | "kitchen"
+  | "brewery"
+  | "smelter"
+  | "forge"
+  | "trade_depot"
+  | "library"
+  | "armoury"
+  | "throne_room"
+  | "pump_station";
 
 export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   bedroom: "Bedroom",
@@ -24,6 +33,15 @@ export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   mine: "Mine",
   farm: "Farm",
   stairwell: "Stairwell",
+  kitchen: "Kitchen",
+  brewery: "Brewery",
+  smelter: "Smelter",
+  forge: "Forge",
+  trade_depot: "Trade Depot",
+  library: "Library",
+  armoury: "Armoury",
+  throne_room: "Throne Room",
+  pump_station: "Pump Station",
 };
 
 export type BlueprintStatus = "digging" | "complete";
@@ -57,7 +75,26 @@ export interface Blueprint {
    * MAINTAIN_VALIDITY_TICKS stop counting toward the architect's targets,
    * so the colony can't sprawl beyond what its dwarves can keep up. */
   lastMaintainedTick?: number;
+  /** Room quality in 0..100. A freshly-dug room starts at QUALITY_BASE
+   * and creeps up each time it's maintained — engravings, gem inlays,
+   * carved chairs, the oldest rooms become the most beautiful (GDD
+   * §7.3). Sleeping or eating in a higher-quality room boosts morale
+   * more than a bare cavity does. Optional in saved data: missing
+   * means base quality (the architect's freshly-finished default). */
+  quality?: number;
 }
+
+/** Quality of a freshly-finished room. The architect counts the dig
+ * itself as the first round of work; subsequent maintenance cycles
+ * raise quality from here. */
+export const QUALITY_BASE = 30;
+/** Cap quality can climb to. Leaves a small dead-zone above 90 so a
+ * legendary room is *visibly* a thing, not a slow asymptote. */
+export const QUALITY_MAX = 100;
+/** Per-maintain-cycle quality bump. ~30 cycles past the baseline takes
+ * a room from 'rough cavity' to 'legendary', which is exactly the
+ * fortress-history pacing the GDD describes. */
+export const QUALITY_PER_MAINTAIN = 2;
 
 export function packCell(x: number, y: number): number {
   return (y << 16) | x;
@@ -102,7 +139,21 @@ export function isRoomNeglected(b: Blueprint, currentTick: number): boolean {
 /** Whether a room of this kind takes general upkeep. Corridors, tunnels,
  * stairwells, and mines are bare passages that don't require it. */
 export function isMaintainable(kind: BlueprintKind): boolean {
-  return kind === "bedroom" || kind === "dining_hall" || kind === "stockpile" || kind === "farm";
+  return (
+    kind === "bedroom" ||
+    kind === "dining_hall" ||
+    kind === "stockpile" ||
+    kind === "farm" ||
+    kind === "kitchen" ||
+    kind === "brewery" ||
+    kind === "smelter" ||
+    kind === "forge" ||
+    kind === "trade_depot" ||
+    kind === "library" ||
+    kind === "armoury" ||
+    kind === "throne_room" ||
+    kind === "pump_station"
+  );
 }
 
 /** Build a rectangular cavity from corner + dims. */

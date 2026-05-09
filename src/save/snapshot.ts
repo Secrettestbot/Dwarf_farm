@@ -1,7 +1,7 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
 import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, GameMode } from "./schema";
-import { decodeOverrides, encodeOverrides } from "./codec";
+import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
 // Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
@@ -60,6 +60,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       : undefined;
     const partnerIndex = dw.partnerId !== null ? entityToIndex.get(dw.partnerId) ?? null : null;
     const h = sim.health.get(id);
+    const carrying = sim.carrying.get(id);
+    const squad = sim.squad.get(id);
+    const equipment = sim.equipment.get(id);
     dwarves.push({
       name: dw.name,
       x: pos.x,
@@ -69,6 +72,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       skillXp: dw.skillXp as Record<string, number>,
       profession: dw.profession,
       bornAtTick: dw.bornAtTick,
+      bornInColony: dw.bornInColony,
       partnerIndex,
       lastJobTick: dw.lastJobTick,
       health: h
@@ -80,14 +84,19 @@ export function snapshot(input: SnapshotInput): SaveV1 {
             social: n.social,
             hunger: n.hunger,
             thirst: n.thirst,
+            morale: n.morale,
             decayAccumSleep: n.decayAccumSleep,
             decayAccumSocial: n.decayAccumSocial,
             decayAccumHunger: n.decayAccumHunger,
             decayAccumThirst: n.decayAccumThirst,
+            decayAccumMorale: n.decayAccumMorale,
           }
         : undefined,
       job: savedJob,
       pathing: savedPathing,
+      carrying: carrying ? { kind: carrying.kind, quality: carrying.quality } : undefined,
+      squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
+      equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
     });
   });
 
@@ -112,6 +121,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       createdTick: b.createdTick,
       cellTendedAt: b.cellTendedAt ? Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
+      quality: b.quality,
     };
   });
 
@@ -131,6 +141,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       planner: input.sim.plannerRng.serialize(),
     },
     tileOverrides: overrides,
+    seenMask: encodeSeen(input.sim.grid),
     dwarves,
     blueprints,
     plannerNextId: planner.nextId,
@@ -146,12 +157,44 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       dirt: sim.stockpile.dirt,
       food: sim.stockpile.food,
       drink: sim.stockpile.drink,
+      bars: sim.stockpile.bars,
+      tools: sim.stockpile.tools,
+      gems: sim.stockpile.gems,
+      meals: sim.stockpile.meals,
     },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
     populationMilestones: Array.from(sim.populationMilestones),
+    narrativeMilestones: Array.from(sim.narrativeMilestones),
     hostiles: collectHostiles(sim),
+    sliders: { ...sim.sliders },
+    emergency: { ...sim.emergency },
+    items: collectItems(sim),
+    research: {
+      current: sim.research.current,
+      progress: sim.research.progress,
+      completed: [...sim.research.completed],
+    },
+    hollowKingAware: sim.hollowKingAware,
+    hollowKingNightmares: sim.hollowKingNightmares,
+    hollowKingLastSiegeTick: sim.hollowKingLastSiegeTick,
+    hollowKingSpawned: sim.hollowKingSpawned,
+    voidShadesSlain: sim.voidShadesSlain,
+    aquiferBreachTick: sim.aquiferBreachTick,
   };
+}
+
+function collectItems(sim: SimWorld): import("./schema").SavedItem[] {
+  const out: import("./schema").SavedItem[] = [];
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i];
+    const it = sim.item.get(e);
+    const p = sim.position.get(e);
+    if (!it || !p) continue;
+    out.push({ kind: it.kind, x: p.x, y: p.y, quality: it.quality });
+  }
+  return out;
 }
 
 function collectHostiles(sim: SimWorld): SavedHostile[] {
@@ -180,6 +223,15 @@ export function restore(save: SaveV1): SimWorld {
   const w = generateWorld({ seed: save.seed, width: save.width, height: save.height });
   const decoded = decodeOverrides(save.tileOverrides);
   decoded.apply(w.grid);
+  if (save.seenMask) {
+    decodeSeen(save.seenMask, w.grid);
+  } else {
+    // v2 saves had no fog of war; treat the whole map as already explored
+    // so reloading a pre-fog save doesn't black out the player's fortress.
+    for (let y = 0; y < w.grid.height; y++) {
+      for (let x = 0; x < w.grid.width; x++) w.grid.markSeen(x, y);
+    }
+  }
 
   const sim = new SimWorld(save.seed, w.grid, w.surfaceY, w.spawn);
   sim.tick = save.tick;
@@ -218,6 +270,7 @@ export function restore(save: SaveV1): SimWorld {
       bornAtTick: d.bornAtTick,
       age: d.age,
       initialNeeds: d.needs,
+      bornInColony: d.bornInColony ?? false,
     });
     sim.dwarf.get(e)!.lastJobTick = d.lastJobTick ?? 0;
     spawnedEntities.push(e);
@@ -252,6 +305,15 @@ export function restore(save: SaveV1): SimWorld {
         goalY: d.pathing.goalY,
       });
     }
+    if (d.carrying) {
+      sim.carrying.set(e, { kind: d.carrying.kind, quality: d.carrying.quality });
+    }
+    if (d.squad) {
+      sim.squad.set(e, { draftedAtTick: d.squad.draftedAtTick });
+    }
+    if (d.equipment) {
+      sim.equipment.set(e, { weapon: d.equipment.weapon, weaponQuality: d.equipment.weaponQuality });
+    }
   }
 
   // Restore Colony Planner.
@@ -275,6 +337,7 @@ export function restore(save: SaveV1): SimWorld {
       createdTick: b.createdTick,
       cellTendedAt: b.cellTendedAt ? Int32Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
+      quality: b.quality,
     };
   });
   sim.planner.blueprints = blueprints;
@@ -299,12 +362,41 @@ export function restore(save: SaveV1): SimWorld {
     sim.stockpile.dirt = save.stockpile.dirt;
     if (save.stockpile.food !== undefined) sim.stockpile.food = save.stockpile.food;
     if (save.stockpile.drink !== undefined) sim.stockpile.drink = save.stockpile.drink;
+    if (save.stockpile.bars !== undefined) sim.stockpile.bars = save.stockpile.bars;
+    if (save.stockpile.tools !== undefined) sim.stockpile.tools = save.stockpile.tools;
+    if (save.stockpile.gems !== undefined) sim.stockpile.gems = save.stockpile.gems;
+    if (save.stockpile.meals !== undefined) sim.stockpile.meals = save.stockpile.meals;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;
   if (save.populationMilestones) {
     for (const m of save.populationMilestones) sim.populationMilestones.add(m);
   }
+  if (save.narrativeMilestones) {
+    for (const m of save.narrativeMilestones) sim.narrativeMilestones.add(m);
+  }
+  if (save.sliders) {
+    sim.sliders = { ...sim.sliders, ...save.sliders };
+  }
+  if (save.emergency) {
+    sim.emergency = { ...sim.emergency, ...save.emergency };
+  }
+  if (save.items) {
+    for (const it of save.items) {
+      sim.spawnItem({ kind: it.kind, x: it.x, y: it.y, quality: it.quality });
+    }
+  }
+  if (save.research) {
+    sim.research.current = save.research.current ?? null;
+    sim.research.progress = save.research.progress ?? 0;
+    sim.research.completed = [...(save.research.completed ?? [])];
+  }
+  if (save.hollowKingAware) sim.hollowKingAware = true;
+  if (save.hollowKingNightmares !== undefined) sim.hollowKingNightmares = save.hollowKingNightmares;
+  if (save.hollowKingLastSiegeTick !== undefined) sim.hollowKingLastSiegeTick = save.hollowKingLastSiegeTick;
+  if (save.hollowKingSpawned) sim.hollowKingSpawned = true;
+  if (save.voidShadesSlain !== undefined) sim.voidShadesSlain = save.voidShadesSlain;
+  if (save.aquiferBreachTick !== undefined) sim.aquiferBreachTick = save.aquiferBreachTick;
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).

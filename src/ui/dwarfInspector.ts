@@ -106,6 +106,16 @@ export class DwarfInspector {
       ? `${ACTIVITY_LABEL[job.kind] ?? job.kind}${path && path.pathIndex < path.path.length - 1 ? " (en route)" : ""}`
       : "idle";
 
+    const isSoldier = sim.squad.has(this.targetId);
+    const equip = sim.equipment.get(this.targetId);
+    const equipped = equip?.weapon === true;
+    const wq = equip?.weaponQuality ?? 0;
+    const QLABELS = ["", "Fine ", "Superior ", "Exceptional ", "Masterwork "];
+    const armedText = equipped ? ` · armed${wq > 0 ? ` (${QLABELS[wq]}weapon)` : ""}` : " · unarmed";
+    const militaryLine = isSoldier
+      ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">⚔ Standing guard${armedText}</div>`
+      : "";
+
     const health = sim.health.get(this.targetId);
     const hpHtml = health
       ? `${bar("Health", (health.hp / health.maxHp) * 100, `${health.hp}/${health.maxHp}`)}`
@@ -116,6 +126,7 @@ export class DwarfInspector {
         ${bar("Thirst", needs.thirst)}
         ${bar("Sleep", needs.sleep)}
         ${bar("Social", needs.social)}
+        ${bar("Morale", needs.morale, moraleLabel(needs.morale))}
       `
       : "";
 
@@ -131,6 +142,7 @@ export class DwarfInspector {
         <button id="inspector-close" class="btn" style="padding:2px 8px;font-size:11px;">×</button>
       </div>
       ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
+      ${militaryLine}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${hpHtml}
       ${needsHtml}
@@ -140,6 +152,14 @@ export class DwarfInspector {
     const closeBtn = this.root.querySelector("#inspector-close") as HTMLButtonElement | null;
     if (closeBtn) closeBtn.onclick = () => this.close();
   }
+}
+
+function moraleLabel(v: number): string {
+  if (v >= 80) return "elated";
+  if (v >= 60) return "content";
+  if (v >= 40) return "okay";
+  if (v >= 20) return "low";
+  return "distressed";
 }
 
 function bar(label: string, value: number, displayValue?: string): string {

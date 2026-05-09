@@ -9,6 +9,8 @@ import { findMineTarget } from "./chooseJob";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
 import { BlueprintKind, isRoomNeglected } from "../planner/blueprint";
+import { isShelterMode } from "../emergency";
+import { recipeFor } from "../planner/recipes";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
@@ -49,6 +51,39 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // through if no target is found, so a dwarf never gets stuck idle when a
   // lower-priority alternative is reachable.
 
+  // 0. Emergency shelter override — Alarm and Evacuate both pull every
+  //    civilian to the Safe Zone (currently the spawn tile). Even hunger
+  //    and thirst defer until the panic subsides; that matches the GDD's
+  //    "drop their current job (including eating, sleeping, and
+  //    socialising)" rule. Lockdown does not pull dwarves — it just
+  //    blocks the perimeter and the migration system. Soldiers don't
+  //    shelter — they engage; their branch lands two priorities below
+  //    survival needs.
+  if (isShelterMode(sim.emergency) && !sim.squad.has(e)) {
+    return {
+      kind: "shelter" as JobKind,
+      targetX: sim.spawn.x,
+      targetY: sim.spawn.y,
+      progress: 0,
+    };
+  }
+
+  // 0.5 Engage: standing-guard soldiers head toward the nearest reachable
+  //     hostile. Civilians are *not* eligible — they flee or shelter via
+  //     the alarm path. Engagement supersedes most needs except critical
+  //     thirst / hunger / wounds (those branches sit just below).
+  if (sim.squad.has(e)) {
+    const target = findHostileTarget(sim, pos.x, pos.y);
+    if (target) {
+      return {
+        kind: "engage" as JobKind,
+        targetX: target.x,
+        targetY: target.y,
+        progress: 0,
+      };
+    }
+  }
+
   // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours. The
   //    dwarf walks to the nearest stockpile (or dining hall) — they don't
   //    just drink wherever they happen to be standing.
@@ -61,7 +96,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 2. Hunger — second-fastest. Same global stockpile lookup so deep
   //    miners actually go up for a meal.
-  if (needs && needs.hunger <= HUNGER_CRITICAL && sim.stockpile.food > 0) {
+  if (needs && needs.hunger <= HUNGER_CRITICAL && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)) {
     const target = findFoodTarget(sim, pos.x, pos.y);
     if (target) {
       return { kind: "eat" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };
@@ -82,10 +117,13 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   }
 
   // 4. Circadian rest — at night, a dwarf with at-least-mildly-low sleep
-  //    heads to bed instead of starting a new mining job.
+  //    heads to bed instead of starting a new mining job. The Rest slider
+  //    raises (or lowers) the threshold: a high-Rest colony goes to bed
+  //    earlier, a low-Rest colony grinds through the night.
   const hour = (sim.tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
   const isNight = hour < NIGHT_END_HOUR || hour >= NIGHT_START_HOUR;
-  if (isNight && needs && needs.sleep <= NIGHT_REST_THRESHOLD) {
+  const restThreshold = NIGHT_REST_THRESHOLD * (sim.sliders.rest * 1.4 + 0.3);
+  if (isNight && needs && needs.sleep <= restThreshold) {
     const sleepSpot = findSleepTarget(sim, pos.x, pos.y);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
@@ -96,8 +134,9 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 5. Tend a farm cell that's getting close to fallow. Higher priority
   //    than mining because a colony with no food loses fast — but lower
-  //    than survival needs above. Children skip it.
-  if (age >= MIN_WORK_AGE) {
+  //    than survival needs above. Children skip it. Gated by the Farming
+  //    & Brewing slider — set to zero, dwarves stop tending.
+  if (age >= MIN_WORK_AGE && sim.sliders.farming > 0.05) {
     const tendTarget = findTendTarget(sim, pos.x, pos.y);
     if (tendTarget) {
       return { kind: "tend" as JobKind, targetX: tendTarget.x, targetY: tendTarget.y, progress: 0 };
@@ -108,24 +147,92 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //    if a bedroom or dining hall has been left to rot, fix it before
   //    starting new excavation. The architect won't emit a fresh room
   //    until the existing ones are kept up, so a colony of 7 can't
-  //    sprawl into a kingdom-sized footprint.
-  if (age >= MIN_WORK_AGE) {
+  //    sprawl into a kingdom-sized footprint. Gated loosely by the
+  //    Construction slider since it's upkeep work.
+  if (age >= MIN_WORK_AGE && sim.sliders.construction > 0.05) {
     const maintainTarget = findMaintainTarget(sim, pos.x, pos.y);
     if (maintainTarget) {
       return { kind: "maintain" as JobKind, targetX: maintainTarget.x, targetY: maintainTarget.y, progress: 0 };
     }
   }
 
-  // 7. Mine inside an active blueprint.
-  if (age >= MIN_WORK_AGE) {
+  // 6.5 Haul a loose item to a stockpile or a workshop that wants it.
+  //     Sits ahead of new mining so finished cavities don't fill with
+  //     debris while dwarves keep opening new tunnels. The dwarf
+  //     already carrying something jumps straight to the delivery half
+  //     via the early-return below.
+  if (age >= MIN_WORK_AGE && sim.sliders.hauling > 0.05) {
+    const carrying = sim.carrying.get(e);
+    if (carrying) {
+      // Workshops that consume this resource get priority — feeding a
+      // smelter directly is the colony's reason for hauling ore.
+      const workshop = findWorkshopWantingInput(sim, carrying.kind, pos.x, pos.y);
+      if (workshop) {
+        return { kind: "haul" as JobKind, targetX: workshop.x, targetY: workshop.y, progress: 1 };
+      }
+      // Tools route to an Armoury rack ahead of the generic stockpile
+      // — that's how a colony stores its weapons in the GDD.
+      if (carrying.kind === "tools") {
+        const rack = findEmptyArmouryRack(sim, pos.x, pos.y);
+        if (rack) {
+          return { kind: "haul" as JobKind, targetX: rack.x, targetY: rack.y, progress: 1 };
+        }
+      }
+      const drop = findStockpileDrop(sim, pos.x, pos.y);
+      if (drop) {
+        return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
+      }
+    } else {
+      const haul = findHaulTarget(sim, e, pos.x, pos.y);
+      if (haul) {
+        return { kind: "haul" as JobKind, targetX: haul.x, targetY: haul.y, progress: 0 };
+      }
+    }
+  }
+
+  // 6.7 Craft at a workshop. Gated by the Crafting slider. Skips
+  //     workshops whose recipe input isn't in the stockpile so a smelter
+  //     with no ore doesn't tie up a dwarf for nothing.
+  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+    const craftTarget = findCraftTarget(sim, pos.x, pos.y);
+    if (craftTarget) {
+      return { kind: "craft" as JobKind, targetX: craftTarget.x, targetY: craftTarget.y, progress: 0 };
+    }
+  }
+
+  // 6.75 Pump out a nearby flooded tile. Higher priority than research
+  //      so the colony actually reclaims its corridors instead of
+  //      reading books while the water rises. Only triggers when a
+  //      pump station with reachable water exists.
+  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+    const pumpTarget = findPumpTarget(sim, pos.x, pos.y);
+    if (pumpTarget) {
+      return { kind: "pump" as JobKind, targetX: pumpTarget.x, targetY: pumpTarget.y, progress: 0 };
+    }
+  }
+
+  // 6.8 Research at a Library desk. Gated by the Research slider, and
+  //     only fires when there's an active topic to study.
+  if (age >= MIN_WORK_AGE && sim.sliders.research > 0.05 && sim.research.current) {
+    const desk = findResearchDesk(sim, pos.x, pos.y);
+    if (desk) {
+      return { kind: "research" as JobKind, targetX: desk.x, targetY: desk.y, progress: 0 };
+    }
+  }
+
+  // 7. Mine inside an active blueprint. Gated by the Excavation slider —
+  //    set to zero, the colony stops digging entirely.
+  if (age >= MIN_WORK_AGE && sim.sliders.excavation > 0.05) {
     const mineTarget = findMineTarget(sim, pos.x, pos.y);
     if (mineTarget) {
       return { kind: "mine" as JobKind, targetX: mineTarget.x, targetY: mineTarget.y, progress: 0 };
     }
   }
 
-  // 8. Social: find an idle nearby dwarf to talk to.
-  if (needs && needs.social <= SOCIAL_THRESHOLD) {
+  // 8. Social: find an idle nearby dwarf to talk to. Slider scales the
+  //    threshold so a high-Socialising colony chats more eagerly.
+  const socialThreshold = SOCIAL_THRESHOLD * (sim.sliders.socialising * 1.6 + 0.2);
+  if (needs && needs.social <= socialThreshold) {
     const partner = findSocialPartner(sim, e, pos.x, pos.y);
     if (partner !== -1) {
       const partnerPos = sim.position.get(partner)!;
@@ -303,6 +410,346 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
         (d === best.d && (y < best.y || (y === best.y && x < best.x)))
       ) {
         best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find an unclaimed item on the floor for this dwarf to pick up and
+ * mark it claimed in the same call so two haulers running chooseTask in
+ * the same tick don't both target it. Returns the item's tile (the dwarf
+ * walks onto it). */
+function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number): { x: number; y: number } | null {
+  let bestEnt = -1;
+  let best: { x: number; y: number; d: number } | null = null;
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const it = sim.item.get(ents[i]);
+    const p = sim.position.get(ents[i]);
+    if (!it || !p) continue;
+    if (it.claimedBy !== -1 && sim.ecs.isAlive(it.claimedBy)) continue;
+    // Skip items already sitting on a workshop station that wants
+    // them — those are "delivered", waiting for the crafter to consume.
+    // Without this, a hauler picks up the item it just dropped at the
+    // smelter and the production chain loops forever.
+    if (isItemAtWorkshopDestination(sim, p.x, p.y, it.kind)) continue;
+    // Tools sitting on an Armoury rack are "stored" — they wait there
+    // for the next draft to equip a soldier. Same loop-prevention
+    // logic as the workshop destination skip.
+    if (it.kind === "tools" && sim.grid.getTile(p.x, p.y) === TileType.ArmouryRack) continue;
+    const dx = p.x - sx;
+    const dy = p.y - sy;
+    const d = dx * dx + dy * dy;
+    if (
+      !best ||
+      d < best.d ||
+      (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
+    ) {
+      best = { x: p.x, y: p.y, d };
+      bestEnt = ents[i];
+    }
+  }
+  if (bestEnt !== -1) {
+    sim.item.get(bestEnt)!.claimedBy = hauler;
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest Armoury rack tile that doesn't already have a tool
+ * sitting on it. Caps each rack at one weapon — a fortress with five
+ * racks holds five tools without stacking. Returns null if no Armoury
+ * exists yet, so haulers fall through to the regular stockpile flow. */
+function findEmptyArmouryRack(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "armoury" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.ArmouryRack) continue;
+      // Skip racks that already hold a tool.
+      let stocked = false;
+      const ents = sim.item.entities;
+      for (let j = 0; j < ents.length; j++) {
+        const it = sim.item.get(ents[j]);
+        const p = sim.position.get(ents[j]);
+        if (!it || !p) continue;
+        if (p.x === x && p.y === y && it.kind === "tools") {
+          stocked = true;
+          break;
+        }
+      }
+      if (stocked) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** True if (x, y) is a workshop station whose recipe consumes this
+ * resource. Used to mark items as "delivered" — they're not available
+ * for re-pickup. */
+function isItemAtWorkshopDestination(sim: SimWorld, x: number, y: number, kind: string): boolean {
+  const tile = sim.grid.getTile(x, y);
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const recipe = recipeFor(b.kind);
+    if (!recipe) continue;
+    if (recipe.station !== tile) continue;
+    if (recipe.inputKind !== kind) continue;
+    if (x < b.originX || x >= b.originX + b.width) continue;
+    if (y < b.originY || y >= b.originY + b.height) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Find a workshop that wants this resource as its recipe input and
+ * doesn't already have a matching item sitting on its station. Returns
+ * the station tile so the dwarf walks onto it and drops the item. The
+ * workshop's progress system then consumes the item the next tick.
+ *
+ * Only resources that exist as ItemKind values can be routed this way
+ * — food / drink / bars / tools stay in the global stockpile flow
+ * until they get item kinds of their own.
+ */
+function findWorkshopWantingInput(
+  sim: SimWorld,
+  kind: string,
+  sx: number,
+  sy: number,
+): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const recipe = recipeFor(b.kind);
+    if (!recipe || recipe.inputKind !== kind) continue;
+    // Workshop's centre is the workstation — find it.
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== recipe.station) continue;
+      // Skip if a matching item is already on this tile — no point
+      // stacking two delivery jobs at one station.
+      let alreadyStocked = false;
+      const ents = sim.item.entities;
+      for (let j = 0; j < ents.length; j++) {
+        const it = sim.item.get(ents[j]);
+        const p = sim.position.get(ents[j]);
+        if (!it || !p) continue;
+        if (p.x === x && p.y === y && it.kind === kind) {
+          alreadyStocked = true;
+          break;
+        }
+      }
+      if (alreadyStocked) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest walkable cell inside a completed stockpile to drop a
+ * carried item. Falls back to standing-on-the-spot delivery (item just
+ * gets credited to the global counter) if no stockpile exists yet. */
+function findStockpileDrop(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "stockpile" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (!sim.grid.isWalkable(x, y)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find a pump station tile inside a complete pump room with at least
+ * one water tile within PUMP_DRAIN_RADIUS. The pump operator stands on
+ * the station while progressPump dries one nearby tile per cycle. */
+const PUMP_DRAIN_RADIUS = 12;
+function findPumpTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "pump");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "pump_station" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.PumpStation) continue;
+      if (claimed.has((y << 16) | x)) continue;
+      // Verify there's water within drain radius — no point sending a
+      // dwarf to a pump with nothing to pump.
+      if (!hasWaterInRange(sim, x, y, PUMP_DRAIN_RADIUS)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+function hasWaterInRange(sim: SimWorld, sx: number, sy: number, radius: number): boolean {
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx * dx + dy * dy > radius * radius) continue;
+      if (sim.grid.getTile(sx + dx, sy + dy) === TileType.Water) return true;
+    }
+  }
+  return false;
+}
+
+/** Find the nearest unclaimed Library desk for a research job. Skips
+ * desks already occupied by another scholar so two dwarves don't pile
+ * onto the same chair. */
+function findResearchDesk(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "research");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "library" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.LibraryDesk) continue;
+      if (claimed.has((y << 16) | x)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest hostile in line-of-sight range. Returns the
+ * hostile's tile so the soldier walks adjacent and the existing combat
+ * system handles the actual exchange. Range is capped so the colony's
+ * military doesn't deplete itself running across the entire fortress
+ * for a single rat — hostiles deeper than this end up handled when a
+ * soldier wanders into their pursue radius. */
+const SOLDIER_ENGAGE_RANGE = 30;
+function findHostileTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const p = sim.position.get(ents[i]);
+    if (!p) continue;
+    const dx = p.x - sx;
+    const dy = p.y - sy;
+    const d = dx * dx + dy * dy;
+    if (d > SOLDIER_ENGAGE_RANGE * SOLDIER_ENGAGE_RANGE) continue;
+    if (
+      !best ||
+      d < best.d ||
+      (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
+    ) {
+      best = { x: p.x, y: p.y, d };
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest workstation tile in a completed workshop where the
+ * recipe's input is available in the stockpile. Skips workshops already
+ * being worked at (claim by job target) so a colony of seven crafters
+ * spreads across the workshops it has. */
+function findCraftTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "craft");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    const recipe = recipeFor(b.kind);
+    if (!recipe) continue;
+    // Two ways the workshop's input can be available:
+    //  - Global stockpile has enough of the input kind (the
+    //    pre-routing fallback, still valid for food / drink / bars /
+    //    tools that don't have ItemKinds).
+    //  - A matching item is sitting on the station (a hauler
+    //    delivered it).
+    const stationCells: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === recipe.station) stationCells.push({ x, y });
+    }
+    if (stationCells.length === 0) continue;
+    const stockpileHasInput = sim.stockpile[recipe.inputKind] >= recipe.inputQty;
+    let routedItemPresent = false;
+    if (!stockpileHasInput) {
+      const ents = sim.item.entities;
+      outer: for (const s of stationCells) {
+        for (let i = 0; i < ents.length; i++) {
+          const it = sim.item.get(ents[i]);
+          const p = sim.position.get(ents[i]);
+          if (!it || !p) continue;
+          if (p.x === s.x && p.y === s.y && it.kind === recipe.inputKind) {
+            routedItemPresent = true;
+            break outer;
+          }
+        }
+      }
+    }
+    if (!stockpileHasInput && !routedItemPresent) continue;
+    for (const s of stationCells) {
+      if (claimed.has((s.y << 16) | s.x)) continue;
+      const dx = s.x - sx;
+      const dy = s.y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (s.y < best.y || (s.y === best.y && s.x < best.x)))
+      ) {
+        best = { x: s.x, y: s.y, d };
       }
     }
   }

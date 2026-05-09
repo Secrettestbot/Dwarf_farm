@@ -25,7 +25,7 @@ import { TileType } from "../world/tiles";
 import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
-import { Blueprint, BlueprintKind, isComplete, isRoomNeglected, rectCavity } from "./blueprint";
+import { Blueprint, BlueprintKind, isComplete, isRoomNeglected, rectCavity, QUALITY_BASE } from "./blueprint";
 import { furnishRoom } from "./furnish";
 
 export interface PlannerContext {
@@ -41,6 +41,15 @@ export interface PlannerContext {
    * lifecycle events ("plans laid out", "tunnel complete", etc.). The log
    * is part of save state, so the chronicle is reproducible. */
   events?: EventLog;
+  /** Research progress. Gates the workshops whose recipes require
+   * research per GDD §10.2 (Smelter on Iron Smelting, Forge on Iron
+   * Toolmaking). When absent, the planner assumes nothing is researched
+   * yet — useful for unit tests of the planner in isolation. */
+  research?: { completed: string[] };
+  /** True iff the colony has breached an aquifer at some point. Gates
+   * the Pump Station emission — building one before there's water to
+   * pump would be a waste of dwarf-hours. */
+  aquiferBreached?: boolean;
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
@@ -58,6 +67,31 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   mine: { w: 2, h: 2, priority: 2 },
   farm: { w: 4, h: 3, priority: 2 },
   stairwell: { w: 2, h: 6, priority: 5 },
+  // Workshops: a small chamber with the workstation in its centre. Big
+  // enough that a hauler can squeeze past the crafter, small enough not
+  // to bloat the architect's footprint when several workshops drop in.
+  kitchen: { w: 3, h: 3, priority: 2 },
+  brewery: { w: 3, h: 3, priority: 2 },
+  smelter: { w: 3, h: 3, priority: 2 },
+  forge: { w: 3, h: 3, priority: 2 },
+  // Trade depot: a wider open room near the entrance for caravans to
+  // park. Placed once per colony at moderate size.
+  trade_depot: { w: 5, h: 4, priority: 3 },
+  // Library: a quiet 4×3 chamber with two desks. Wider than the
+  // workshops so two scholars can fit without colliding.
+  library: { w: 4, h: 3, priority: 2 },
+  // Armoury: a 4×3 room with rack tiles along the back wall. Stores
+  // tools the smiths produced; the draft system equips soldiers from
+  // the global tools counter when this room exists.
+  armoury: { w: 4, h: 3, priority: 2 },
+  // Throne Room: 5×4 ceremonial space with a single throne tile. The
+  // colony only earns this once it has the surplus to spare on
+  // ornament — gated on population in the architect.
+  throne_room: { w: 5, h: 4, priority: 1 },
+  // Pump Station: a 3×3 chamber with a single pump tile. Reclaims
+  // flooded corridors after an aquifer breach; gated on the Tier 2
+  // Hydraulic Basics topic + a breach having actually happened.
+  pump_station: { w: 3, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -162,6 +196,26 @@ export class ColonyPlanner {
     //     so a growing colony stays self-sufficient.
     if (this.needsFarm(ctx) && this.placeRoom(ctx, "farm")) return true;
 
+    // 2.7 Workshops — kitchen, brewery, smelter, forge. Each lands once
+    //     the colony is large enough to use it. Kitchen + brewery come
+    //     first (food / drink loops directly impact survival); smelter
+    //     and forge follow as the colony's mining output grows.
+    if (this.needsKitchen(ctx) && this.placeRoom(ctx, "kitchen")) return true;
+    if (this.needsBrewery(ctx) && this.placeRoom(ctx, "brewery")) return true;
+    if (this.needsSmelter(ctx) && this.placeRoom(ctx, "smelter")) return true;
+    if (this.needsForge(ctx) && this.placeRoom(ctx, "forge")) return true;
+    if (this.needsTradeDepot(ctx) && this.placeRoom(ctx, "trade_depot")) return true;
+    if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
+    if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
+    if (this.needsThroneRoom(ctx) && this.placeRoom(ctx, "throne_room")) return true;
+    if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
+
+    // 2.9 Stairwell — every few completed rooms the architect drops a
+    //     vertical 2×6 shaft so the colony actually descends instead of
+    //     spreading sideways. Without this, dwarves dig wide but
+    //     shallow and the Gem Seam stays out of reach.
+    if (this.wantsStairwell() && this.placeRoom(ctx, "stairwell")) return true;
+
     // 3. Periodic corridor — every two completed rooms the colony wants
     //    another corridor segment so its reach keeps growing. This is what
     //    turns "a cluster of rooms around spawn" into "a network of tunnels".
@@ -207,6 +261,83 @@ export class ColonyPlanner {
     return this.maintainedAndActiveOfKind("bedroom", ctx.tick) < target;
   }
 
+  private needsKitchen(ctx: PlannerContext): boolean {
+    if (ctx.population < 5) return false;
+    return this.maintainedAndActiveOfKind("kitchen", ctx.tick) === 0;
+  }
+
+  private needsBrewery(ctx: PlannerContext): boolean {
+    if (ctx.population < 5) return false;
+    return this.maintainedAndActiveOfKind("brewery", ctx.tick) === 0;
+  }
+
+  private needsSmelter(ctx: PlannerContext): boolean {
+    // The smelter only matters once there's actually ore to smelt and a
+    // population large enough to spare a dedicated smith. Gated on the
+    // Tier 1 Iron Smelting topic per GDD §10.2 — without research,
+    // ore stays raw.
+    if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("iron_smelting")) return false;
+    return this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0;
+  }
+
+  private needsForge(ctx: PlannerContext): boolean {
+    // The forge needs the smelter to feed it; gate one tier above. Also
+    // gates on Iron Toolmaking research (Tier 1) so a colony has to
+    // know how before it builds a forge.
+    if (ctx.population < 10) return false;
+    if (!(ctx.research?.completed ?? []).includes("iron_toolmaking")) return false;
+    if (this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0) return false;
+    return this.maintainedAndActiveOfKind("forge", ctx.tick) === 0;
+  }
+
+  private needsTradeDepot(ctx: PlannerContext): boolean {
+    // Caravans only show up once the colony is large enough to be worth
+    // visiting — and only one depot per fortress.
+    if (ctx.population < 6) return false;
+    return this.maintainedAndActiveOfKind("trade_depot", ctx.tick) === 0;
+  }
+
+  private needsLibrary(ctx: PlannerContext): boolean {
+    // The library lands once the colony has the bandwidth to spare a
+    // dwarf or two for scholarship. Lowered to pop ≥ 5 so research can
+    // run before the smelter / forge tier — those are now gated on
+    // research topics.
+    if (ctx.population < 5) return false;
+    return this.maintainedAndActiveOfKind("library", ctx.tick) === 0;
+  }
+
+  private needsArmoury(ctx: PlannerContext): boolean {
+    // Once the colony has researched Armoury Basics (Tier 2) and is
+    // big enough to need a standing guard, drop an armoury so the
+    // soldiers' tools have somewhere to live. One per fortress.
+    if (ctx.population < 7) return false;
+    if (!(ctx.research?.completed ?? []).includes("armoury_basics")) return false;
+    return this.maintainedAndActiveOfKind("armoury", ctx.tick) === 0;
+  }
+
+  private needsThroneRoom(ctx: PlannerContext): boolean {
+    // The throne room is the GDD's "Grand Citadel" milestone target —
+    // a fortress reaches it once it has the surplus to spare. Gated on
+    // a real population (so a five-dwarf colony doesn't cosplay royalty)
+    // and on Masonry & Mortaring (Tier 2) — the masons need to know
+    // how to lay a proper hall. One per fortress.
+    if (ctx.population < 30) return false;
+    if (!(ctx.research?.completed ?? []).includes("masonry_and_mortaring")) return false;
+    return this.maintainedAndActiveOfKind("throne_room", ctx.tick) === 0;
+  }
+
+  private needsPumpStation(ctx: PlannerContext): boolean {
+    // GDD §10.2 Tier 2 Hydraulic Basics gates the pump room. The
+    // architect waits until an aquifer has actually been breached
+    // before laying one out — an empty pump room with no water to
+    // pump is just a dwarf labor sink.
+    if (ctx.population < 5) return false;
+    if (!ctx.aquiferBreached) return false;
+    if (!(ctx.research?.completed ?? []).includes("hydraulic_basics")) return false;
+    return this.maintainedAndActiveOfKind("pump_station", ctx.tick) === 0;
+  }
+
   /**
    * Count of completed rooms of `kind` that are not currently neglected,
    * plus any blueprint of that kind still being dug. Used by the
@@ -243,6 +374,28 @@ export class ColonyPlanner {
       (this.completedByKind["mine"] ?? 0);
     const corridorTarget = Math.floor(completedRooms / 2);
     return corridorTotal < corridorTarget;
+  }
+
+  /**
+   * The colony wants a stairwell roughly every five non-passage rooms it
+   * builds. One active stairwell at a time so the architect doesn't
+   * sink three parallel shafts in a row. Without this rhythm the
+   * colony spreads sideways and never reaches the Gem Seam.
+   */
+  private wantsStairwell(): boolean {
+    if ((this.activeByKind()["stairwell"] ?? 0) > 0) return false;
+    const stairwellTotal = this.totalOfKind("stairwell");
+    const completedRooms =
+      (this.completedByKind["bedroom"] ?? 0) +
+      (this.completedByKind["dining_hall"] ?? 0) +
+      (this.completedByKind["stockpile"] ?? 0) +
+      (this.completedByKind["mine"] ?? 0) +
+      (this.completedByKind["kitchen"] ?? 0) +
+      (this.completedByKind["brewery"] ?? 0) +
+      (this.completedByKind["smelter"] ?? 0) +
+      (this.completedByKind["forge"] ?? 0);
+    const stairwellTarget = Math.floor(completedRooms / 5);
+    return stairwellTotal < stairwellTarget;
   }
 
   // ---- Room placement (rectangles adjacent to walkable) ------------------
@@ -760,8 +913,11 @@ export class ColonyPlanner {
         this.completed++;
         this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
         // A freshly-dug room counts as fully maintained — the dig itself
-        // exercised every cell. The maintenance clock starts now.
+        // exercised every cell. The maintenance clock starts now, and
+        // quality starts at the freshly-dug baseline. Later sessions
+        // raise quality through maintenance + (eventually) decoration.
         b.lastMaintainedTick = ctx.tick;
+        if (b.quality === undefined) b.quality = QUALITY_BASE;
         for (let i = 0; i < b.cavity.length; i++) {
           const c = b.cavity[i];
           const x = c & 0xffff;

@@ -26,11 +26,74 @@ export function furnishRoom(grid: TileGrid, b: Blueprint): void {
     case "farm":
       furnishFarm(grid, b);
       break;
+    case "kitchen":
+      furnishWorkshop(grid, b, TileType.KitchenStation);
+      break;
+    case "brewery":
+      furnishWorkshop(grid, b, TileType.BreweryStation);
+      break;
+    case "smelter":
+      furnishWorkshop(grid, b, TileType.SmelterStation);
+      break;
+    case "forge":
+      furnishWorkshop(grid, b, TileType.ForgeStation);
+      break;
+    case "library":
+      furnishLibrary(grid, b);
+      break;
+    case "armoury":
+      furnishArmoury(grid, b);
+      break;
+    case "throne_room":
+      furnishThroneRoom(grid, b);
+      break;
+    case "pump_station":
+      furnishWorkshop(grid, b, TileType.PumpStation);
+      break;
     // Corridors, mines, and stairwells stay bare — they're passages or
     // active workspaces, not rooms. Real ore mines later get an extraction
     // marker; for now leaving them as plain CorridorFloor.
     default:
       break;
+  }
+}
+
+/** Throne Room: a single throne tile dead-centre. Decorative for now —
+ * the chair sits where it sits and the milestone fires on completion. */
+function furnishThroneRoom(grid: TileGrid, b: Blueprint): void {
+  const cx = b.originX + Math.floor(b.width / 2);
+  const cy = b.originY + Math.floor(b.height / 2);
+  if (cavityContains(b, cx, cy)) grid.setTile(cx, cy, TileType.Throne);
+}
+
+/** Armoury: rack tiles along the back wall, evenly spaced. Visual only —
+ * the draft system equips soldiers from the global tools counter when
+ * this room exists, regardless of which rack tile holds what. */
+function furnishArmoury(grid: TileGrid, b: Blueprint): void {
+  const y = b.originY;
+  for (let dx = 0; dx < b.width; dx += 2) {
+    const x = b.originX + dx;
+    if (cavityContains(b, x, y)) grid.setTile(x, y, TileType.ArmouryRack);
+  }
+}
+
+/** Library: two desks along the upper row so two scholars can study
+ * side by side without blocking each other. */
+function furnishLibrary(grid: TileGrid, b: Blueprint): void {
+  const y = b.originY;
+  const x1 = b.originX + 1;
+  const x2 = b.originX + b.width - 2;
+  if (cavityContains(b, x1, y)) grid.setTile(x1, y, TileType.LibraryDesk);
+  if (x2 !== x1 && cavityContains(b, x2, y)) grid.setTile(x2, y, TileType.LibraryDesk);
+}
+
+/** Workshops drop a single workstation tile in the centre of their cavity.
+ * The crafter dwarf stands on it for the duration of a recipe. */
+function furnishWorkshop(grid: TileGrid, b: Blueprint, station: TileType): void {
+  const cx = b.originX + Math.floor(b.width / 2);
+  const cy = b.originY + Math.floor(b.height / 2);
+  if (cavityContains(b, cx, cy)) {
+    grid.setTile(cx, cy, station);
   }
 }
 

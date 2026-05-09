@@ -66,15 +66,58 @@ export function generateWorld(params: WorldGenParams): WorldGenResult {
           // Stone pockets.
           if (noise2(surfaceSeed + 11, x * 0.13, y * 0.13) > 0.55) t = TileType.Stone;
         } else if (y < 300) {
-          // Shallow earth: stone with occasional ore.
+          // Shallow earth: stone with occasional ore. Pockets of
+          // aquifer rock sit in here per GDD §5.2 — water-saturated
+          // stone the dwarves should be wary of mining.
           t = TileType.Stone;
           if (noise2(oreSeed, x * 0.18, y * 0.18) > 0.62) t = TileType.Ore;
-        } else {
-          // Deep rock: granite with rare ore.
+          if (noise2(oreSeed + 89, x * 0.12, y * 0.12) > 0.78) t = TileType.Aquifer;
+        } else if (y < 700) {
+          // Deep rock: granite with rare ore and the first silver veins.
           t = TileType.Granite;
           if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.72) t = TileType.Ore;
+          // Silver pockets — rarer than iron ore. GDD §5.2 places
+          // silver / gold / coal seams in this band.
+          if (noise2(oreSeed + 67, x * 0.30, y * 0.30) > 0.86) t = TileType.Silver;
           // Occasional stone vein for variety.
           if (noise2(oreSeed + 53, x * 0.05, y * 0.05) > 0.55) t = TileType.Stone;
+        } else if (y < 1200) {
+          // Gem Seam: dense igneous rock with gem clusters and rare
+          // magma vents. Diamonds are the rarest cluster, emeralds the
+          // most common.
+          t = TileType.Granite;
+          const gemN = noise2(oreSeed + 73, x * 0.30, y * 0.30);
+          const variantN = noise2(oreSeed + 97, x * 0.55, y * 0.55);
+          if (gemN > 0.78) {
+            t = variantN > 0.4 ? TileType.RawEmerald : variantN > 0.0 ? TileType.RawRuby : TileType.RawDiamond;
+          } else if (noise2(oreSeed + 113, x * 0.18, y * 0.18) > 0.85) {
+            t = TileType.MagmaVent;
+          } else if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.78) {
+            t = TileType.Ore;
+          }
+        } else if (y < 1600) {
+          // Ancient Dark (Layer 5): solid granite, near-silent. Sparse
+          // ancient ruins poke through, plus the first adamantite veins
+          // and rare soul-crystal pockets.
+          t = TileType.Granite;
+          const ruinN = noise2(oreSeed + 137, x * 0.06, y * 0.06);
+          const adaN = noise2(oreSeed + 149, x * 0.18, y * 0.18);
+          const soulN = noise2(oreSeed + 163, x * 0.32, y * 0.32);
+          if (ruinN > 0.86) t = TileType.AncientRuin;
+          else if (soulN > 0.88) t = TileType.SoulCrystal;
+          else if (adaN > 0.78) t = TileType.Adamantite;
+          else if (noise2(oreSeed + 31, x * 0.22, y * 0.22) > 0.80) t = TileType.Ore;
+        } else {
+          // Underworld (Layer 6, §5.2): impossible architecture. Mostly
+          // dense rock with veins of void-ore and the occasional ancient
+          // ruin. The Hollow King's domain — narrative awakens when the
+          // first dwarf stands at this depth.
+          t = TileType.Granite;
+          const voidN = noise2(oreSeed + 191, x * 0.20, y * 0.20);
+          const adaN = noise2(oreSeed + 211, x * 0.18, y * 0.18);
+          if (voidN > 0.74) t = TileType.VoidOre;
+          else if (adaN > 0.74) t = TileType.Adamantite;
+          else if (noise2(oreSeed + 137, x * 0.06, y * 0.06) > 0.86) t = TileType.AncientRuin;
         }
 
         // 3. Carve natural caverns. fbm gives big blob shapes; threshold cuts holes.

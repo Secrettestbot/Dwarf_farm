@@ -12,6 +12,15 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   mine: { fill: "rgba(220, 130, 60, 0.14)", stroke: "rgba(240, 150, 70, 0.7)" },
   farm: { fill: "rgba(140, 200, 90, 0.12)", stroke: "rgba(160, 220, 110, 0.65)" },
   stairwell: { fill: "rgba(230, 130, 200, 0.10)", stroke: "rgba(230, 130, 200, 0.55)" },
+  kitchen: { fill: "rgba(220, 110, 80, 0.12)", stroke: "rgba(230, 130, 90, 0.65)" },
+  brewery: { fill: "rgba(120, 180, 90, 0.12)", stroke: "rgba(140, 200, 110, 0.65)" },
+  smelter: { fill: "rgba(190, 90, 60, 0.14)", stroke: "rgba(220, 110, 70, 0.7)" },
+  forge: { fill: "rgba(220, 140, 80, 0.14)", stroke: "rgba(240, 160, 100, 0.7)" },
+  trade_depot: { fill: "rgba(180, 200, 220, 0.10)", stroke: "rgba(200, 220, 240, 0.65)" },
+  library: { fill: "rgba(120, 160, 220, 0.10)", stroke: "rgba(150, 180, 240, 0.65)" },
+  armoury: { fill: "rgba(180, 180, 220, 0.10)", stroke: "rgba(200, 200, 240, 0.65)" },
+  throne_room: { fill: "rgba(160, 100, 200, 0.12)", stroke: "rgba(180, 120, 230, 0.7)" },
+  pump_station: { fill: "rgba(60, 130, 170, 0.12)", stroke: "rgba(90, 160, 200, 0.65)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -19,6 +28,14 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   sleep: { glyph: "z", color: "#8aa9ff" },
   socialise: { glyph: "♥", color: "#ff9aa2" },
   wander: { glyph: ".", color: "#999" },
+  haul: { glyph: "↕", color: "#9ad3a3" },
+  craft: { glyph: "✦", color: "#e0a070" },
+  tend: { glyph: "✿", color: "#7aa040" },
+  maintain: { glyph: "•", color: "#aaa" },
+  shelter: { glyph: "!", color: "#e07050" },
+  engage: { glyph: "⚔", color: "#e0c080" },
+  research: { glyph: "📖", color: "#8aa9ff" },
+  pump: { glyph: "≈", color: "#80b0d0" },
 };
 
 export function renderWorld(
@@ -44,11 +61,20 @@ export function renderWorld(
   for (let y = Math.max(0, y0); y < Math.min(grid.height, y1); y++) {
     const layer = layerOf(y, surfaceRefY);
     for (let x = Math.max(0, x0); x < Math.min(grid.width, x1); x++) {
+      const sx = (x - camera.x) * pt + viewW / 2;
+      const sy = (y - camera.y) * pt + viewH / 2;
+      // Fog of war: the dwarves haven't seen this tile yet — draw a flat
+      // black square so the unmined mountain is opaque, in keeping with
+      // the GDD's "the player never knows exactly what lies ahead until
+      // the stone is broken" rule.
+      if (!grid.isSeen(x, y)) {
+        ctx.fillStyle = "#050507";
+        ctx.fillRect(sx, sy, pt, pt);
+        continue;
+      }
       const t = grid.getTile(x, y);
       if (t === TileType.Air) continue;
       const sprite = getTileSpriteAtLayer(t as TileType, layer);
-      const sx = (x - camera.x) * pt + viewW / 2;
-      const sy = (y - camera.y) * pt + viewH / 2;
       ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
     }
   }
@@ -81,6 +107,34 @@ export function renderWorld(
       }
     }
     ctx.restore();
+  }
+
+  // Loose items on the floor — output of mining, input to haul jobs.
+  // Drawn as small palette-coloured chips so a hauler can spot a pile.
+  const itemEnts = sim.item.entities;
+  for (let i = 0; i < itemEnts.length; i++) {
+    const ie = itemEnts[i];
+    const p = sim.position.get(ie);
+    const it = sim.item.get(ie);
+    if (!p || !it) continue;
+    if (!grid.isSeen(p.x, p.y)) continue;
+    const sx = (p.x - camera.x) * pt + viewW / 2;
+    const sy = (p.y - camera.y) * pt + viewH / 2;
+    ctx.fillStyle =
+      it.kind === "ore" ? "#e0c070" :
+      it.kind === "stone" ? "#9a9aa3" :
+      it.kind === "gem" ? "#a8d8e0" :
+      it.kind === "bars" ? "#d0a060" :
+      it.kind === "tools" ? "#c0c8d0" :
+      it.kind === "food" ? "#9ad3a3" :
+      it.kind === "drink" ? "#8aa9ff" :
+      it.kind === "meal" ? "#e0c080" :
+      "#8a6a4a";
+    const m = pt * 0.25;
+    ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx + m + 0.5, sy + pt - m * 1.5 + 0.5, pt - m * 2 - 1, m - 1);
   }
 
   // Hostiles below dwarves so dwarves draw over them in melee.
@@ -130,5 +184,14 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "mine": return "mine";
     case "farm": return "farm";
     case "stairwell": return "stair";
+    case "kitchen": return "kitchen";
+    case "brewery": return "brewery";
+    case "smelter": return "smelter";
+    case "forge": return "forge";
+    case "trade_depot": return "depot";
+    case "library": return "library";
+    case "armoury": return "armoury";
+    case "throne_room": return "throne";
+    case "pump_station": return "pump";
   }
 }

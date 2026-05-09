@@ -13,6 +13,27 @@ function buildSim(seed: number, dwarves: number): SimWorld {
   return sim;
 }
 
+describe("hostile roster", () => {
+  it("registers definitions for cave rat, cave spider, goblin scout, and cave troll", () => {
+    expect(HOSTILE_DEFS.cave_rat).toBeDefined();
+    expect(HOSTILE_DEFS.cave_spider).toBeDefined();
+    expect(HOSTILE_DEFS.goblin_scout).toBeDefined();
+    expect(HOSTILE_DEFS.cave_troll).toBeDefined();
+  });
+
+  it("each deeper kind has a stricter minDepth than the kind above it", () => {
+    expect(HOSTILE_DEFS.cave_spider.minDepth).toBeGreaterThan(HOSTILE_DEFS.cave_rat.minDepth);
+    expect(HOSTILE_DEFS.goblin_scout.minDepth).toBeGreaterThan(HOSTILE_DEFS.cave_spider.minDepth);
+    expect(HOSTILE_DEFS.cave_troll.minDepth).toBeGreaterThan(HOSTILE_DEFS.goblin_scout.minDepth);
+  });
+
+  it("each deeper kind hits harder than the kind above it", () => {
+    expect(HOSTILE_DEFS.cave_spider.damage).toBeGreaterThan(HOSTILE_DEFS.cave_rat.damage);
+    expect(HOSTILE_DEFS.goblin_scout.damage).toBeGreaterThan(HOSTILE_DEFS.cave_spider.damage);
+    expect(HOSTILE_DEFS.cave_troll.damage).toBeGreaterThan(HOSTILE_DEFS.goblin_scout.damage);
+  });
+});
+
 describe("hostiles: spawn + combat", () => {
   it("a dwarf gets the default 100 HP on spawn", () => {
     const sim = buildSim(1, 1);

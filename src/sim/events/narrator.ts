@@ -71,6 +71,24 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       ]);
     case "stairwell":
       return `A stairwell is laid out, descending into the rock.`;
+    case "kitchen":
+      return `The colony marks out a new kitchen ${where}.`;
+    case "brewery":
+      return `A brewery is laid out ${where}. The dwarves are pleased.`;
+    case "smelter":
+      return `A smelter is planned ${where}. Smoke will follow.`;
+    case "forge":
+      return `A forge is sketched in the stone ${where}.`;
+    case "trade_depot":
+      return `A trade depot is mapped out ${where}. The colony plans for visitors.`;
+    case "library":
+      return `A library is laid out ${where}. The scholars stir.`;
+    case "armoury":
+      return `An armoury is mapped out ${where}. The smiths sharpen their plans.`;
+    case "throne_room":
+      return `A throne room is sketched ${where}. The colony plans for ceremony.`;
+    case "pump_station":
+      return `A pump station is sketched ${where}. The flood has somewhere to go.`;
   }
 }
 
@@ -109,6 +127,24 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       ]);
     case "stairwell":
       return `The stairwell is finished. The colony reaches further into the mountain.`;
+    case "kitchen":
+      return `The kitchen is complete ${where}. The cooks light their first fire.`;
+    case "brewery":
+      return `The brewery stands ready ${where}. Barrels are rolled into place.`;
+    case "smelter":
+      return `The smelter is fired ${where}. The first bars are cast.`;
+    case "forge":
+      return `The forge rings to life ${where}. The first tool is hammered out.`;
+    case "trade_depot":
+      return `The trade depot is finished ${where}. The first caravan will be welcome.`;
+    case "library":
+      return `The library is opened ${where}. The first books are placed on the desks.`;
+    case "armoury":
+      return `The armoury opens ${where}. The first weapons go on the racks.`;
+    case "throne_room":
+      return `The throne room stands finished ${where}. The hall awaits its first procession.`;
+    case "pump_station":
+      return `The pump station is built ${where}. The flood begins to recede.`;
   }
 }
 

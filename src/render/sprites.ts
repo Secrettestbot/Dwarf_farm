@@ -359,7 +359,10 @@ export function getDwarfSprite(): HTMLCanvasElement | OffscreenCanvas {
   return s;
 }
 
-// Cave rat: small, low to the ground, palette-red.
+// Hostile pixel art. Each row uses palette indices (0 = transparent);
+// 1 = dark outline, the body uses kind-specific palette slots.
+
+// Cave rat: small, low to the ground, palette-red (E = blonde).
 const CAVE_RAT_PIXELS: string[] = [
   "0000000000000000",
   "0000000000000000",
@@ -379,11 +382,125 @@ const CAVE_RAT_PIXELS: string[] = [
   "0000000000000000",
 ];
 
+// Cave spider: eight legs, low body, palette-purple-ish (5 = dusk).
+const CAVE_SPIDER_PIXELS: string[] = [
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+  "0001000000010000",
+  "0010111111100000",
+  "0010155555100100",
+  "0101555555510010",
+  "0105555555550010",
+  "1015555555510100",
+  "0115555555511000",
+  "0010111111100000",
+  "0001000000010000",
+  "0000000000000000",
+  "0000000000000000",
+  "0000000000000000",
+];
+
+// Goblin scout: humanoid silhouette, palette-green (A = sprout).
+const GOBLIN_SCOUT_PIXELS: string[] = [
+  "0000000000000000",
+  "0000001111000000",
+  "0000011AA1100000",
+  "0000011AA1100000",
+  "0000011AA1100000",
+  "0000111AA1110000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001A11AA11A1000",
+  "0001A1100AA1A100",
+  "0011A1000AA1A100",
+  "0010100000110000",
+  "0000000000000000",
+];
+
+// Cave troll: hulking, slow, palette-grey-blue (4 = dusk).
+const CAVE_TROLL_PIXELS: string[] = [
+  "0000111111100000",
+  "0001144444411000",
+  "0011144444441100",
+  "0011144444441100",
+  "0001144444411000",
+  "0011144444441100",
+  "0114444444444110",
+  "1444444444444441",
+  "1444444444444441",
+  "1444444444444441",
+  "1444444444444441",
+  "0144444444444410",
+  "0114111111141100",
+  "0011100000111000",
+  "0010000000001000",
+  "0000000000000000",
+];
+
+// Void shade: tall, dark, and wrong — the King's emissary. Palette
+// 5 = dusk-purple, 1 = outline. Asymmetric outline so it reads as
+// not-quite-stable.
+const VOID_SHADE_PIXELS: string[] = [
+  "0001000000010000",
+  "0011000000110000",
+  "0151100001151000",
+  "0155100001551000",
+  "0155551115551000",
+  "0155555555551000",
+  "0155555555551000",
+  "0015555555510000",
+  "0015555555510000",
+  "0001555555100000",
+  "0001515551500000",
+  "0001150511500000",
+  "0001100110010000",
+  "0001000000010000",
+  "0010000000010000",
+  "0000000000000000",
+];
+
+// The Hollow King: hulking, crowned, and wrong. Fills almost the
+// entire 16×16 cell — palette 5 = dusk-purple body, 9 = wine for the
+// crown's accent, 1 = dark outline.
+const HOLLOW_KING_PIXELS: string[] = [
+  "0001500000510000",
+  "0015190000915100",
+  "0015999999951500",
+  "0015999999951500",
+  "0115555555555110",
+  "1555555555555551",
+  "1559155555515951",
+  "1559155555515951",
+  "1555555555555551",
+  "1555515555155551",
+  "1555599999955551",
+  "0155555555555510",
+  "0015551115555100",
+  "0001550000551000",
+  "0001100000110000",
+  "0010000000010000",
+];
+
+const HOSTILE_PIXELS: Record<string, string[]> = {
+  cave_rat: CAVE_RAT_PIXELS,
+  cave_spider: CAVE_SPIDER_PIXELS,
+  goblin_scout: GOBLIN_SCOUT_PIXELS,
+  cave_troll: CAVE_TROLL_PIXELS,
+  void_shade: VOID_SHADE_PIXELS,
+  hollow_king: HOLLOW_KING_PIXELS,
+};
+
 export function getHostileSprite(kind: string): HTMLCanvasElement | OffscreenCanvas {
   const key = `hostile:${kind}`;
   let s = cache.get(key);
   if (!s) {
-    s = paintFromRows(CAVE_RAT_PIXELS);
+    const rows = HOSTILE_PIXELS[kind] ?? CAVE_RAT_PIXELS;
+    s = paintFromRows(rows);
     cache.set(key, s);
   }
   return s;

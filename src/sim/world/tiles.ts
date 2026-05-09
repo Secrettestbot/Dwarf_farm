@@ -29,6 +29,65 @@ export const enum TileType {
   // arrives abstractly, the way underground subsistence farming
   // implicitly works in the GDD).
   FarmTile = 15,
+  // Workshop workstations — the focal tile of a workshop room where the
+  // crafter dwarf stands while running a recipe. One workstation per
+  // cavity for the simple session-3 implementation; more elaborate
+  // multi-station workshops land later.
+  KitchenStation = 16,
+  BreweryStation = 17,
+  SmelterStation = 18,
+  ForgeStation = 19,
+  /** A scholar's desk in the Library. Walkable; a dwarf with the
+   * "research" job stands on it while their progress accumulates. */
+  LibraryDesk = 20,
+  // Gem Seam content (§5.2 Layer 4): rough gemstones embedded in the
+  // rock. Solid like ore, mined to the same dropped-item flow once the
+  // Tier 3 Gem Cutting research lands.
+  RawDiamond = 21,
+  RawRuby = 22,
+  RawEmerald = 23,
+  /** Magma vent — Layer 4 hazard / future fuel source for magma forges
+   * (Tier 4 research). Walkable but lethal. For now decorative. */
+  MagmaVent = 24,
+  /** Pre-built dwarven ruin (§5.2 Layer 4): walkable floor with a
+   * distinct visual marker, signalling places where future Tier 5
+   * ancient-text research can be performed. */
+  AncientRuin = 25,
+  // Layer 5+ content: the Ancient Dark and the Underworld below it.
+  /** Adamantite vein — Layer 5 ore (§5.2). Mined like ore but counts as
+   * its own metal once a smelter / forge integration arrives. */
+  Adamantite = 26,
+  /** Void-ore — found in Layer 6 (§5.2 Underworld). The only material
+   * the Hollow King's physical form cannot destroy. */
+  VoidOre = 27,
+  /** Soul-crystal — Tier 5 special gem with attunement properties. */
+  SoulCrystal = 28,
+  /** Armoury rack — decorative storage spot for weapons in an Armoury
+   * room. Walkable so soldiers can step in to grab a weapon. The
+   * mechanical effect (equipping a soldier) lands on the draft tick;
+   * this tile is the visual signal that a fortress has armed itself. */
+  ArmouryRack = 29,
+  /** Silver vein — sits in Deep Rock per GDD §5.2 ("silver, gold, coal
+   * seams"). Mined like ore, drops an ore item, and triggers the
+   * Silver Halls milestone the first time a dwarf strikes one. A
+   * future commit can split it into its own item kind once silver-as-
+   * trade-good has a downstream consumer. */
+  Silver = 30,
+  /** Throne — centerpiece of the Throne Room (GDD §10.2 milestone
+   * "The Grand Citadel"). Walkable; rendered as a deep purple to read
+   * as ceremonial. Decorative for now — the chair sits where it sits. */
+  Throne = 31,
+  /** Aquifer rock — Shallow Earth pocket of stone saturated with
+   * water (GDD §5.2 "aquifer pockets — risky to breach without a
+   * pump room"). Mineable like ore; striking it spawns Water that
+   * spreads into adjacent corridors. The Aquifer Survived milestone
+   * fires once the colony lives through the flood. */
+  Aquifer = 32,
+  /** Pump station — workstation tile in a Pump Station room (GDD
+   * §10.2 Tier 2 Hydraulic Basics). A dwarf working at this tile
+   * drains one adjacent water tile per pump cycle, reclaiming flooded
+   * corridors after an aquifer breach. */
+  PumpStation = 33,
 }
 
 export interface TileInfo {
@@ -56,7 +115,38 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Bin]: { name: "bin", walkable: true, solid: false, color: 0x5a4633 },
   [TileType.Memorial]: { name: "memorial", walkable: true, solid: false, color: 0xc0a070 },
   [TileType.FarmTile]: { name: "farm", walkable: true, solid: false, color: 0x6a8a3a },
+  [TileType.KitchenStation]: { name: "kitchen", walkable: true, solid: false, color: 0xc06040 },
+  [TileType.BreweryStation]: { name: "brewery", walkable: true, solid: false, color: 0x5a8a40 },
+  [TileType.SmelterStation]: { name: "smelter", walkable: true, solid: false, color: 0xa05030 },
+  [TileType.ForgeStation]: { name: "forge", walkable: true, solid: false, color: 0xb07040 },
+  [TileType.LibraryDesk]: { name: "desk", walkable: true, solid: false, color: 0x6080a0 },
+  [TileType.RawDiamond]: { name: "raw diamond", walkable: false, solid: true, color: 0xc8e0e8 },
+  [TileType.RawRuby]: { name: "raw ruby", walkable: false, solid: true, color: 0xa83040 },
+  [TileType.RawEmerald]: { name: "raw emerald", walkable: false, solid: true, color: 0x40a058 },
+  [TileType.MagmaVent]: { name: "magma vent", walkable: true, solid: false, color: 0xd84020 },
+  [TileType.AncientRuin]: { name: "ancient ruin", walkable: true, solid: false, color: 0x9080a0 },
+  [TileType.Adamantite]: { name: "adamantite", walkable: false, solid: true, color: 0xc8d0ff },
+  [TileType.VoidOre]: { name: "void-ore", walkable: false, solid: true, color: 0x402850 },
+  [TileType.SoulCrystal]: { name: "soul-crystal", walkable: false, solid: true, color: 0x7090e0 },
+  [TileType.ArmouryRack]: { name: "armoury rack", walkable: true, solid: false, color: 0x8090a8 },
+  [TileType.Silver]: { name: "silver vein", walkable: false, solid: true, color: 0xd0d8e8 },
+  [TileType.Throne]: { name: "throne", walkable: true, solid: false, color: 0x6040a0 },
+  [TileType.Aquifer]: { name: "aquifer", walkable: false, solid: true, color: 0x3a5078 },
+  [TileType.PumpStation]: { name: "pump", walkable: true, solid: false, color: 0x4080a0 },
 };
+
+export function tileIsGem(t: number): boolean {
+  return t === TileType.RawDiamond || t === TileType.RawRuby || t === TileType.RawEmerald;
+}
+
+export function tileIsWorkshopStation(t: number): boolean {
+  return (
+    t === TileType.KitchenStation ||
+    t === TileType.BreweryStation ||
+    t === TileType.SmelterStation ||
+    t === TileType.ForgeStation
+  );
+}
 
 export function tileIsBed(t: number): boolean {
   return t === TileType.Bed;

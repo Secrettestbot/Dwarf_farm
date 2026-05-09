@@ -154,7 +154,12 @@ describe("farm tending", () => {
       farm.cellTendedAt!.fill(sim.tick);
       tick(sim);
     }
-    expect(sim.stockpile.food).toBeGreaterThan(0);
+    // Yield drops as item entities now; count items + counter together.
+    let foodItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "food") foodItems++;
+    }
+    expect(sim.stockpile.food + foodItems).toBeGreaterThan(0);
   });
 
   it("a tended cell goes fallow after the validity window expires", () => {

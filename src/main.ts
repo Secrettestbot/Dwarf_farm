@@ -6,6 +6,8 @@ import { Camera } from "./render/camera";
 import { renderWorld } from "./render/renderer";
 import { Minimap } from "./render/minimap";
 import { Hud } from "./ui/hud";
+import { SliderPanel } from "./ui/sliders";
+import { EmergencyPanel } from "./ui/emergency";
 import { EventLogPanel } from "./ui/eventLogPanel";
 import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
@@ -18,8 +20,10 @@ import { WorkerToMain } from "./shared/protocol";
 import { Founder } from "./sim/dwarves/founders";
 import { narrateFounding } from "./sim/events/narrator";
 
-const WORLD_WIDTH = 200;
-const WORLD_HEIGHT = 500;
+// GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
+// 200×500 world for speed; live play uses the full size.
+const WORLD_WIDTH = 400;
+const WORLD_HEIGHT = 2000;
 // 1 in-game month at the GDD's 1× rate is the catch-up cap.
 const MAX_CATCHUP_TICKS = TICKS_PER_DAY * 30;
 
@@ -131,6 +135,9 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
       age: f.age,
     });
   }
+  // Reveal the founders' immediate surroundings before the first frame so
+  // the New Game screen doesn't open onto an all-black mountain.
+  sim.revealAroundDwarves();
 }
 
 async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {
@@ -187,9 +194,13 @@ function runGame(active: ActiveFortress, camera: Camera) {
       await persist(active, camera);
       flashSave();
     },
+    worldSeed: () => sim.seed,
   });
   const eventPanel = new EventLogPanel(uiHost);
   const inspector = new DwarfInspector(uiHost);
+  const sliders = new SliderPanel(uiHost, sim);
+  void sliders;
+  const emergency = new EmergencyPanel(uiHost, sim);
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
   canvas.addEventListener("pointerdown", (e) => {
@@ -282,6 +293,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
     hud.update(clock, sim);
     eventPanel.update(sim.events.events);
     inspector.update(sim);
+    emergency.update();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
