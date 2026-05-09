@@ -61,6 +61,12 @@ export interface Stockpile {
   /** Fired pottery — Kiln output (GDD §10.2 Tier 2 Pottery & Kilns).
    * Trade-good with no in-game consumer yet beyond accumulating. */
   pots: number;
+  /** Raw hides — dropped by larger hostiles when slain. Hauled to a
+   * Tannery and tanned into leather. */
+  hide: number;
+  /** Tanned leather — Tannery output. Future input for armouring and
+   * trade goods. */
+  leather: number;
 }
 
 const STARTER_FOOD = 1000;
@@ -126,6 +132,8 @@ export class SimWorld {
     wood: 0,
     planks: 0,
     pots: 0,
+    hide: 0,
+    leather: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-

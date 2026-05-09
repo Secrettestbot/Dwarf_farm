@@ -109,6 +109,8 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // Kiln: 3×3 with a fire pit in the centre. Tier 2 Pottery & Kilns
   // gates it; cheap-to-build but the recipe is slow.
   kiln: { w: 3, h: 3, priority: 2 },
+  // Tannery: 3×3 workshop. Tier 2 Textile Craft gates it.
+  tannery: { w: 3, h: 3, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -230,6 +232,7 @@ export class ColonyPlanner {
     if (this.needsJeweller(ctx) && this.placeRoom(ctx, "jeweller")) return true;
     if (this.needsCarpenter(ctx) && this.placeRoom(ctx, "carpenter")) return true;
     if (this.needsKiln(ctx) && this.placeRoom(ctx, "kiln")) return true;
+    if (this.needsTannery(ctx) && this.placeRoom(ctx, "tannery")) return true;
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -402,6 +405,14 @@ export class ColonyPlanner {
     if (ctx.population < 8) return false;
     if (!(ctx.research?.completed ?? []).includes("pottery_and_kilns")) return false;
     return this.maintainedAndActiveOfKind("kiln", ctx.tick) === 0;
+  }
+
+  private needsTannery(ctx: PlannerContext): boolean {
+    // Tannery sits behind Tier 2 Textile Craft — same topic that
+    // unlocks the future Loom for cloth. Pop ≥ 8 mirrors the kiln.
+    if (ctx.population < 8) return false;
+    if (!(ctx.research?.completed ?? []).includes("textile_craft")) return false;
+    return this.maintainedAndActiveOfKind("tannery", ctx.tick) === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's

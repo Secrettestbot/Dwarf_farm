@@ -1988,6 +1988,7 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "drink") return "drink";
   if (resource === "meals") return "meal";
   if (resource === "wood") return "wood";
+  if (resource === "hide") return "hide";
   return null;
 }
 
@@ -2113,6 +2114,7 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     else if (carrying.kind === "drink") sim.stockpile.drink++;
     else if (carrying.kind === "meal") sim.stockpile.meals++;
     else if (carrying.kind === "wood") sim.stockpile.wood++;
+    else if (carrying.kind === "hide") sim.stockpile.hide++;
   }
   sim.carrying.remove(e);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
@@ -2817,6 +2819,14 @@ function combatSystem(sim: SimWorld): void {
             "the_hollow_king_falls",
             "The Hollow King Falls. The King is dead. The mountain is the dwarves' alone, for as long as anyone remembers.",
           );
+        }
+        // Hides drop on the corpse tile for the larger creatures —
+        // spiders, goblins, trolls (cave rats and incorporeal void
+        // entities leave nothing). The tanner picks them up like any
+        // other haulable item once a Tannery exists.
+        if (def.dropsHide) {
+          const hp = sim.position.get(h);
+          if (hp) sim.spawnItem({ kind: "hide", x: hp.x, y: hp.y });
         }
         sim.ecs.destroy(h, [sim.position, sim.hostile, sim.health]);
       }

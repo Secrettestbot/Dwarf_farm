@@ -44,6 +44,7 @@ const KIND_LABEL: Record<BlueprintKind, string> = {
   carpenter: "carpenter's workshop",
   lumberyard: "lumberyard",
   kiln: "kiln",
+  tannery: "tannery",
 };
 
 export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): string {
@@ -113,6 +114,8 @@ export function narrateBlueprintBegin(rng: Rng, b: Blueprint, spawnY: number): s
       return `The colony marks a tree for felling on the surface.`;
     case "kiln":
       return `A kiln is sketched ${where}. The fire pit waits for clay.`;
+    case "tannery":
+      return `A tannery is laid out ${where}. Hides will become leather.`;
   }
 }
 
@@ -179,6 +182,8 @@ export function narrateBlueprintComplete(rng: Rng, b: Blueprint, spawnY: number)
       return `A tree falls on the surface. The colony has wood.`;
     case "kiln":
       return `The kiln is fired ${where}. The first pot leaves the wheel.`;
+    case "tannery":
+      return `The tannery opens ${where}. The first cured leather hangs on the rack.`;
   }
 }
 

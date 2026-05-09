@@ -168,6 +168,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       wood: sim.stockpile.wood,
       planks: sim.stockpile.planks,
       pots: sim.stockpile.pots,
+      hide: sim.stockpile.hide,
+      leather: sim.stockpile.leather,
     },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
@@ -381,6 +383,8 @@ export function restore(save: SaveV1): SimWorld {
     if (save.stockpile.wood !== undefined) sim.stockpile.wood = save.stockpile.wood;
     if (save.stockpile.planks !== undefined) sim.stockpile.planks = save.stockpile.planks;
     if (save.stockpile.pots !== undefined) sim.stockpile.pots = save.stockpile.pots;
+    if (save.stockpile.hide !== undefined) sim.stockpile.hide = save.stockpile.hide;
+    if (save.stockpile.leather !== undefined) sim.stockpile.leather = save.stockpile.leather;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;

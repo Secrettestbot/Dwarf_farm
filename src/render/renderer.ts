@@ -26,6 +26,7 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   carpenter: { fill: "rgba(180, 130, 70, 0.12)", stroke: "rgba(200, 150, 90, 0.7)" },
   lumberyard: { fill: "rgba(90, 160, 70, 0.18)", stroke: "rgba(120, 200, 100, 0.75)" },
   kiln: { fill: "rgba(200, 110, 70, 0.14)", stroke: "rgba(220, 130, 80, 0.7)" },
+  tannery: { fill: "rgba(140, 100, 60, 0.14)", stroke: "rgba(170, 130, 80, 0.7)" },
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -135,6 +136,7 @@ export function renderWorld(
       it.kind === "drink" ? "#8aa9ff" :
       it.kind === "meal" ? "#e0c080" :
       it.kind === "wood" ? "#a87838" :
+      it.kind === "hide" ? "#8a5a3a" :
       "#8a6a4a";
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);
@@ -204,5 +206,6 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "carpenter": return "carpenter";
     case "lumberyard": return "tree";
     case "kiln": return "kiln";
+    case "tannery": return "tannery";
   }
 }

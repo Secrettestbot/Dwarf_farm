@@ -25,6 +25,10 @@ export interface HostileDef {
   minDepth: number;
   /** Pursuit range in tiles. */
   pursueRange: number;
+  /** True if killing this kind drops a hide item the colony can tan
+   * into leather. Smaller pests (cave rats) and incorporeal threats
+   * (void shades, the Hollow King) leave nothing useful behind. */
+  dropsHide?: boolean;
 }
 
 export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
@@ -52,6 +56,7 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 18,
     minDepth: 60,
     pursueRange: 14,
+    dropsHide: true,
   },
   // First proper opponent: a goblin patrol scout. Faster, harder hitter,
   // appears as the colony pushes deeper. The full siege flow lands with
@@ -66,6 +71,7 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 22,
     minDepth: 80,
     pursueRange: 18,
+    dropsHide: true,
   },
   // Deep Rock (§5.2): cave troll. Slow, brutal, hard to kill — the kind
   // of threat that justifies a permanent military.
@@ -79,6 +85,7 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 35,
     minDepth: 200,
     pursueRange: 16,
+    dropsHide: true,
   },
   // Underworld (§9.4 The Hollow King): a void shade. Spawned only by
   // the Hollow King once they've awakened — never by the regular
