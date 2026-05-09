@@ -1,5 +1,5 @@
 import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
-import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying, Squad, Equipment } from "../ecs/components";
+import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying, Squad, Equipment, Fury } from "../ecs/components";
 import { effectsFor } from "../dwarves/traitEffects";
 import { Rng } from "../rng";
 import { TileGrid } from "./grid";
@@ -72,6 +72,7 @@ export class SimWorld {
   readonly carrying: ComponentStore<Carrying>;
   readonly squad: ComponentStore<Squad>;
   readonly equipment: ComponentStore<Equipment>;
+  readonly fury: ComponentStore<Fury>;
 
   // Forked RNG streams.
   readonly aiRng: Rng;
@@ -181,6 +182,7 @@ export class SimWorld {
     this.carrying = new ComponentStore(maxEntities);
     this.squad = new ComponentStore(maxEntities);
     this.equipment = new ComponentStore(maxEntities);
+    this.fury = new ComponentStore(maxEntities);
     const root = Rng.fromSeed(seed);
     this.aiRng = root.fork("ai");
     this.worldRng = root.fork("world");

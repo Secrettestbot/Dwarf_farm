@@ -121,6 +121,19 @@ export interface Equipment {
   weapon: boolean;
 }
 
+/** The Fury (GDD §6.5 special trait): once-per-life berserk rage that
+ * triggers when a bonded dwarf is killed in combat. While set, the
+ * dwarf is effectively unkillable and deals huge damage; the rage
+ * ends naturally when no hostile is in range, then the dwarf
+ * collapses (one-shot, the trait is consumed). */
+export interface Fury {
+  /** Tick at which the rage was triggered. Used for the optional
+   * exhaustion event after the storm passes. */
+  startedAtTick: number;
+  /** Set to true once the trait has fired — prevents a second rage. */
+  used: boolean;
+}
+
 export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump";
 
 export interface JobAssignment {

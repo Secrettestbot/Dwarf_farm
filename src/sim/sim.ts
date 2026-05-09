@@ -76,10 +76,146 @@ export function tick(sim: SimWorld): void {
   tradeSystem(sim);
   hollowKingSystem(sim);
   hollowKingManifestSystem(sim);
+  specialTraitSystem(sim);
+  furyEndSystem(sim);
   floodSystem(sim);
   depthMilestoneSystem(sim);
   plannerMilestoneSystem(sim);
   visibilitySystem(sim);
+}
+
+// ---- Special traits (GDD §6.5) ---------------------------------------
+//
+// Most traits are folded into numerical modifiers via traitEffects,
+// but a handful of "special" traits — flagged rare in the GDD — fire
+// flavour events instead of changing damage / speed numbers.
+// Stone-Speaker senses ore veins, Ancestor's Voice delivers advice
+// from beyond, and The Fury triggers a berserk rage when a bonded
+// dwarf is slain. Each runs on its own cadence and writes to the
+// chronicle in the dwarf's voice.
+
+const STONE_SPEAKER_INTERVAL = TICKS_PER_DAY * 6; // once per season
+const ANCESTOR_VOICE_INTERVAL = TICKS_PER_DAY * 7; // once per in-game week
+const STONE_SPEAKER_RANGE = 200;
+
+function specialTraitSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  if (sim.tick % STONE_SPEAKER_INTERVAL === 0) {
+    // For each Stone-Speaker, find the nearest still-unseen valuable
+    // tile within range and write a vision line in their voice.
+    for (const id of sim.dwarf.entities) {
+      const dw = sim.dwarf.get(id);
+      if (!dw || !dw.traitIds.includes("stone_speaker")) continue;
+      const pos = sim.position.get(id);
+      if (!pos) continue;
+      const find = findUnseenValuableTile(sim, pos.x, pos.y, STONE_SPEAKER_RANGE);
+      if (!find) continue;
+      const dy = find.y - sim.spawn.y;
+      const where = dy < 80 ? "in the upper rock"
+        : dy < 300 ? "in the shallow earth"
+        : dy < 700 ? "deep in the granite"
+        : dy < 1200 ? "at the gem seam"
+        : "in the ancient dark";
+      sim.events.add(
+        sim.tick,
+        "discovery",
+        `${dw.name} closes their eyes and listens. They say there is ${find.kindLabel} ${where}, ${dy} tiles down.`,
+      );
+    }
+  }
+  if (sim.tick % ANCESTOR_VOICE_INTERVAL === 0) {
+    // Each Ancestor's-Voice dwarf hears one piece of dwarven wisdom.
+    for (const id of sim.dwarf.entities) {
+      const dw = sim.dwarf.get(id);
+      if (!dw || !dw.traitIds.includes("ancestors_voice")) continue;
+      const advice = ANCESTOR_ADVICE[sim.aiRng.nextRange(0, ANCESTOR_ADVICE.length)];
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${dw.name} hears their grandmother's voice from somewhere behind the stone. "${advice}"`,
+      );
+    }
+  }
+}
+
+const ANCESTOR_ADVICE: string[] = [
+  "Mind the water. Stone forgets a great many things, but never water.",
+  "A dwarf without a friend is a dwarf without a fortress.",
+  "The deep rock keeps better counsel than any king.",
+  "Sharpen a tool twice and use it once.",
+  "Ale is a kind of architecture.",
+  "Do not climb stairs while angry.",
+  "Three things should never be done in haste: a marriage, a tunnel, and a meal.",
+  "Listen to the new arrivals. They have walked roads we have forgotten.",
+];
+
+interface UnseenValuable { x: number; y: number; kindLabel: string }
+
+function findUnseenValuableTile(sim: SimWorld, sx: number, sy: number, range: number): UnseenValuable | null {
+  const grid = sim.grid;
+  let best: UnseenValuable & { d: number } | null = null;
+  for (let dy = -range; dy <= range; dy++) {
+    for (let dx = -range; dx <= range; dx++) {
+      const d = dx * dx + dy * dy;
+      if (d > range * range) continue;
+      const x = sx + dx;
+      const y = sy + dy;
+      if (!grid.inBounds(x, y)) continue;
+      if (grid.isSeen(x, y)) continue;
+      const t = grid.getTile(x, y);
+      let label: string | null = null;
+      if (t === TileType.Ore) label = "an ore vein";
+      else if (t === TileType.Silver) label = "a silver vein";
+      else if (t === TileType.RawDiamond) label = "a diamond cluster";
+      else if (t === TileType.RawRuby) label = "a ruby cluster";
+      else if (t === TileType.RawEmerald) label = "an emerald cluster";
+      else if (t === TileType.Adamantite) label = "adamantite, deep down";
+      else if (t === TileType.VoidOre) label = "void-ore in the dark";
+      if (!label) continue;
+      if (!best || d < best.d) {
+        best = { x, y, kindLabel: label, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y, kindLabel: best.kindLabel } : null;
+}
+
+/** Once a Furious dwarf has no hostile within engage range, the rage
+ * drains and they collapse exhausted. The trait is consumed (the
+ * GDD's "once per lifetime" rule); the marker stays on the dwarf so
+ * it can never re-trigger. */
+function furyEndSystem(sim: SimWorld): void {
+  const ents = sim.fury.entities.slice();
+  for (const id of ents) {
+    const pos = sim.position.get(id);
+    if (!pos) {
+      sim.fury.remove(id);
+      continue;
+    }
+    let hostileNearby = false;
+    const hEnts = sim.hostile.entities;
+    for (let i = 0; i < hEnts.length; i++) {
+      const hp = sim.position.get(hEnts[i]);
+      if (!hp) continue;
+      const dx = hp.x - pos.x;
+      const dy = hp.y - pos.y;
+      if (dx * dx + dy * dy <= 16 * 16) { hostileNearby = true; break; }
+    }
+    if (hostileNearby) continue;
+    // Rage drains. Mark the trait used so a second bereavement can't
+    // re-fire it.
+    const f = sim.fury.get(id);
+    if (f && !f.used) {
+      const dw = sim.dwarf.get(id);
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `${dw?.name ?? "Someone"} stops walking. They look around as if surprised to be alive, and sit down where they stand.`,
+      );
+      f.used = true;
+    }
+    sim.fury.remove(id);
+  }
 }
 
 // ---- Aquifer flooding (GDD §5.2) -------------------------------------
@@ -765,6 +901,22 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   const dw = sim.dwarf.get(e);
   const pos = sim.position.get(e);
   if (!dw || !pos) return;
+  // The Fury (GDD §6.5): once-per-life berserk rage that triggers
+  // when a bonded dwarf is killed in combat. Combat-only — death from
+  // age, dehydration, or starvation doesn't set the survivor on a
+  // war path.
+  const violentCause = /slain|gored|torn|crushed|struck/i.test(cause);
+  if (violentCause && dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId)) {
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (partner && partner.traitIds.includes("the_fury") && !sim.fury.has(dw.partnerId)) {
+      sim.fury.set(dw.partnerId, { startedAtTick: sim.tick, used: false });
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `${partner.name} sees ${dw.name} fall. Something behind their eyes goes still. They do not stop walking forward.`,
+      );
+    }
+  }
   const age = sim.ageOf(e);
   // Free any mining claim before removing the job component.
   const job = sim.job.get(e);
@@ -800,7 +952,7 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y });
   }
   // Remove from the ECS, which strips all component stores.
-  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment]);
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury]);
 }
 
 // ---- Partnership + reproduction ----------------------------------------
@@ -2214,7 +2366,11 @@ function combatSystem(sim: SimWorld): void {
       hostile.lastAttackTick = sim.tick;
       const dwarfHealth = sim.health.get(target);
       if (dwarfHealth) {
-        dwarfHealth.hp -= def.damage;
+        // Furious dwarves are effectively unkillable for the duration
+        // of the rage — incoming damage is absorbed without effect
+        // (GDD §6.5 The Fury).
+        const damageIn = sim.fury.has(target) ? 0 : def.damage;
+        dwarfHealth.hp -= damageIn;
         // Latch a "was severe wound" flag once HP crosses below 30% of
         // max; the recovery event in healingSystem fires when the flag
         // is still set and HP returns to full.
@@ -2242,11 +2398,13 @@ function combatSystem(sim: SimWorld): void {
       const military = dwarf?.skills.military ?? 1;
       const isSoldier = sim.squad.has(target);
       const equipped = sim.equipment.get(target)?.weapon === true;
+      const inFury = sim.fury.has(target);
       const damage =
         DWARF_BASE_DAMAGE +
         Math.floor((military - 1) / 2) +
         (isSoldier ? 5 : 0) +
-        (equipped ? 8 : 0);
+        (equipped ? 8 : 0) +
+        (inFury ? 30 : 0); // The Fury: huge bonus, hostiles fall fast.
       hHealth.hp -= damage;
       if (hHealth.hp <= 0) {
         const dwarfName = dwarf?.name ?? "A dwarf";
