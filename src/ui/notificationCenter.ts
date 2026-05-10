@@ -41,12 +41,14 @@ export class NotificationCenter {
     this.camera = camera;
     const wrap = document.createElement("div");
     wrap.style.cssText =
-      // Top-centre stack so toasts don't cover the HUD (top-left),
-      // sliders (top-right), inspector (right inset), event log
-      // (bottom-left), or the minimap (bottom-right). The stack
-      // grows downward; a hard max-height + overflow ensures a
-      // burst of crises can't reach the canvas itself.
-      "position:absolute;top:8px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:10;pointer-events:none;width:min(420px,60vw);max-height:calc(100vh - 24px);overflow:hidden;";
+      // Slot toasts into the gap on the LEFT edge between the HUD
+      // (top-left, ~280px tall) and the Emergency + Event Log
+      // panels at the bottom-left. Width matches the HUD column
+      // (240px) so the stack lines up visually with the panels
+      // above and below; max-height clips the column at the bottom
+      // gap boundary, with hidden overflow so a burst of crises
+      // can't push past into the event log.
+      "position:absolute;top:288px;left:8px;display:flex;flex-direction:column;gap:6px;z-index:10;pointer-events:none;width:240px;max-height:calc(100vh - 580px);overflow:hidden;";
     this.host.appendChild(wrap);
     this.root = wrap;
   }
