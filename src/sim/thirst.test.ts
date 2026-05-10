@@ -27,6 +27,16 @@ describe("colony survives thirst", () => {
     for (let i = 0; i < 10; i++) {
       sim.spawnItem({ kind: "barrel", x: w.spawn.x, y: w.spawn.y });
     }
+    // Mirror the founder starter kit so the dependency chain can
+    // actually land: bin (for stockpile drop), bed × pop (for
+    // bedrooms), table / stove (for dining hall / kitchen), and a
+    // library desk so research can fire — without research the
+    // brewery never gets emitted at all.
+    for (let i = 0; i < 7; i++) sim.spawnItem({ kind: "bed", x: w.spawn.x, y: w.spawn.y });
+    sim.spawnItem({ kind: "bin", x: w.spawn.x, y: w.spawn.y });
+    sim.spawnItem({ kind: "table", x: w.spawn.x, y: w.spawn.y });
+    sim.spawnItem({ kind: "stove", x: w.spawn.x, y: w.spawn.y });
+    sim.spawnItem({ kind: "library_desk", x: w.spawn.x, y: w.spawn.y });
     // Bump starter food too — the new brewery furniture pipeline
     // means more breweries can come online at the same time once
     // the carpenter starts shipping barrels, which drains food
