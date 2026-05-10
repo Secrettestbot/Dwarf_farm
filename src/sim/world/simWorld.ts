@@ -433,15 +433,43 @@ export class SimWorld {
     return null;
   }
 
-  /** Drop an item onto the floor at (x, y). Returns the new entity id.
-   * Used by the mining work system when a tile is excavated, so the rough
-   * stone / ore / dirt becomes a haulable object instead of teleporting
-   * straight into the stockpile counter. */
+  /** Drop an item onto the floor at (x, y). Returns the new entity id,
+   * or -1 if the item was credited directly to the stockpile counter
+   * because the world is approaching the entity cap. Production-side
+   * backpressure: when items pile up faster than haulers can clear
+   * them, new yields skip the item entity and just bump the counter
+   * — graceful degradation instead of an exception that crashes the
+   * sim. Callers don't need to use the return value (and most don't).
+   *
+   * Used by the mining work system when a tile is excavated, by the
+   * farm system when a cell yields, and by various dropped-on-death
+   * paths. */
   spawnItem(spec: { kind: ItemKind; x: number; y: number; quality?: number }): EntityId {
+    if (this.ecs.liveCount() >= this.ecs.maxEntities * 0.9) {
+      this.creditItemToStockpile(spec.kind);
+      return -1;
+    }
     const e = this.ecs.create();
     this.position.set(e, { x: spec.x, y: spec.y });
     this.item.set(e, { kind: spec.kind, claimedBy: -1, quality: spec.quality });
     return e;
+  }
+
+  /** Drop an item kind directly into the stockpile counter — used by
+   * the spawnItem backpressure path so a busy fortress degrades to
+   * counter-only flow rather than crashing on the entity cap. */
+  private creditItemToStockpile(kind: ItemKind): void {
+    if (kind === "ore") this.stockpile.ore++;
+    else if (kind === "stone") this.stockpile.stone++;
+    else if (kind === "dirt") this.stockpile.dirt++;
+    else if (kind === "gem") this.stockpile.gems++;
+    else if (kind === "bars") this.stockpile.bars++;
+    else if (kind === "tools") this.stockpile.tools++;
+    else if (kind === "food") this.stockpile.food++;
+    else if (kind === "drink") this.stockpile.drink++;
+    else if (kind === "meal") this.stockpile.meals++;
+    else if (kind === "wood") this.stockpile.wood++;
+    else if (kind === "hide") this.stockpile.hide++;
   }
 
   /** Destroy an item entity (after it's hauled into a stockpile). */
