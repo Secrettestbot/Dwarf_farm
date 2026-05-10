@@ -201,7 +201,18 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     voidShadesSlain: sim.voidShadesSlain,
     aquiferBreachTick: sim.aquiferBreachTick,
     caravan: sim.caravanLeavesTick > 0
-      ? { x: sim.caravanX, y: sim.caravanY, leavesTick: sim.caravanLeavesTick, origin: sim.caravanOrigin }
+      ? {
+          x: sim.caravanX,
+          y: sim.caravanY,
+          leavesTick: sim.caravanLeavesTick,
+          origin: sim.caravanOrigin,
+          brokerId: sim.caravanBrokerId,
+          dealResource: sim.caravanDealResource,
+          dealCost: sim.caravanDealCost,
+          dealImport: sim.caravanDealImport,
+          dealGain: sim.caravanDealGain,
+          dealComplete: sim.caravanDealComplete,
+        }
       : undefined,
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
@@ -490,6 +501,12 @@ export function restore(save: SaveV1): SimWorld {
     sim.caravanY = save.caravan.y;
     sim.caravanLeavesTick = save.caravan.leavesTick;
     sim.caravanOrigin = save.caravan.origin;
+    if (save.caravan.brokerId !== undefined) sim.caravanBrokerId = save.caravan.brokerId;
+    if (save.caravan.dealResource !== undefined) sim.caravanDealResource = save.caravan.dealResource;
+    if (save.caravan.dealCost !== undefined) sim.caravanDealCost = save.caravan.dealCost;
+    if (save.caravan.dealImport !== undefined) sim.caravanDealImport = save.caravan.dealImport;
+    if (save.caravan.dealGain !== undefined) sim.caravanDealGain = save.caravan.dealGain;
+    if (save.caravan.dealComplete) sim.caravanDealComplete = true;
   }
   if (save.graves) {
     for (const g of save.graves) sim.graves.push({ ...g });

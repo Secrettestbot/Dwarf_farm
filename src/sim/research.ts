@@ -11,6 +11,14 @@
 
 export type ResearchTier = 1 | 2 | 3 | 4 | 5 | 6;
 
+/** Multiplier applied to every topic's declared cost when consumed
+ * by progressResearch. The base costs in this file describe the
+ * relative effort of each topic; the scaler tunes the overall
+ * pace so a moderate colony spends in-game years (not weeks)
+ * working through the tree. Increase to slow research, decrease
+ * to speed it up. */
+export const RESEARCH_COST_SCALE = 4;
+
 /** Resource counter (matches Stockpile keys) used for material
  * prereqs. Iron Smelting requires having mined ore, Pottery & Kilns
  * requires dirt, etc. */
@@ -136,6 +144,18 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
     cost: 800,
     prereqs: ["basic_stonecutting"],
     materials: [{ resource: "dirt", min: 10, describe: "10 dirt accumulated" }],
+  },
+  {
+    // Hydraulic Basics — the colony's first water-management topic.
+    // Gates the Pump Station blueprint so a fortress that's breached
+    // an aquifer can drain it. Was previously referenced by the
+    // planner but missing from the tree, which silently disabled
+    // pumping entirely.
+    id: "hydraulic_basics",
+    name: "Hydraulic Basics",
+    tier: 2,
+    cost: 1000,
+    prereqs: ["carpentry_mechanisms"],
   },
 ];
 

@@ -191,6 +191,27 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 4.75 Trade — if a caravan is on site and this dwarf is the
+  //      assigned broker, walk to the depot to close the deal.
+  //      Pre-empts the standard work order: trade is a once-per-
+  //      season window and the caravan leaves whether the broker
+  //      arrived or not. Falls through silently when this dwarf
+  //      isn't the broker, the deal already closed, or no caravan
+  //      is on site.
+  if (
+    age >= MIN_WORK_AGE
+    && sim.caravanBrokerId === e
+    && !sim.caravanDealComplete
+    && sim.caravanLeavesTick > 0
+  ) {
+    return {
+      kind: "trade" as JobKind,
+      targetX: sim.caravanX,
+      targetY: sim.caravanY,
+      progress: 0,
+    };
+  }
+
   // 4.8 Specialization — a Skilled+ dwarf prioritizes the work
   //     branch matching their highest skill before the standard work
   //     order. A master miner mines before hauling, a master smith

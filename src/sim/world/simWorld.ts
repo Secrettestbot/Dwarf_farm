@@ -252,6 +252,18 @@ export class SimWorld {
   /** Origin kingdom of the caravan currently on site, for inspector
    * display. Empty when no caravan is present. */
   caravanOrigin = "";
+  /** Pending trade deal — set when a caravan arrives, applied when
+   * the assigned broker walks to the depot. While `dealComplete` is
+   * false, the trade hasn't closed yet; chooseTask routes the
+   * broker over and progressTrade finalises the counters. If the
+   * caravan despawns first, the deal silently expires. brokerId=-1
+   * means there's no living broker to send (very small colonies). */
+  caravanBrokerId: number = -1;
+  caravanDealResource: string = ""; // key on Stockpile
+  caravanDealCost = 0;
+  caravanDealImport: string = "";
+  caravanDealGain = 0;
+  caravanDealComplete = false;
 
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips

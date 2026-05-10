@@ -3,19 +3,30 @@ import { generateWorld } from "./world/worldgen";
 import { SimWorld } from "./world/simWorld";
 import { tick } from "./sim";
 import { TICKS_PER_DAY } from "./time";
+import { TileType } from "./world/tiles";
 import { Blueprint } from "./planner/blueprint";
 
 const SEASON = TICKS_PER_DAY * 6;
+// Walk-to-depot + negotiate window. The deferred-trade refactor
+// means the deal closes only after the broker physically arrives,
+// so the test loops have to cover the walk plus NEGOTIATE_TICKS.
+const TRADE_WINDOW = TICKS_PER_DAY;
 
 /** Plant a synthetic completed trade depot near spawn so the trade
- * system fires on the next season boundary. */
+ * system fires on the next season boundary. Carves the cavity
+ * tiles to corridor floor so the broker can actually path in. */
 function plantDepot(sim: SimWorld): Blueprint {
   const ox = sim.spawn.x + 2;
   const oy = sim.spawn.y;
   const cavity: number[] = [];
   for (let yy = oy; yy < oy + 4; yy++) {
-    for (let xx = ox; xx < ox + 5; xx++) cavity.push((yy << 16) | xx);
+    for (let xx = ox; xx < ox + 5; xx++) {
+      cavity.push((yy << 16) | xx);
+      sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+    }
   }
+  // Carve a corridor from spawn to the depot so a broker can reach it.
+  for (let xx = sim.spawn.x; xx < ox; xx++) sim.grid.setTile(xx, sim.spawn.y, TileType.CorridorFloor);
   const bp: Blueprint = {
     id: 9100,
     kind: "trade_depot",
@@ -42,7 +53,7 @@ describe("trade caravans", () => {
     sim.stockpile.food = 100; // low → caravan brings food
     const stoneBefore = sim.stockpile.stone;
     const foodBefore = sim.stockpile.food;
-    for (let i = 0; i < SEASON + 5; i++) {
+    for (let i = 0; i < SEASON + TRADE_WINDOW; i++) {
       const id = sim.dwarf.entities[0];
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
@@ -61,7 +72,7 @@ describe("trade caravans", () => {
     const stoneBefore = sim.stockpile.stone;
     sim.emergency.mode = "lockdown";
     sim.emergency.startedAtTick = 0;
-    for (let i = 0; i < SEASON + 5; i++) {
+    for (let i = 0; i < SEASON + TRADE_WINDOW; i++) {
       const id = sim.dwarf.entities[0];
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
@@ -76,7 +87,7 @@ describe("trade caravans", () => {
     sim.spawnDwarf({ name: "Broker", x: w.spawn.x, y: w.spawn.y, age: 30 });
     sim.stockpile.stone = 100;
     const stoneBefore = sim.stockpile.stone;
-    for (let i = 0; i < SEASON + 5; i++) {
+    for (let i = 0; i < SEASON + TRADE_WINDOW; i++) {
       const id = sim.dwarf.entities[0];
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
@@ -91,7 +102,7 @@ describe("trade caravans", () => {
     plantDepot(sim);
     sim.spawnDwarf({ name: "Broker", x: w.spawn.x, y: w.spawn.y, age: 30 });
     sim.stockpile.stone = 0;
-    for (let i = 0; i < SEASON + 5; i++) {
+    for (let i = 0; i < SEASON + TRADE_WINDOW; i++) {
       const id = sim.dwarf.entities[0];
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }

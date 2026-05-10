@@ -253,7 +253,7 @@ export type DiseaseKind =
    * drain; the colony's most lethal disease without medicine. */
   | "wound_sickness";
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat";
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade";
 
 export interface JobAssignment {
   kind: JobKind;

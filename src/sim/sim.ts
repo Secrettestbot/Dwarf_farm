@@ -15,7 +15,7 @@ import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 import { recipeFor } from "./planner/recipes";
 import { QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
-import { nextTopic, TOPICS_BY_ID } from "./research";
+import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
 
 // One in-game minute = MOVE_TICKS to step one tile, MINE_TICKS to break a tile.
 // Tuning is intentionally fast for early sessions so behavior is visible.
@@ -1705,14 +1705,24 @@ function tradeSystem(sim: SimWorld): void {
   // well as begin.
   if (sim.caravanLeavesTick > 0 && sim.tick >= sim.caravanLeavesTick) {
     if (sim.caravanOrigin) {
-      sim.events.add(
-        sim.tick,
-        "social",
-        `The caravan from ${sim.caravanOrigin} packs its wagons and rolls back out the gate.`,
-      );
+      // Distinguish a clean send-off from a missed deal — the
+      // chronicle reads differently when the broker never reached
+      // the wagons.
+      const departureLine = sim.caravanDealComplete || sim.caravanBrokerId === -1
+        ? `The caravan from ${sim.caravanOrigin} packs its wagons and rolls back out the gate.`
+        : `The caravan from ${sim.caravanOrigin} leaves empty-handed — no broker reached the depot in time.`;
+      sim.events.add(sim.tick, "social", departureLine);
     }
+    // Clear all caravan-related state so the next arrival starts
+    // from a clean slate.
     sim.caravanLeavesTick = -1;
     sim.caravanOrigin = "";
+    sim.caravanBrokerId = -1;
+    sim.caravanDealResource = "";
+    sim.caravanDealCost = 0;
+    sim.caravanDealImport = "";
+    sim.caravanDealGain = 0;
+    sim.caravanDealComplete = false;
   }
   if (sim.tick === 0) return;
   if (sim.tick % TRADE_INTERVAL_TICKS !== 0) return;
@@ -1808,10 +1818,15 @@ function tradeSystem(sim: SimWorld): void {
   const cost = offer.min;
   const grossValue = cost * offer.price;
   const gain = Math.round(grossValue * brokerBonus * (TRADE_BASE_GAIN / 30));
-  sim.stockpile[offer.resource] -= cost;
-  sim.stockpile[importKind] += gain;
-  // Award XP to the broker.
-  if (bestBroker !== -1) awardSkillXp(sim, bestBroker, "trading", 1);
+  // Stash the deal — chooseTask will route the broker to the depot,
+  // and progressTrade will apply the counter changes once they
+  // arrive. The caravan now actually waits for the broker.
+  sim.caravanBrokerId = bestBroker;
+  sim.caravanDealResource = offer.resource;
+  sim.caravanDealCost = cost;
+  sim.caravanDealImport = importKind;
+  sim.caravanDealGain = gain;
+  sim.caravanDealComplete = false;
   const brokerName = bestBroker !== -1 ? sim.dwarf.get(bestBroker)?.name ?? "the broker" : "the broker";
   // Caravan arrivals fire as "discovery" so the notification toast
   // surfaces them — visiting traders are infrequent and easy to
@@ -1820,7 +1835,7 @@ function tradeSystem(sim: SimWorld): void {
   sim.events.add(
     sim.tick,
     "discovery",
-    `A caravan from ${kingdom} arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${importKind} for ${cost} ${offer.resource}.`,
+    `A caravan from ${kingdom} arrives at the Trade Depot. ${brokerName} sets out to negotiate ${gain} ${importKind} for ${cost} ${offer.resource}.`,
     { x: depot.cx, y: depot.cy },
   );
 }
@@ -3107,6 +3122,9 @@ function workSystem(sim: SimWorld): void {
       case "treat":
         progressTreat(sim, e, job, pos);
         break;
+      case "trade":
+        progressTrade(sim, e, job, pos);
+        break;
     }
   }
 }
@@ -3207,6 +3225,45 @@ function progressTreat(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   }
 }
 
+/** Walk to the caravan depot and close the trade. The broker's
+ * job — set when a caravan arrives, computed in tradeSystem — is
+ * applied here once the broker is at (or adjacent to) the depot
+ * tile. NEGOTIATE_TICKS keeps the broker on site briefly so the
+ * exchange is visible, then the counters update + a chronicle
+ * line fires. Bails if the caravan despawns mid-walk. */
+const NEGOTIATE_TICKS = 60; // one in-game hour at the table
+function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  // Caravan packed up while we were walking — no deal.
+  if (sim.caravanLeavesTick <= 0 || sim.caravanDealComplete) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  const dx = Math.abs(pos.x - sim.caravanX);
+  const dy = Math.abs(pos.y - sim.caravanY);
+  // Still walking — wait until adjacent (or on) the depot tile.
+  if (dx > 1 || dy > 1) return;
+  job.progress++;
+  if (job.progress < NEGOTIATE_TICKS) return;
+  // Negotiation finished — apply the deal we cached at arrival.
+  const stockpile = sim.stockpile as unknown as Record<string, number>;
+  stockpile[sim.caravanDealResource] = (stockpile[sim.caravanDealResource] ?? 0) - sim.caravanDealCost;
+  stockpile[sim.caravanDealImport] = (stockpile[sim.caravanDealImport] ?? 0) + sim.caravanDealGain;
+  sim.caravanDealComplete = true;
+  awardSkillXp(sim, e, "trading", 1);
+  const dw = sim.dwarf.get(e);
+  const brokerName = dw?.name ?? "the broker";
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${brokerName} closes the deal at the Trade Depot — ${sim.caravanDealGain} ${sim.caravanDealImport} for ${sim.caravanDealCost} ${sim.caravanDealResource}.`,
+    { x: sim.caravanX, y: sim.caravanY },
+  );
+  sim.dwarf.get(e)!.lastJobTick = sim.tick;
+  sim.job.remove(e);
+  sim.pathing.remove(e);
+}
+
 /** Tick a pump cycle while the dwarf stands on a pump-station tile.
  * On completion, drain the nearest water tile within PUMP_DRAIN_RADIUS
  * back to corridor floor — reclaiming flooded space one cell at a time.
@@ -3282,7 +3339,7 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
   sim.research.progress += ticksThisStep;
   awardSkillXp(sim, e, "scholarship", 1);
   const topic = TOPICS_BY_ID[sim.research.current];
-  if (topic && sim.research.progress >= topic.cost) {
+  if (topic && sim.research.progress >= topic.cost * RESEARCH_COST_SCALE) {
     sim.research.completed.push(topic.id);
     sim.research.current = null;
     sim.research.progress = 0;
