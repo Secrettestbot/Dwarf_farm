@@ -34,6 +34,54 @@ describe("ColonyPlanner", () => {
     expect(planner.activeCount()).toBeLessThanOrEqual(3);
   });
 
+  it("rooms never break the surface — at least 2 tiles of rock above every ceiling", () => {
+    // Carve a long run of corridors that descends from the spawn cavern,
+    // hand-excavating cavities so reachable space expands. Then check
+    // every emitted ROOM blueprint has at least 2 tiles of solid rock
+    // above its ceiling — a room carved at or just under the surface
+    // looks absurd and offers zero protection from above.
+    const w = generateWorld({ seed: 36, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    for (let t = 1; t <= 5000; t++) {
+      planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 14, rng: testRng });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          w.grid.setTile(x, y, 7);
+        }
+      }
+    }
+    const ROOM_KINDS = new Set([
+      "bedroom", "dining_hall", "stockpile", "farm", "kitchen", "brewery",
+      "smelter", "forge", "mason", "jeweller", "carpenter", "kiln", "tannery",
+      "loom", "library", "armoury", "throne_room", "hospital", "tavern",
+      "trade_depot", "pump_station", "water_wheel", "cemetery", "stairwell",
+      "magma_forge",
+    ]);
+    const rooms = planner.blueprints.filter((b) => ROOM_KINDS.has(b.kind));
+    expect(rooms.length).toBeGreaterThan(0);
+    for (const r of rooms) {
+      // The blueprint cavity tiles are now walkable in the grid (we
+      // carved them above). At placement time, the buffer rule requires
+      // 2 solid tiles above each cavity column. Inspect the original
+      // bbox: row r.originY is the topmost cavity row. The two rows
+      // above (originY - 1 and originY - 2) must not be Air.
+      for (let x = r.originX; x < r.originX + r.width; x++) {
+        for (let d = 1; d <= 2; d++) {
+          const y = r.originY - d;
+          if (y < 0) continue;
+          // 0 == TileType.Air. We can't import the enum into a test
+          // import without complicating the module graph; the numeric
+          // value is stable across the codebase.
+          expect(w.grid.getTile(x, y), `room kind=${r.kind} at (${r.originX},${r.originY}) has Air at (${x},${y}) within ceiling buffer`).not.toBe(0);
+        }
+      }
+    }
+  });
+
   it("bedrooms spread out instead of clustering at the surface", () => {
     const w = generateWorld({ seed: 35, width: 200, height: 500 });
     const planner = new ColonyPlanner();

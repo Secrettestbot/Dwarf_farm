@@ -41,9 +41,12 @@ export class NotificationCenter {
     this.camera = camera;
     const wrap = document.createElement("div");
     wrap.style.cssText =
-      // Stack at top-left under the speed/HUD bar. Each toast is a
-      // separate child div added at the top so newest sits highest.
-      "position:absolute;top:60px;left:8px;display:flex;flex-direction:column;gap:6px;z-index:10;pointer-events:none;";
+      // Top-centre stack so toasts don't cover the HUD (top-left),
+      // sliders (top-right), inspector (right inset), event log
+      // (bottom-left), or the minimap (bottom-right). The stack
+      // grows downward; a hard max-height + overflow ensures a
+      // burst of crises can't reach the canvas itself.
+      "position:absolute;top:8px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:10;pointer-events:none;width:min(420px,60vw);max-height:calc(100vh - 24px);overflow:hidden;";
     this.host.appendChild(wrap);
     this.root = wrap;
   }
