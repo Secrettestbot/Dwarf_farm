@@ -114,11 +114,12 @@ export interface Stockpile {
 }
 
 // Starter caches sized to give the colony comfortable runway for
-// research → library → brewery → stable production. The earlier
-// 1000 each was tight when migration boosted population past ~20
-// before the brewery + farms could keep up.
-const STARTER_FOOD = 2000;
-const STARTER_DRINK = 2000;
+// research → library → brewery → stable production. With the
+// research-cost scaler at 4×, the brewery research chain takes
+// substantially longer to land — bumped to 4000 so the founders'
+// cellar lasts through the slower research ramp.
+const STARTER_FOOD = 4000;
+const STARTER_DRINK = 4000;
 
 /**
  * Aggregate of everything the deterministic tick function needs. The same
