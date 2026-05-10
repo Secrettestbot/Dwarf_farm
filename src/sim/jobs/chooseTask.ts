@@ -14,6 +14,7 @@ import { recipeFor } from "../planner/recipes";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
+const SOCIAL_CRITICAL = 15;
 const SOCIAL_RANGE = 10; // tiles
 const HUNGER_CRITICAL = 30;
 const THIRST_CRITICAL = 35;
@@ -113,6 +114,27 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     const sleepSpot = findSleepTarget(sim, pos.x, pos.y, e);
     if (sleepSpot) {
       return { kind: "sleep" as JobKind, targetX: sleepSpot.x, targetY: sleepSpot.y, progress: 0 };
+    }
+  }
+
+  // 3.5 Critical social — when isolation has dropped social very low,
+  //     drop work to find someone. Sits above work but below sleep /
+  //     hunger / thirst. Uses the lenient partner search so a busy
+  //     colony (where every other dwarf has a mining or hauling job)
+  //     still produces matches: a working partner doesn't need to
+  //     stop, the chooser just walks over and chats at them while
+  //     they work. Both dwarves' social ticks up the whole time.
+  if (needs && needs.social <= SOCIAL_CRITICAL) {
+    const partner = findSocialPartner(sim, e, pos.x, pos.y, true);
+    if (partner !== -1) {
+      const partnerPos = sim.position.get(partner)!;
+      return {
+        kind: "socialise" as JobKind,
+        targetX: partnerPos.x,
+        targetY: partnerPos.y,
+        progress: 0,
+        partnerId: partner,
+      };
     }
   }
 
@@ -267,10 +289,14 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   }
 
   // 8. Social: find an idle nearby dwarf to talk to. Slider scales the
-  //    threshold so a high-Socialising colony chats more eagerly.
+  //    threshold so a high-Socialising colony chats more eagerly. The
+  //    moderate-tier branch keeps the strict idle-only partner rule
+  //    so a healthy colony doesn't constantly interrupt productive
+  //    work for casual chats — the critical branch above handles the
+  //    "really needs people" case differently.
   const socialThreshold = SOCIAL_THRESHOLD * (sim.sliders.socialising * 1.6 + 0.2);
   if (needs && needs.social <= socialThreshold) {
-    const partner = findSocialPartner(sim, e, pos.x, pos.y);
+    const partner = findSocialPartner(sim, e, pos.x, pos.y, false);
     if (partner !== -1) {
       const partnerPos = sim.position.get(partner)!;
       return {
@@ -960,10 +986,16 @@ function findRestSpot(sim: SimWorld, sx: number, sy: number): { x: number; y: nu
 }
 
 /**
- * Find another idle dwarf nearby (no current job) to socialise with.
- * Returns -1 if none found.
+ * Find a nearby dwarf to socialise with. By default ("strict") only
+ * idle dwarves count — chat is leisure, leisure shouldn't interrupt
+ * work. When `lenient` is true (called from the critical-social
+ * branch in chooseTask), accept any nearby dwarf whose current job
+ * isn't a survival or combat one. The chooser walks over and gets
+ * social ticks regardless of what the partner is doing — both
+ * dwarves' social bumps each tick of progressSocialise. Returns -1
+ * if no suitable partner is in range.
  */
-function findSocialPartner(sim: SimWorld, self: EntityId, sx: number, sy: number): EntityId {
+function findSocialPartner(sim: SimWorld, self: EntityId, sx: number, sy: number, lenient: boolean): EntityId {
   const ents = sim.dwarf.entities;
   // Iterate dense array for determinism.
   let best = -1;
@@ -971,7 +1003,16 @@ function findSocialPartner(sim: SimWorld, self: EntityId, sx: number, sy: number
   for (let i = 0; i < ents.length; i++) {
     const other = ents[i];
     if (other === self) continue;
-    if (sim.job.has(other)) continue; // already busy
+    const otherJob = sim.job.get(other);
+    if (otherJob) {
+      if (!lenient) continue; // strict mode: any job disqualifies
+      // Lenient mode: skip survival / combat / shelter jobs but
+      // accept work jobs (mine, haul, craft, tend, maintain, etc.).
+      const k = otherJob.kind;
+      if (k === "eat" || k === "drink" || k === "sleep" || k === "shelter" || k === "engage" || k === "treat") {
+        continue;
+      }
+    }
     const op = sim.position.get(other);
     if (!op) continue;
     const dx = op.x - sx;
