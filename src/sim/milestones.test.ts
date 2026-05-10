@@ -135,7 +135,11 @@ describe("narrative milestones (GDD §10.2)", () => {
 
   it("Three Generations fires when both parents were themselves born in-colony", () => {
     const w = generateWorld({ seed: 817, width: 200, height: 500 });
-    const sim = new SimWorld(817, w.grid, w.surfaceY, w.spawn);
+    // 12 in-game years of full sim (farms, brewery, hauling) generates
+    // far more loose items than a normal play session. Bump the entity
+    // cap so the production chain doesn't trip the limit before the
+    // grandchild milestone has a chance to fire.
+    const sim = new SimWorld(817, w.grid, w.surfaceY, w.spawn, 32768);
     // Hand-spawn two adults flagged as in-colony births. Pair them, run
     // a year, expect a child + the milestone.
     const m = sim.spawnDwarf({ name: "Mother", x: w.spawn.x, y: w.spawn.y, age: 25, bornInColony: true });
