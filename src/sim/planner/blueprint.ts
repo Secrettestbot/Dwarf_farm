@@ -131,6 +131,7 @@ export const FURNITURE_REQUIREMENTS: Partial<Record<BlueprintKind, ReadonlyArray
   brewery: [{ item: "barrel", count: 1 }],
   dining_hall: [{ item: "table", count: 1 }],
   stockpile: [{ item: "bin", count: 1 }],
+  kitchen: [{ item: "stove", count: 1 }],
 };
 
 /** Quality of a freshly-finished room. The architect counts the dig

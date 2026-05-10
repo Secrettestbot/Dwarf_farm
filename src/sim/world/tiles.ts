@@ -165,6 +165,11 @@ export const enum TileType {
    * Walkable so the brewer can step around the room without
    * tripping over the cask. */
   BrewingBarrel = 53,
+  /** Stone stove — a built hearth at the centre of a Kitchen. A
+   * Kitchen blueprint becomes functional only after a Stove has
+   * been delivered (Mason's Workshop recipe: 2 blocks → 1 stove).
+   * Walkable so the cook can step around it. */
+  Stove = 54,
 }
 
 export interface TileInfo {
@@ -230,6 +235,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Grave]: { name: "grave plot", walkable: true, solid: false, color: 0x504838 },
   [TileType.Headstone]: { name: "headstone", walkable: true, solid: false, color: 0x9a8a72 },
   [TileType.BrewingBarrel]: { name: "brewing barrel", walkable: true, solid: false, color: 0x7a5028 },
+  [TileType.Stove]: { name: "stove", walkable: true, solid: false, color: 0x504030 },
 };
 
 export function tileIsGem(t: number): boolean {

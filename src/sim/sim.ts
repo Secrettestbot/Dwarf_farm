@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, MASON_TABLE_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -2436,6 +2436,18 @@ function needsDiningHallFurniture(sim: SimWorld): boolean {
   return false;
 }
 
+/** True iff the colony has at least one kitchen waiting on a
+ * stove delivery. */
+function needsKitchenFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "kitchen") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["stove"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
 /** Map from furniture-item kind to the tile that gets stamped when
  * it's delivered. Extended as new furniture pipelines are wired up
  * (tables for dining halls, stoves + ovens for kitchens, etc.). */
@@ -2444,6 +2456,7 @@ const FURNITURE_TILE: Partial<Record<string, TileType>> = {
   barrel: TileType.BrewingBarrel,
   table: TileType.Table,
   bin: TileType.Bin,
+  stove: TileType.Stove,
 };
 
 /** If (px, py) lies inside a needs_furnishing blueprint's cavity
@@ -3610,11 +3623,16 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = CARPENTER_BED_RECIPE;
     }
   }
-  // Mason swaps recipes for dining-hall tables. Default is cutting
-  // blocks from stone; the swap kicks in only when a dining hall
-  // is waiting on a table AND the colony has blocks to consume.
-  if (blueprintKind === "mason" && recipe && needsDiningHallFurniture(sim) && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
-    recipe = MASON_TABLE_RECIPE;
+  // Mason swaps recipes by demand. Priority: stove (kitchen — a
+  // colony with no kitchen falls back on raw food) → table
+  // (dining hall) → default blocks. Both swaps need enough blocks
+  // in the stockpile to consume.
+  if (blueprintKind === "mason" && recipe && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
+    if (needsKitchenFurniture(sim)) {
+      recipe = MASON_STOVE_RECIPE;
+    } else if (needsDiningHallFurniture(sim)) {
+      recipe = MASON_TABLE_RECIPE;
+    }
   }
   if (!recipe) {
     sim.job.remove(e);
@@ -3837,6 +3855,7 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "barrel") return "barrel";
   if (resource === "table") return "table";
   if (resource === "bin") return "bin";
+  if (resource === "stove") return "stove";
   return null;
 }
 
@@ -4068,6 +4087,9 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     }
     else if (carrying.kind === "bin") {
       sim.spawnItem({ kind: "bin", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "stove") {
+      sim.spawnItem({ kind: "stove", x: pos.x, y: pos.y, quality: carrying.quality });
     }
   }
   sim.carrying.remove(e);

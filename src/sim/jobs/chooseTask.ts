@@ -887,6 +887,9 @@ function isFurnitureOrStationTile(t: number): boolean {
   return (
     t === TileType.Bed
     || t === TileType.BrewingBarrel
+    || t === TileType.Stove
+    || t === TileType.Table
+    || t === TileType.Bin
     || t === TileType.BreweryStation
     || t === TileType.KitchenStation
     || t === TileType.SmelterStation

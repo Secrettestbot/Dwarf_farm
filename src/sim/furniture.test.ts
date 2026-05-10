@@ -161,6 +161,57 @@ describe("furniture pipeline", () => {
     expect(placed).toBe(true);
   });
 
+  it("a needs_furnishing kitchen takes a stove delivery", () => {
+    const w = generateWorld({ seed: 85, width: 200, height: 500 });
+    const sim = new SimWorld(85, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    sim.spawnItem({ kind: "stove", x: sx, y: sy });
+    for (let xx = sx; xx <= sx + 12; xx++) sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+    const ox = sx + 3;
+    const oy = sy;
+    const cavity: number[] = [];
+    for (let yy = oy; yy < oy + 3; yy++) {
+      for (let xx = ox; xx < ox + 3; xx++) {
+        cavity.push((yy << 16) | xx);
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    sim.grid.setTile(ox + 1, oy + 1, TileType.KitchenStation);
+    const kitchen: Blueprint = {
+      id: 9313,
+      kind: "kitchen",
+      originX: ox,
+      originY: oy,
+      width: 3,
+      height: 3,
+      cavity: new Int32Array(cavity),
+      status: "needs_furnishing",
+      priority: 1,
+      createdTick: 0,
+      furniturePlaced: {},
+    };
+    sim.planner.blueprints.push(kitchen);
+    sim.spawnDwarf({ name: "Hauler", x: sx, y: sy, age: 30 });
+    let placed = false;
+    for (let i = 0; i < TICKS_PER_DAY * 2 && !placed; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (kitchen.status === "complete") placed = true;
+    }
+    expect(placed).toBe(true);
+    let stoveFound = false;
+    for (let i = 0; i < kitchen.cavity.length; i++) {
+      const c = kitchen.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === TileType.Stove) { stoveFound = true; break; }
+    }
+    expect(stoveFound).toBe(true);
+  });
+
   it("a needs_furnishing stockpile takes a bin delivery", () => {
     const w = generateWorld({ seed: 83, width: 200, height: 500 });
     const sim = new SimWorld(83, w.grid, w.surfaceY, w.spawn);

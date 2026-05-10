@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin" | "stove";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -214,6 +214,20 @@ export const MASON_TABLE_RECIPE: Recipe = {
   outputKind: "table",
   outputQty: 1,
   ticks: 100,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+/** Alternate mason recipe for kitchen stoves. Two stone blocks
+ * become a single carved hearth, slightly more involved than a
+ * table (more ticks). */
+export const MASON_STOVE_RECIPE: Recipe = {
+  verb: "builds a stove",
+  inputKind: "blocks",
+  inputQty: 2,
+  outputKind: "stove",
+  outputQty: 1,
+  ticks: 120,
   skill: "masonry",
   station: TileType.MasonStation,
 };

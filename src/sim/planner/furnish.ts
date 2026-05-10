@@ -272,6 +272,11 @@ export function prepareInfrastructureForFurnishing(grid: TileGrid, b: Blueprint)
       // even while it waits for its barrel.
       stampWorkshopStationCentre(grid, b, TileType.BreweryStation);
       break;
+    case "kitchen":
+      // Cook's workstation. Same reasoning as the brewery — the
+      // station is a fixed feature, the stove is the deliverable.
+      stampWorkshopStationCentre(grid, b, TileType.KitchenStation);
+      break;
     // Bedroom, dining hall, stockpile: door only. The bed / table /
     // bin is the deliverable furniture and the rest of the cavity
     // is plain CorridorFloor until the haul lands.
