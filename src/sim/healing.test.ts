@@ -55,10 +55,14 @@ describe("healing", () => {
     // system would normally set on a damaging hit.
     hp.hp = 20;
     hp.wasSevereWound = true;
-    // Run long enough to fully heal: 80 hp / 1 hp per 30 ticks (idle) ≈
-    // 2400 ticks. Plus chooseTask will likely send the dwarf to sleep,
-    // boosting the rate. Either way 6000 ticks is plenty.
-    for (let i = 0; i < 6000; i++) tick(sim);
+    // Pin needs each tick so Borin doesn't die mid-run and free
+    // his entity slot for a migrant — the calendar-aging test
+    // already documents this slot-reuse issue.
+    for (let i = 0; i < 6000; i++) {
+      const n = sim.needs.get(e);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+    }
     expect(sim.health.get(e)!.hp).toBe(hp.maxHp);
     const recovered = sim.events.events.find((ev) =>
       ev.text.includes("recovered from their wounds"),
