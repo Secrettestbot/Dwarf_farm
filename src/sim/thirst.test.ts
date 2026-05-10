@@ -24,6 +24,15 @@ describe("colony survives thirst", () => {
       lowestDrink = Math.min(lowestDrink, sim.stockpile.drink);
     }
     const dehydrationDeaths = sim.events.events.filter((e) => /dehydration|of thirst|parched/i.test(e.text)).length;
+    {
+      const brewComplete = sim.planner.blueprints.filter((b) => b.kind === "brewery" && b.status === "complete").length;
+      const farmComplete = sim.planner.blueprints.filter((b) => b.kind === "farm" && b.status === "complete").length;
+      const libComplete = sim.planner.blueprints.filter((b) => b.kind === "library" && b.status === "complete").length;
+      const starvations = sim.events.events.filter((e) => /starvation|of hunger|starved/i.test(e.text)).length;
+      const violentDeaths = sim.events.events.filter((e) => /slain|gored|torn|crushed|struck dead/i.test(e.text)).length;
+      // eslint-disable-next-line no-console
+      console.log(`pop=${sim.dwarf.entities.length} drink=${sim.stockpile.drink} food=${sim.stockpile.food} lowest_drink=${lowestDrink} dehydrations=${dehydrationDeaths} starvations=${starvations} violent=${violentDeaths} breweries=${brewComplete} farms=${farmComplete} libs=${libComplete} basic_brewing_done=${sim.research.completed.includes("basic_brewing")}`);
+    }
     expect(dehydrationDeaths).toBe(0);
     expect(sim.dwarf.entities.length).toBeGreaterThan(0);
     // Drink supply should never run dry — there should always be a

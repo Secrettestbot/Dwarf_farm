@@ -346,20 +346,25 @@ export class ColonyPlanner {
     if (ctx.population < 5) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_cooking")) return false;
     const target = Math.max(1, Math.ceil(ctx.population / 10));
-    return this.maintainedAndActiveOfKind("kitchen", ctx.tick) < target;
+    // Use completedByKind so neglect doesn't trigger an emission
+    // cascade — same reasoning as the brewery scaling.
+    const built = (this.completedByKind["kitchen"] ?? 0) + (this.activeByKind()["kitchen"] ?? 0);
+    return built < target;
   }
 
   private needsBrewery(ctx: PlannerContext): boolean {
     // Tier 1 Basic Brewing gates the Brewery. Same reasoning as the
     // kitchen — the founders' cellar lasts until research lands.
-    // One brewery per ~8 dwarves so a growing colony doesn't drink
-    // a single brewer dry between brews. Without this scaling, a
-    // post-migration colony of 25+ dwarves quietly dies of thirst
-    // while the lone brewer can't keep up.
+    // One brewery per ~8 dwarves. Use completedByKind (total
+    // completed) rather than maintainedAndActiveOfKind so a
+    // neglected brewery doesn't trigger an emission cascade — the
+    // colony was building 20+ breweries and starving its farms
+    // dry once neglect-driven emissions added up over the long run.
     if (ctx.population < 5) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_brewing")) return false;
     const target = Math.max(1, Math.ceil(ctx.population / 8));
-    return this.maintainedAndActiveOfKind("brewery", ctx.tick) < target;
+    const built = (this.completedByKind["brewery"] ?? 0) + (this.activeByKind()["brewery"] ?? 0);
+    return built < target;
   }
 
   private needsSmelter(ctx: PlannerContext): boolean {
@@ -393,9 +398,12 @@ export class ColonyPlanner {
     // The library lands once the colony has the bandwidth to spare a
     // dwarf or two for scholarship. Lowered to pop ≥ 5 so research can
     // run before the smelter / forge tier — those are now gated on
-    // research topics.
+    // research topics. Use completedByKind so a neglected library
+    // doesn't trigger an emission cascade (the colony was building
+    // 5+ libraries over a long run, tying up too many scholars).
     if (ctx.population < 5) return false;
-    return this.maintainedAndActiveOfKind("library", ctx.tick) === 0;
+    const built = (this.completedByKind["library"] ?? 0) + (this.activeByKind()["library"] ?? 0);
+    return built === 0;
   }
 
   private needsArmoury(ctx: PlannerContext): boolean {
