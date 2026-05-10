@@ -191,6 +191,24 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 4.8 Specialization — a Skilled+ dwarf prioritizes the work
+  //     branch matching their highest skill before the standard work
+  //     order. A master miner mines before hauling, a master smith
+  //     crafts before tending, a master scholar researches before
+  //     mining. Falls through to the standard order when the
+  //     specialty branch has no target. Skipped when the dwarf is
+  //     carrying something — finishing delivery first.
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e)) {
+    const dw = sim.dwarf.get(e);
+    if (dw) {
+      const specialty = preferredWorkKind(dw);
+      if (specialty) {
+        const proposal = trySpecialtyBranch(sim, e, pos, specialty);
+        if (proposal) return proposal;
+      }
+    }
+  }
+
   // 5. Tend a farm cell that's getting close to fallow. Higher priority
   //    than mining because a colony with no food loses fast — but lower
   //    than survival needs above. Children skip it. Gated by the Farming
@@ -345,6 +363,98 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   }
 
   return null;
+}
+
+/** Skill level above which a dwarf treats a work kind as their
+ * specialty. Apprentice-tier (4) — a noticeable step up from
+ * Novice without requiring true mastery. Below this, the dwarf
+ * has no preferred work and falls through to the standard order. */
+const SPECIALTY_THRESHOLD = 4;
+
+/** Pick the work branch matching this dwarf's highest skill that
+ * counts as a real specialty (≥ SPECIALTY_THRESHOLD). Returns null
+ * if no skill clears the bar. Crafting skills (smithing, cooking,
+ * brewing, masonry, jewelling, carpentry, loom_tanning) all map to
+ * the generic "craft" branch — the recipe at each station picks the
+ * actual skill once the dwarf arrives. */
+function preferredWorkKind(dw: import("../ecs/components").Dwarf): JobKind | null {
+  const s = dw.skills;
+  type Cand = { kind: JobKind; level: number };
+  // Take the max across crafting skills so a master smith and a
+  // master cook both qualify for "craft" without splitting the score.
+  const craftMax = Math.max(
+    s.smithing ?? 1,
+    s.cooking ?? 1,
+    s.brewing ?? 1,
+    s.masonry ?? 1,
+    s.jewelling ?? 1,
+    s.carpentry ?? 1,
+    s.loom_tanning ?? 1,
+  );
+  const candidates: Cand[] = [
+    { kind: "mine", level: s.mining ?? 1 },
+    { kind: "haul", level: s.hauling ?? 1 },
+    { kind: "tend", level: s.farming ?? 1 },
+    { kind: "craft", level: craftMax },
+    { kind: "research", level: s.scholarship ?? 1 },
+    { kind: "treat", level: s.medicine ?? 1 },
+  ];
+  let best: Cand | null = null;
+  for (const c of candidates) {
+    if (c.level < SPECIALTY_THRESHOLD) continue;
+    if (!best || c.level > best.level) best = c;
+  }
+  return best ? best.kind : null;
+}
+
+/** Run the specialty-preferred work branch. Mirrors the gates of
+ * the standard work order — same slider thresholds, same target
+ * helpers — but called BEFORE the standard chain so a specialist
+ * picks their craft over the default priority order. Returns a
+ * proposal if the branch has a target, null otherwise. */
+function trySpecialtyBranch(
+  sim: SimWorld,
+  e: EntityId,
+  pos: { x: number; y: number },
+  kind: JobKind,
+): JobAssignment | null {
+  switch (kind) {
+    case "mine": {
+      if (sim.sliders.excavation <= 0.05) return null;
+      const t = findMineTarget(sim, pos.x, pos.y);
+      return t ? { kind: "mine" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
+    }
+    case "haul": {
+      if (sim.sliders.hauling <= 0.05) return null;
+      const t = findHaulTarget(sim, e, pos.x, pos.y);
+      return t ? { kind: "haul" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
+    }
+    case "tend": {
+      if (sim.sliders.farming <= 0.05) return null;
+      const t = findTendTarget(sim, pos.x, pos.y);
+      return t ? { kind: "tend" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
+    }
+    case "craft": {
+      if (sim.sliders.crafting <= 0.05) return null;
+      const t = findCraftTarget(sim, pos.x, pos.y);
+      return t ? { kind: "craft" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
+    }
+    case "research": {
+      if (sim.sliders.research <= 0.05 || !sim.research.current) return null;
+      const t = findResearchDesk(sim, pos.x, pos.y);
+      return t ? { kind: "research" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
+    }
+    case "treat": {
+      const dw = sim.dwarf.get(e);
+      if (!dw || (dw.skills.medicine ?? 1) < MEDIC_MIN_SKILL) return null;
+      const patient = findPatientForTreatment(sim, e, pos.x, pos.y);
+      if (patient === -1) return null;
+      const ppos = sim.position.get(patient)!;
+      return { kind: "treat" as JobKind, targetX: ppos.x, targetY: ppos.y, progress: 0, partnerId: patient };
+    }
+    default:
+      return null;
+  }
 }
 
 /** Below this morale threshold, a survivor with a recorded lost

@@ -300,6 +300,18 @@ export class SimWorld {
    * the dwarves forever. Round-trips through save. */
   grudges: Map<string, { count: number; lastIncidentTick: number }> = new Map();
 
+  /** Cumulative haul totals — tracks how much of each resource the
+   * colony has ever produced. Drives material-gated research: once
+   * a threshold is crossed the gate stays open even if the
+   * stockpile is later spent. Round-trips through save. */
+  cumulative: Partial<Record<import("../research").MaterialResource, number>> = {};
+
+  /** Tile types the colony has discovered, either by mining them or
+   * uncovering them via visibility. Drives the discovery-side of
+   * material-gated research (gem veins, magma vents, ancient ruins,
+   * adamantite, void-ore). Round-trips through save. */
+  discoveries: Set<number> = new Set();
+
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;
 

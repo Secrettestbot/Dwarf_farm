@@ -294,6 +294,15 @@ export interface SaveV1 {
    * count rises with each spat. Round-trips so a feud survives a
    * reload (or a worker catch-up) instead of resetting to peace. */
   grudges?: Array<{ key: string; count: number; lastIncidentTick: number }>;
+  /** Cumulative haul totals — drives material-gated research. Once
+   * a counter has crossed a topic's threshold the gate stays open
+   * even if the stockpile is later spent, so we round-trip the
+   * cumulative number rather than the live stockpile. */
+  cumulative?: Partial<Record<string, number>>;
+  /** Tile types the colony has discovered. Drives the discovery
+   * side of material-gated research (gem veins, magma vents,
+   * ancient ruins, adamantite, void-ore). */
+  discoveries?: number[];
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

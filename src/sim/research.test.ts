@@ -27,6 +27,53 @@ describe("research tree", () => {
     expect(next?.tier).toBe(2);
   });
 
+  it("Iron Smelting is locked until the colony has mined ore", () => {
+    const r = defaultResearch();
+    // Without ore, the cumulative table is empty — Iron Smelting's
+    // material gate fails. The selector skips it and picks something
+    // that doesn't gate on materials.
+    const noMaterial = nextTopic(r, { cumulative: {}, discovered: new Set() });
+    expect(noMaterial?.id).not.toBe("iron_smelting");
+    // Pre-seed everything except iron_smelting and iron_toolmaking
+    // so iron_smelting is the cheapest still-unfinished Tier 1 topic.
+    r.completed = [
+      "basic_stonecutting", "basic_carpentry", "basic_cooking",
+      "basic_brewing", "rope_and_fibre",
+    ];
+    // Without ore, the selector still skips iron_smelting and falls
+    // through to Tier 2 topics whose prereqs are met (medical_practice,
+    // masonry_and_mortaring, etc.). Iron Smelting is NOT picked.
+    const stillLocked = nextTopic(r, { cumulative: {}, discovered: new Set() });
+    expect(stillLocked?.id).not.toBe("iron_smelting");
+    // Once 3 ore have been mined, the gate opens and iron_smelting
+    // (cheaper than the Tier 2 alternatives at 800 vs 800-1100) wins
+    // by alphabetical tiebreak vs. the rest.
+    const withOre = nextTopic(r, { cumulative: { ore: 3 }, discovered: new Set() });
+    expect(withOre?.id).toBe("iron_smelting");
+  });
+
+  it("Gem Cutting is locked until a gem vein is discovered", () => {
+    const r = defaultResearch();
+    r.completed = [
+      "basic_stonecutting", "basic_carpentry", "basic_cooking",
+      "basic_brewing", "rope_and_fibre", "iron_smelting",
+      "iron_toolmaking", "masonry_and_mortaring", "carpentry_mechanisms",
+      "armoury_basics", "medical_practice", "textile_craft",
+      "underground_agriculture", "minecart_tracks", "pottery_and_kilns",
+      "steel_alloying", "advanced_metallurgy", "weaponsmithing",
+      "military_tactics", "fortification_design", "advanced_medicine",
+    ];
+    const ctx = {
+      cumulative: { ore: 100, bars: 50, blocks: 50, dirt: 50, rope: 10 },
+      discovered: new Set<number>(),
+    };
+    const without = nextTopic(r, ctx);
+    expect(without?.id).not.toBe("gem_cutting");
+    // Discover a ruby seam.
+    const withGem = nextTopic(r, { ...ctx, discovered: new Set([22 /* RawRuby */]) });
+    expect(withGem?.id).toBe("gem_cutting");
+  });
+
   it("a scholar at a library desk advances research progress", () => {
     const w = generateWorld({ seed: 101, width: 200, height: 500 });
     const sim = new SimWorld(101, w.grid, w.surfaceY, w.spawn);

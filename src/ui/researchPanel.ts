@@ -5,7 +5,7 @@
 // which scholar wrote the book on each completed topic.
 
 import { SimWorld } from "../sim/world/simWorld";
-import { ALL_TOPICS, ResearchTopic, ResearchTier, TOPICS_BY_ID } from "../sim/research";
+import { ALL_TOPICS, ResearchTopic, ResearchTier, TOPICS_BY_ID, hasMaterials } from "../sim/research";
 import { TICKS_PER_YEAR } from "../sim/time";
 
 export class ResearchPanel {
@@ -83,11 +83,12 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
   const isDone = completed.has(t.id);
   const isCurrent = current === t.id;
   const prereqsMet = t.prereqs.every((p) => completed.has(p));
+  const materialsMet = hasMaterials(t, { cumulative: sim.cumulative, discovered: sim.discoveries });
   const status = isDone
     ? `<span style="color:#7fc08c;">✓ complete</span>`
     : isCurrent
       ? `<span style="color:#e0c080;">studying ${Math.round((sim.research.progress / t.cost) * 100)}%</span>`
-      : prereqsMet
+      : prereqsMet && materialsMet
         ? `<span style="color:#aaa;">available</span>`
         : `<span style="color:#666;">locked</span>`;
   // Book + author for completed topics — cross-reference sim.books.
@@ -98,19 +99,25 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
   const prereqLine = !prereqsMet && t.prereqs.length > 0
     ? `<div style="font-size:10px;color:#666;margin-top:2px;">requires: ${t.prereqs.map((p) => TOPICS_BY_ID[p]?.name ?? p).join(", ")}</div>`
     : "";
+  // Material gate hint for locked topics whose prereqs are met but
+  // the colony hasn't actually mined / discovered the material yet.
+  const materialLine = !isDone && prereqsMet && !materialsMet && t.materials
+    ? `<div style="font-size:10px;color:#a8d0c0;margin-top:2px;">needs: ${t.materials.map((m) => m.describe).join(", ")}</div>`
+    : "";
   // Progress bar for the current topic.
   const progressBar = isCurrent
     ? `<div style="height:3px;background:#2a2a35;margin-top:4px;">
          <div style="height:3px;width:${Math.round((sim.research.progress / t.cost) * 100)}%;background:#e0c080;"></div>
        </div>`
     : "";
-  const nameColor = isDone ? "#cdb88a" : isCurrent ? "#e0c080" : prereqsMet ? "#bbb" : "#666";
+  const nameColor = isDone ? "#cdb88a" : isCurrent ? "#e0c080" : (prereqsMet && materialsMet) ? "#bbb" : "#666";
   return `
     <div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px dashed #2a2a35;">
       <div style="flex:1;min-width:0;">
         <div style="color:${nameColor};">${escapeHtml(t.name)}</div>
         ${bookLine}
         ${prereqLine}
+        ${materialLine}
         ${progressBar}
       </div>
       <div style="font-size:11px;text-align:right;flex-shrink:0;">${status}<div style="color:#666;font-size:10px;">${t.cost} ticks</div></div>
