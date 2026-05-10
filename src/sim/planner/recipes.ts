@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -158,3 +158,19 @@ export const RECIPES: Partial<Record<BlueprintKind, Recipe>> = {
 export function recipeFor(kind: BlueprintKind): Recipe | undefined {
   return RECIPES[kind];
 }
+
+/** Alternate carpenter recipe that produces a Bed item from planks.
+ * progressCraft swaps the default `carpenter` recipe for this one
+ * when a needs_furnishing bedroom is waiting AND the colony has
+ * planks to spend — so the carpenter spends idle time milling logs
+ * but switches to bed-building the moment beds are needed. */
+export const CARPENTER_BED_RECIPE: Recipe = {
+  verb: "builds a bed",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "bed",
+  outputQty: 1,
+  ticks: 90,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};

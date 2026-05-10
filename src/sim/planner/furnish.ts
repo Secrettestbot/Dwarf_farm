@@ -251,6 +251,14 @@ function cavityContains(b: Blueprint, x: number, y: number): boolean {
   return false;
 }
 
+/** Place a door at the cavity entrance without stamping any of the
+ * room's specific furniture. Used by harvestCompleted when a
+ * blueprint enters needs_furnishing — the room gets its
+ * threshold but waits on haulers for the rest. */
+export function prepareDoorForFurnishing(grid: TileGrid, b: Blueprint): void {
+  if (isMaintainable(b.kind)) placeDoorAtEntrance(grid, b);
+}
+
 /** Place a Door tile at the cavity cell that has the most walkable
  * non-cavity neighbours — that's the doorway between the room and the
  * rest of the colony. If no cell has any external walkable neighbours

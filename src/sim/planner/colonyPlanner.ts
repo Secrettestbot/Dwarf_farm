@@ -25,8 +25,8 @@ import { TileType, tileIsGem } from "../world/tiles";
 import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
-import { Blueprint, BlueprintKind, isComplete, isRoomNeglected, rectCavity, QUALITY_BASE } from "./blueprint";
-import { furnishRoom } from "./furnish";
+import { Blueprint, BlueprintKind, BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, isComplete, isRoomNeglected, rectCavity, QUALITY_BASE } from "./blueprint";
+import { furnishRoom, prepareDoorForFurnishing } from "./furnish";
 
 export interface PlannerContext {
   grid: TileGrid;
@@ -591,7 +591,10 @@ export class ColonyPlanner {
     let n = 0;
     for (const b of this.blueprints) {
       if (b.kind !== kind) continue;
-      if (b.status === "digging") {
+      if (b.status === "digging" || b.status === "needs_furnishing") {
+        // In-progress rooms (digging or waiting for furniture) count
+        // toward the active total so the planner doesn't emit a
+        // duplicate while the first one is still being completed.
         n++;
         continue;
       }
@@ -1260,9 +1263,6 @@ export class ColonyPlanner {
     const grid = ctx.grid;
     for (const b of this.blueprints) {
       if (b.status === "digging" && isComplete(b, grid)) {
-        b.status = "complete";
-        this.completed++;
-        this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
         // A freshly-dug room counts as fully maintained — the dig itself
         // exercised every cell. The maintenance clock starts now, and
         // quality starts at the freshly-dug baseline. Later sessions
@@ -1275,11 +1275,35 @@ export class ColonyPlanner {
           const y = (c >>> 16) & 0xffff;
           grid.setDesignation(x, y, 0);
         }
-        // The room is dug; now furnish it. Beds in bedrooms, tables in
-        // dining halls, bins in stockpiles. Tunnels and mines stay bare.
-        furnishRoom(grid, b);
-        if (ctx.events) {
-          ctx.events.add(ctx.tick, "construction", narrateBlueprintComplete(ctx.rng, b, ctx.spawn.y));
+        // Two paths now. Kinds that take crafted furniture
+        // (FURNITURE_REQUIREMENTS) flip to needs_furnishing and wait
+        // for haulers to deliver beds / barrels / etc. Other kinds
+        // still auto-stamp via furnishRoom and go straight to
+        // complete — they'll get migrated to the new pipeline in
+        // follow-up commits.
+        const reqs = FURNITURE_REQUIREMENTS[b.kind];
+        if (reqs && reqs.length > 0) {
+          b.status = "needs_furnishing";
+          b.furniturePlaced = {};
+          // Place the door so the room is enclosed even before its
+          // furniture lands — a bedroom-shaped cavity with no door is
+          // just a hallway nook.
+          prepareDoorForFurnishing(grid, b);
+          if (ctx.events) {
+            ctx.events.add(
+              ctx.tick,
+              "construction",
+              `${BLUEPRINT_KIND_LABELS[b.kind]} dug. Awaiting ${reqs.map((r) => `${r.count} ${r.item}`).join(", ")}.`,
+            );
+          }
+        } else {
+          b.status = "complete";
+          this.completed++;
+          this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
+          furnishRoom(grid, b);
+          if (ctx.events) {
+            ctx.events.add(ctx.tick, "construction", narrateBlueprintComplete(ctx.rng, b, ctx.spawn.y));
+          }
         }
       }
     }

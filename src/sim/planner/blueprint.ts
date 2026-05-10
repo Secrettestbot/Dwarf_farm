@@ -68,7 +68,7 @@ export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   cemetery: "Cemetery",
 };
 
-export type BlueprintStatus = "digging" | "complete";
+export type BlueprintStatus = "digging" | "needs_furnishing" | "complete";
 
 /** Packed (y << 16) | x cells. */
 export type CavityCells = Int32Array;
@@ -106,7 +106,29 @@ export interface Blueprint {
    * more than a bare cavity does. Optional in saved data: missing
    * means base quality (the architect's freshly-finished default). */
   quality?: number;
+  /** Furniture items placed in the cavity since dig completed. The
+   * blueprint's status flips from `needs_furnishing` to `complete`
+   * once every entry in FURNITURE_REQUIREMENTS for this kind has
+   * been satisfied. Keyed by ItemKind string so saves don't depend
+   * on enum ordering. Undefined for kinds with no furniture
+   * requirement (corridors, mines, lumberyard). */
+  furniturePlaced?: Record<string, number>;
 }
+
+/** What a room needs hauled in before it counts as functional. The
+ * cavity gets dug → status `needs_furnishing` → haulers route
+ * crafted furniture items into the cavity → on each delivery the
+ * item is consumed and a furniture tile stamps in its place →
+ * once every requirement is met, status flips to `complete`.
+ *
+ * Kinds NOT listed here go straight from digging to complete with
+ * the existing furnishRoom auto-stamp (passages, transitional
+ * rooms still being migrated to the new pipeline). Wired-in kinds
+ * disable that auto-stamp for the corresponding tiles and rely on
+ * delivery instead. */
+export const FURNITURE_REQUIREMENTS: Partial<Record<BlueprintKind, ReadonlyArray<{ item: string; count: number }>>> = {
+  bedroom: [{ item: "bed", count: 1 }],
+};
 
 /** Quality of a freshly-finished room. The architect counts the dig
  * itself as the first round of work; subsequent maintenance cycles

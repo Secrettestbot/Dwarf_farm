@@ -146,6 +146,18 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
       age: f.age,
     });
   }
+  // Starter equipment — the founders arrive with one bed each
+  // (placed as items at spawn so the first bedrooms can be
+  // furnished without first standing up a carpenter), plus a
+  // small planks + wood reserve so the carpenter can start on
+  // beds for migrants. Half of the planks the founders mill
+  // themselves; the rest comes pre-cut.
+  const starterBeds = founders.length;
+  for (let i = 0; i < starterBeds; i++) {
+    sim.spawnItem({ kind: "bed", x: spawn.x, y: spawn.y });
+  }
+  sim.stockpile.planks += 8;
+  sim.stockpile.wood += 4;
   // Reveal the founders' immediate surroundings before the first frame so
   // the New Game screen doesn't open onto an all-black mountain.
   sim.revealAroundDwarves();

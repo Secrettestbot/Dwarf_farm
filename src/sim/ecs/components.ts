@@ -107,7 +107,7 @@ export interface Needs {
  * to hauling jobs. The kind matches the stockpile counter that the item
  * eventually credits when a hauler delivers it. Items are entities so
  * pathfinding and the renderer can locate them by Position. */
-export type ItemKind = "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide";
+export type ItemKind = "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide" | "bed";
 
 export interface Item {
   kind: ItemKind;

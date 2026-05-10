@@ -65,7 +65,7 @@ export interface SavedDwarf {
   /** Combat HP. Optional for back-compat with v2 saves. */
   health?: { hp: number; maxHp: number; lastAttackTick: number; wasSevereWound?: boolean };
   /** What this dwarf is currently carrying mid-haul, if anything. */
-  carrying?: { kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide"; quality?: number };
+  carrying?: { kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide" | "bed"; quality?: number };
   /** Squad membership at save time. The draft is re-checked at the next
    * year boundary regardless, but persisting the current state means an
    * in-progress engagement survives a save/load cycle. */
@@ -87,7 +87,7 @@ export interface SavedDwarf {
 /** A loose item on the floor — dropped by mining or by a workshop,
  * picked up by hauling. */
 export interface SavedItem {
-  kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide";
+  kind: "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide" | "bed";
   x: number;
   y: number;
   /** Quality tier 0-4 (§6.3). Optional; missing means basic. */
@@ -129,7 +129,12 @@ export interface SavedBlueprint {
   width: number;
   height: number;
   cells: number[];
-  status: "digging" | "complete";
+  status: "digging" | "needs_furnishing" | "complete";
+  /** Furniture items placed in the cavity, keyed by ItemKind string.
+   * Tracked while status === "needs_furnishing"; once every entry in
+   * FURNITURE_REQUIREMENTS for the kind is satisfied the blueprint
+   * flips to complete. Optional for back-compat. */
+  furniturePlaced?: Record<string, number>;
   priority: number;
   createdTick: number;
   /** Per-cell last-tended ticks for farm blueprints. Parallel to cells/2
@@ -178,7 +183,7 @@ export interface SavedStockpile {
 }
 
 export interface SaveV1 {
-  version: 2;
+  version: 3;
   slotId: string;
   /** Friendly fortress name shown on the title screen — set when the founders begin. */
   fortressName: string;
@@ -319,7 +324,12 @@ export interface SaveV1 {
   discoveries?: number[];
 }
 
-export const CURRENT_SAVE_VERSION = 2 as const;
+// Bumped 2 → 3 for the rooms-need-furniture overhaul: the
+// blueprint state machine grew a needs_furnishing tier, item kinds
+// gained "bed", carpenter recipes split into planks vs bed. Old
+// saves are dropped rather than migrated — the room state on a
+// loaded colony wouldn't match the new gates.
+export const CURRENT_SAVE_VERSION = 3 as const;
 
 /** A lightweight summary of a save slot, shown on the title screen. */
 export interface SlotSummary {
