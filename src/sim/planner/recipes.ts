@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -188,4 +188,32 @@ export const CARPENTER_BARREL_RECIPE: Recipe = {
   ticks: 90,
   skill: "carpentry",
   station: TileType.CarpenterStation,
+};
+
+/** Alternate carpenter recipe for stockpile bins. Swapped in when a
+ * stockpile is waiting on a bin delivery. */
+export const CARPENTER_BIN_RECIPE: Recipe = {
+  verb: "builds a storage bin",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "bin",
+  outputQty: 1,
+  ticks: 80,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Alternate mason recipe for dining-hall tables. Swapped in when a
+ * dining hall is waiting on a table delivery. Stone blocks are
+ * cheaper than other crafting inputs but the mason has to be
+ * built first (Basic Stonecutting research). */
+export const MASON_TABLE_RECIPE: Recipe = {
+  verb: "carves a table",
+  inputKind: "blocks",
+  inputQty: 2,
+  outputKind: "table",
+  outputQty: 1,
+  ticks: 100,
+  skill: "masonry",
+  station: TileType.MasonStation,
 };

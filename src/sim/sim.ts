@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, MASON_TABLE_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -2412,12 +2412,38 @@ function needsBreweryFurniture(sim: SimWorld): boolean {
   return false;
 }
 
+/** True iff the colony has at least one stockpile waiting on a
+ * bin delivery. */
+function needsStockpileFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "stockpile") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["bin"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+/** True iff the colony has at least one dining hall waiting on a
+ * table delivery. */
+function needsDiningHallFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "dining_hall") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["table"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
 /** Map from furniture-item kind to the tile that gets stamped when
  * it's delivered. Extended as new furniture pipelines are wired up
  * (tables for dining halls, stoves + ovens for kitchens, etc.). */
 const FURNITURE_TILE: Partial<Record<string, TileType>> = {
   bed: TileType.Bed,
   barrel: TileType.BrewingBarrel,
+  table: TileType.Table,
+  bin: TileType.Bin,
 };
 
 /** If (px, py) lies inside a needs_furnishing blueprint's cavity
@@ -3571,16 +3597,24 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     break;
   }
   // Carpenter swaps recipes based on the colony's furniture
-  // backlog. Priority order: barrel (brewery is a survival room —
-  // no drinks if no brewery) → bed (bedrooms gate morale recovery)
-  // → default planks. Default carpentry resumes once both backlogs
-  // are clear and the carpenter has planks to spend.
+  // backlog. Priority: barrel (brewery — drink survival) →
+  // bin (stockpile — keeps the colony's haul flow functional)
+  // → bed (bedroom — morale) → default planks. Default
+  // carpentry resumes when every backlog is clear.
   if (blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
     if (needsBreweryFurniture(sim)) {
       recipe = CARPENTER_BARREL_RECIPE;
+    } else if (needsStockpileFurniture(sim)) {
+      recipe = CARPENTER_BIN_RECIPE;
     } else if (needsBedroomFurniture(sim)) {
       recipe = CARPENTER_BED_RECIPE;
     }
+  }
+  // Mason swaps recipes for dining-hall tables. Default is cutting
+  // blocks from stone; the swap kicks in only when a dining hall
+  // is waiting on a table AND the colony has blocks to consume.
+  if (blueprintKind === "mason" && recipe && needsDiningHallFurniture(sim) && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
+    recipe = MASON_TABLE_RECIPE;
   }
   if (!recipe) {
     sim.job.remove(e);
@@ -3801,6 +3835,8 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "hide") return "hide";
   if (resource === "bed") return "bed";
   if (resource === "barrel") return "barrel";
+  if (resource === "table") return "table";
+  if (resource === "bin") return "bin";
   return null;
 }
 
@@ -4026,6 +4062,12 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       // Same — no brewery currently wants this barrel; sit it on
       // the floor for the next one.
       sim.spawnItem({ kind: "barrel", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "table") {
+      sim.spawnItem({ kind: "table", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "bin") {
+      sim.spawnItem({ kind: "bin", x: pos.x, y: pos.y, quality: carrying.quality });
     }
   }
   sim.carrying.remove(e);

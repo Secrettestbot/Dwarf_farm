@@ -160,8 +160,17 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
   for (let i = 0; i < 2; i++) {
     sim.spawnItem({ kind: "barrel", x: spawn.x, y: spawn.y });
   }
+  // One pre-built table for the first dining hall; one pre-built
+  // bin so the first stockpile is operational on day one too. The
+  // founders bring a small starter kit of finished pieces; the
+  // rest the colony has to craft as it grows.
+  sim.spawnItem({ kind: "table", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "bin", x: spawn.x, y: spawn.y });
   sim.stockpile.planks += 8;
   sim.stockpile.wood += 4;
+  // A small block cache so the mason can carve a table for a
+  // dining hall expansion before mining catches up.
+  sim.stockpile.blocks += 4;
   // Reveal the founders' immediate surroundings before the first frame so
   // the New Game screen doesn't open onto an all-black mountain.
   sim.revealAroundDwarves();
