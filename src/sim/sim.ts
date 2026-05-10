@@ -2705,7 +2705,7 @@ function migrationSystem(sim: SimWorld): void {
   checkPopulationMilestones(sim);
 }
 
-function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
+export function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
   const mother = sim.dwarf.get(motherId);
   const father = sim.dwarf.get(fatherId);
   const motherPos = sim.position.get(motherId);
