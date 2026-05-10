@@ -321,7 +321,7 @@ export class SimWorld {
   // Spawn point.
   readonly spawn: { x: number; y: number };
 
-  constructor(seed: number, grid: TileGrid, surfaceY: Int32Array, spawn: { x: number; y: number }, maxEntities = 4096) {
+  constructor(seed: number, grid: TileGrid, surfaceY: Int32Array, spawn: { x: number; y: number }, maxEntities = 16384) {
     this.seed = seed;
     this.grid = grid;
     this.surfaceY = surfaceY;

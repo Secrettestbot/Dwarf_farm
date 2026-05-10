@@ -14,12 +14,20 @@ describe("grudges", () => {
     const a = sim.spawnDwarf({ name: "Argo", x: sx, y: sy, age: 30, traitIds: ["antagonistic"] });
     const b = sim.spawnDwarf({ name: "Bron", x: sx + 1, y: sy, age: 30, traitIds: ["antagonistic"] });
     // Pin them adjacent and need-satisfied so chooseTask doesn't pull
-    // them apart. Run a couple of in-game years; grudges are daily.
+    // them apart. Pinning has to happen TWICE — once before tick to
+    // suppress the chooseTask reroute, once after to undo whatever
+    // movementSystem did within the tick. The argument system runs
+    // late in the tick and reads the live position; without the
+    // mid-tick reset, jobs can drag the dwarves apart before
+    // argumentSystem checks.
     for (let i = 0; i < TICKS_PER_DAY * 60; i++) {
       const apos = sim.position.get(a)!;
       const bpos = sim.position.get(b)!;
       apos.x = sx; apos.y = sy;
       bpos.x = sx + 1; bpos.y = sy;
+      // Wipe any jobs/paths so the dwarves don't get moved by movementSystem.
+      sim.job.remove(a); sim.job.remove(b);
+      sim.pathing.remove(a); sim.pathing.remove(b);
       const an = sim.needs.get(a); if (an) { an.hunger = 100; an.thirst = 100; an.sleep = 100; an.social = 100; }
       const bn = sim.needs.get(b); if (bn) { bn.hunger = 100; bn.thirst = 100; bn.sleep = 100; bn.social = 100; }
       tick(sim);
