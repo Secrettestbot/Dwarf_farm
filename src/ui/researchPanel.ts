@@ -5,7 +5,7 @@
 // which scholar wrote the book on each completed topic.
 
 import { SimWorld } from "../sim/world/simWorld";
-import { ALL_TOPICS, ResearchTopic, ResearchTier, TOPICS_BY_ID, hasMaterials } from "../sim/research";
+import { ALL_TOPICS, ResearchTopic, ResearchTier, TOPICS_BY_ID, hasMaterials, RESEARCH_COST_SCALE } from "../sim/research";
 import { TICKS_PER_YEAR } from "../sim/time";
 
 export class ResearchPanel {
@@ -87,7 +87,7 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
   const status = isDone
     ? `<span style="color:#7fc08c;">✓ complete</span>`
     : isCurrent
-      ? `<span style="color:#e0c080;">studying ${Math.round((sim.research.progress / t.cost) * 100)}%</span>`
+      ? `<span style="color:#e0c080;">studying ${Math.round((sim.research.progress / (t.cost * RESEARCH_COST_SCALE)) * 100)}%</span>`
       : prereqsMet && materialsMet
         ? `<span style="color:#aaa;">available</span>`
         : `<span style="color:#666;">locked</span>`;
@@ -107,7 +107,7 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
   // Progress bar for the current topic.
   const progressBar = isCurrent
     ? `<div style="height:3px;background:#2a2a35;margin-top:4px;">
-         <div style="height:3px;width:${Math.round((sim.research.progress / t.cost) * 100)}%;background:#e0c080;"></div>
+         <div style="height:3px;width:${Math.round((sim.research.progress / (t.cost * RESEARCH_COST_SCALE)) * 100)}%;background:#e0c080;"></div>
        </div>`
     : "";
   const nameColor = isDone ? "#cdb88a" : isCurrent ? "#e0c080" : (prereqsMet && materialsMet) ? "#bbb" : "#666";
@@ -120,7 +120,7 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
         ${materialLine}
         ${progressBar}
       </div>
-      <div style="font-size:11px;text-align:right;flex-shrink:0;">${status}<div style="color:#666;font-size:10px;">${t.cost} ticks</div></div>
+      <div style="font-size:11px;text-align:right;flex-shrink:0;">${status}<div style="color:#666;font-size:10px;">${t.cost * RESEARCH_COST_SCALE} ticks</div></div>
     </div>
   `;
 }

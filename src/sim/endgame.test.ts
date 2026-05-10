@@ -21,6 +21,7 @@ describe("endgame content", () => {
       "masonry_and_mortaring", "carpentry_mechanisms", "steel_alloying",
       "armoury_basics", "medical_practice", "textile_craft",
       "underground_agriculture", "minecart_tracks", "pottery_and_kilns",
+      "hydraulic_basics",
     ];
     const t = nextTopic(r);
     expect(t).not.toBeNull();

@@ -329,7 +329,24 @@ function runGame(active: ActiveFortress, camera: Camera) {
     lastFrame = now;
 
     const ticks = clock.consume(dt);
-    for (let i = 0; i < ticks; i++) tick(sim);
+    for (let i = 0; i < ticks; i++) {
+      try {
+        tick(sim);
+      } catch (err) {
+        // Last-resort net so a sim regression doesn't black-screen
+        // the game. The sim's own paths handle entity-cap overflow
+        // gracefully via -1 sentinels; this catches everything
+        // else so the player can see the chronicle and save.
+        // eslint-disable-next-line no-console
+        console.error("tick failed", err);
+        sim.events.add(
+          sim.tick,
+          "crisis",
+          `A sim error skipped a tick: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        break;
+      }
+    }
 
     autoSaveAccum += ticks;
     if (autoSaveAccum >= 60) {

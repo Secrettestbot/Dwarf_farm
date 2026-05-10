@@ -88,10 +88,19 @@ export class EcsWorld {
     this.generations = new Uint16Array(maxEntities);
   }
 
+  /** Allocate a fresh entity id. Returns -1 when the entity table is
+   * full — callers MUST check for the sentinel and gracefully skip
+   * the spawn rather than press on. The previous behaviour of
+   * throwing on overflow turned a content-saturated late game into
+   * an unrecoverable black screen; the sentinel lets the sim keep
+   * running while the player or the system clears space. */
   create(): EntityId {
     const idx = this.freeIndices.length > 0 ? this.freeIndices.pop()! : this.nextIndex++;
     if (idx >= this.maxEntities) {
-      throw new Error(`EcsWorld exceeded maxEntities=${this.maxEntities}`);
+      // Roll back the index bump so the next call has another chance
+      // once entities are destroyed.
+      if (this.freeIndices.length === 0) this.nextIndex = idx;
+      return -1;
     }
     const gen = this.generations[idx];
     return ((gen << GENERATION_SHIFT) | idx) >>> 0;

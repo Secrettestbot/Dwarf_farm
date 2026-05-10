@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade";
     targetX: number;
     targetY: number;
     progress: number;
@@ -255,7 +255,21 @@ export interface SaveV1 {
   aquiferBreachTick?: number;
   /** Caravan-on-site marker. Round-trips so a save mid-trade-visit
    * restores with the wagons still parked. */
-  caravan?: { x: number; y: number; leavesTick: number; origin: string };
+  caravan?: {
+    x: number;
+    y: number;
+    leavesTick: number;
+    origin: string;
+    /** Pending-trade fields — set when the caravan arrives, applied
+     * when the broker walks to the depot. Optional for back-compat
+     * with saves from before the deferred-trade refactor. */
+    brokerId?: number;
+    dealResource?: string;
+    dealCost?: number;
+    dealImport?: string;
+    dealGain?: number;
+    dealComplete?: boolean;
+  };
   /** Cemetery registry — every dwarf interred in a Headstone tile.
    * Round-trips so a reload restores the colony's full memorial
    * roll call. */

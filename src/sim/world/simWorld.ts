@@ -114,11 +114,12 @@ export interface Stockpile {
 }
 
 // Starter caches sized to give the colony comfortable runway for
-// research → library → brewery → stable production. The earlier
-// 1000 each was tight when migration boosted population past ~20
-// before the brewery + farms could keep up.
-const STARTER_FOOD = 2000;
-const STARTER_DRINK = 2000;
+// research → library → brewery → stable production. With the
+// research-cost scaler at 4×, the brewery research chain takes
+// substantially longer to land — bumped to 4000 so the founders'
+// cellar lasts through the slower research ramp.
+const STARTER_FOOD = 4000;
+const STARTER_DRINK = 4000;
 
 /**
  * Aggregate of everything the deterministic tick function needs. The same
@@ -252,6 +253,18 @@ export class SimWorld {
   /** Origin kingdom of the caravan currently on site, for inspector
    * display. Empty when no caravan is present. */
   caravanOrigin = "";
+  /** Pending trade deal — set when a caravan arrives, applied when
+   * the assigned broker walks to the depot. While `dealComplete` is
+   * false, the trade hasn't closed yet; chooseTask routes the
+   * broker over and progressTrade finalises the counters. If the
+   * caravan despawns first, the deal silently expires. brokerId=-1
+   * means there's no living broker to send (very small colonies). */
+  caravanBrokerId: number = -1;
+  caravanDealResource: string = ""; // key on Stockpile
+  caravanDealCost = 0;
+  caravanDealImport: string = "";
+  caravanDealGain = 0;
+  caravanDealComplete = false;
 
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips
@@ -321,7 +334,7 @@ export class SimWorld {
   // Spawn point.
   readonly spawn: { x: number; y: number };
 
-  constructor(seed: number, grid: TileGrid, surfaceY: Int32Array, spawn: { x: number; y: number }, maxEntities = 16384) {
+  constructor(seed: number, grid: TileGrid, surfaceY: Int32Array, spawn: { x: number; y: number }, maxEntities = 32768) {
     this.seed = seed;
     this.grid = grid;
     this.surfaceY = surfaceY;
@@ -376,6 +389,11 @@ export class SimWorld {
     parentNames?: [string, string];
   }): EntityId {
     const e = this.ecs.create();
+    // Entity table full — the migration / birth / founder spawn
+    // skips, the colony stops growing for now. Caller code that
+    // checks the return value can react; everything else just
+    // misses one spawn attempt.
+    if (e === -1) return -1;
     this.position.set(e, { x: spec.x, y: spec.y });
     const age = spec.age ?? 25;
     const bornAtTick = spec.bornAtTick ?? this.tick - age * TICKS_PER_YEAR;
@@ -450,6 +468,13 @@ export class SimWorld {
       return -1;
     }
     const e = this.ecs.create();
+    // ecs.create returns -1 when the table is genuinely full (the
+    // 10% buffer above is for early backpressure; the cap itself
+    // is the hard limit). Same fallback: credit the counter.
+    if (e === -1) {
+      this.creditItemToStockpile(spec.kind);
+      return -1;
+    }
     this.position.set(e, { x: spec.x, y: spec.y });
     this.item.set(e, { kind: spec.kind, claimedBy: -1, quality: spec.quality });
     return e;
@@ -524,7 +549,9 @@ export class SimWorld {
 
   // ---- Hostile spawning --------------------------------------------------
 
-  /** Spawn a new hostile entity. Returns the new entity id. */
+  /** Spawn a new hostile entity. Returns the new entity id, or -1 if
+   * the entity table is full — the periodic spawn just misses this
+   * cycle and tries again later. */
   spawnHostile(spec: {
     kind: HostileKind;
     x: number;
@@ -535,6 +562,7 @@ export class SimWorld {
   }): EntityId {
     const def = HOSTILE_DEFS[spec.kind];
     const e = this.ecs.create();
+    if (e === -1) return -1;
     this.position.set(e, { x: spec.x, y: spec.y });
     this.hostile.set(e, {
       kind: spec.kind,
@@ -561,6 +589,7 @@ export class SimWorld {
     maxHp?: number;
   }): EntityId {
     const e = this.ecs.create();
+    if (e === -1) return -1;
     this.position.set(e, { x: spec.x, y: spec.y });
     this.pet.set(e, {
       kind: spec.kind,

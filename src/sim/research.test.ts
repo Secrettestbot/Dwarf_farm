@@ -60,6 +60,7 @@ describe("research tree", () => {
       "iron_toolmaking", "masonry_and_mortaring", "carpentry_mechanisms",
       "armoury_basics", "medical_practice", "textile_craft",
       "underground_agriculture", "minecart_tracks", "pottery_and_kilns",
+      "hydraulic_basics",
       "steel_alloying", "advanced_metallurgy", "weaponsmithing",
       "military_tactics", "fortification_design", "advanced_medicine",
     ];
