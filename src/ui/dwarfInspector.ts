@@ -9,7 +9,7 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { EntityId } from "../sim/ecs/world";
 import { TRAITS_BY_ID } from "../sim/dwarves/traits";
-import { SKILLS_BY_ID, skillTierLabel, SkillId } from "../sim/dwarves/skills";
+import { SKILLS, SKILLS_BY_ID, skillTierLabel, SkillId } from "../sim/dwarves/skills";
 import { progressInLevel } from "../sim/dwarves/skillProgress";
 import { grudgeCount } from "../sim/sim";
 
@@ -92,29 +92,46 @@ export class DwarfInspector {
       )
       .join("");
 
-    // Top 5 skills by level. Each row shows a small XP progress bar to the
-    // next level so the player can see who's about to advance.
-    const skillEntries = Object.entries(dw.skills) as Array<[SkillId, number]>;
-    skillEntries.sort((a, b) => b[1] - a[1]);
-    const topSkills = skillEntries
-      .slice(0, 5)
-      .map(([id, lvl]) => {
-        const s = SKILLS_BY_ID[id];
-        const xp = dw.skillXp[id] ?? 0;
-        const p = progressInLevel(xp);
-        const pct = p.xpForNext === 0 ? 100 : Math.min(100, Math.floor((p.xpInLevel / p.xpForNext) * 100));
-        return `
-          <div style="font-size:11px;color:#aaa;margin-top:3px;">
-            <div style="display:flex;justify-content:space-between;">
-              <span>${escapeHtml(s.name)}</span>
-              <span style="color:#888;">${skillTierLabel(lvl)} (${lvl})</span>
-            </div>
-            <div style="background:#1c1c24;height:3px;border-radius:2px;overflow:hidden;margin-top:2px;">
-              <div style="height:100%;width:${pct}%;background:#7a8aa6;"></div>
-            </div>
-          </div>`;
-      })
-      .join("");
+    // Skills view: top 5 shown by default with full progress bars,
+    // the rest hidden inside a <details> dropdown so the player can
+    // expand to see every skill the dwarf has — including the ones
+    // sitting at Novice 1 because the dwarf hasn't practised them.
+    // The renderRow helper keeps the markup identical between the
+    // visible and collapsed sections.
+    const renderSkillRow = ([id, lvl]: [SkillId, number]): string => {
+      const s = SKILLS_BY_ID[id];
+      const xp = dw.skillXp[id] ?? 0;
+      const p = progressInLevel(xp);
+      const pct = p.xpForNext === 0 ? 100 : Math.min(100, Math.floor((p.xpInLevel / p.xpForNext) * 100));
+      // Dim Novice rows so the practised skills stand out at a
+      // glance even when the full list is expanded.
+      const dim = lvl <= 1;
+      return `
+        <div style="font-size:11px;color:${dim ? "#777" : "#aaa"};margin-top:3px;">
+          <div style="display:flex;justify-content:space-between;">
+            <span>${escapeHtml(s.name)}</span>
+            <span style="color:#888;">${skillTierLabel(lvl)} (${lvl})</span>
+          </div>
+          <div style="background:#1c1c24;height:3px;border-radius:2px;overflow:hidden;margin-top:2px;">
+            <div style="height:100%;width:${pct}%;background:${dim ? "#3a3a4a" : "#7a8aa6"};"></div>
+          </div>
+        </div>`;
+    };
+    // Build the per-skill rows ordered by level descending. Include
+    // every skill in the registry so even untouched ones show up
+    // when the player expands the list.
+    const ordered: Array<[SkillId, number]> = SKILLS
+      .map((s): [SkillId, number] => [s.id, dw.skills[s.id] ?? 1])
+      .sort((a, b) => b[1] - a[1]);
+    const visibleRows = ordered.slice(0, 5).map(renderSkillRow).join("");
+    const restRows = ordered.slice(5).map(renderSkillRow).join("");
+    const topSkills = restRows
+      ? `${visibleRows}
+        <details style="margin-top:6px;">
+          <summary style="font-size:10px;color:#888;cursor:pointer;list-style:none;">show all ${ordered.length} skills</summary>
+          ${restRows}
+        </details>`
+      : visibleRows;
 
     const inTantrum = sim.tantrum.has(this.targetId);
     const baseActivity = job
