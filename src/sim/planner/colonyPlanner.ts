@@ -382,7 +382,15 @@ export class ColonyPlanner {
     // dry once neglect-driven emissions added up over the long run.
     if (ctx.population < 5) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_brewing")) return false;
-    const target = Math.max(1, Math.ceil(ctx.population / 8));
+    // One brewery per ~14 dwarves. A 4-drink-per-brew brewery
+    // running steadily covers ~120 dwarves of demand, so the cap
+    // mostly exists to add a second brewery when one isn't enough
+    // to outpace consumption (the brewers themselves aren't always
+    // at the station — they get pulled to eat, sleep, etc.).
+    // Earlier ratios (1 per 7-8) were over-aggressive: many
+    // breweries × 1 food/brew × 24 brews/day drained food before
+    // farms could keep up.
+    const target = Math.max(1, Math.ceil(ctx.population / 14));
     const built = (this.completedByKind["brewery"] ?? 0) + (this.activeByKind()["brewery"] ?? 0);
     return built < target;
   }
