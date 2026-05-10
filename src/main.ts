@@ -168,6 +168,12 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
   sim.spawnItem({ kind: "table", x: spawn.x, y: spawn.y });
   sim.spawnItem({ kind: "bin", x: spawn.x, y: spawn.y });
   sim.spawnItem({ kind: "stove", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "library_desk", x: spawn.x, y: spawn.y });
+  // Hospital cot + tavern counter pre-built so those rooms can stand
+  // up without waiting on a carpenter. Throne is NOT pre-built — the
+  // colony has to earn its crown via mason work later in the game.
+  sim.spawnItem({ kind: "hospital_bed", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "tavern_counter", x: spawn.x, y: spawn.y });
   sim.stockpile.planks += 8;
   sim.stockpile.wood += 4;
   // A small block cache so the mason can carve a table for a

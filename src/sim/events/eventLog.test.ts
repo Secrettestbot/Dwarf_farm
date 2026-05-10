@@ -19,6 +19,9 @@ function buildSim(seed: number, dwarves: number): SimWorld {
   sim.spawnItem({ kind: "barrel", x: w.spawn.x, y: w.spawn.y });
   sim.spawnItem({ kind: "table", x: w.spawn.x, y: w.spawn.y });
   sim.spawnItem({ kind: "stove", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "library_desk", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "hospital_bed", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "tavern_counter", x: w.spawn.x, y: w.spawn.y });
   return sim;
 }
 
@@ -36,8 +39,11 @@ describe("event log + stockpile", () => {
 
   it("counts stone in the stockpile when stone tiles are mined", () => {
     const sim = buildSim(103, 7);
-    // Run long enough for the dwarves to mine at least a few tiles.
-    for (let i = 0; i < 600; i++) tick(sim);
+    // Run long enough for the stockpile to dig, accept a bin
+    // delivery, and start collecting hauled items. The earlier
+    // 600 ticks predates the slice-3 stockpile furniture
+    // requirement — now we need the haul chain to land first.
+    for (let i = 0; i < 3000; i++) tick(sim);
     const sp = sim.stockpile;
     // The starter cavern is mostly Dirt; deeper bedroom blueprints often
     // dig into Stone. Either way, *something* should have been counted.

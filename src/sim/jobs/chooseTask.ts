@@ -287,6 +287,14 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       if (drop) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
       }
+      // Nothing wants this item right now. Drop it on the floor at
+      // the current tile so the dwarf is free to pick up other
+      // things — without this every hauler ends up stuck carrying
+      // a stone or a barrel when the destination room hasn't been
+      // built yet, and the bin / barrel / table that WOULD
+      // complete that room can't be picked up.
+      sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+      sim.carrying.remove(e);
     } else {
       const haul = findHaulTarget(sim, e, pos.x, pos.y);
       if (haul) {
@@ -890,6 +898,8 @@ function isFurnitureOrStationTile(t: number): boolean {
     || t === TileType.Stove
     || t === TileType.Table
     || t === TileType.Bin
+    || t === TileType.HospitalBed
+    || t === TileType.TavernCounter
     || t === TileType.BreweryStation
     || t === TileType.KitchenStation
     || t === TileType.SmelterStation

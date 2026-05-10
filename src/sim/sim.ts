@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -2448,6 +2448,48 @@ function needsKitchenFurniture(sim: SimWorld): boolean {
   return false;
 }
 
+/** True iff the colony has at least one library waiting on a
+ * desk delivery. */
+function needsLibraryFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "library") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["library_desk"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsThroneRoomFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "throne_room") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["throne"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsHospitalFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "hospital") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["hospital_bed"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsTavernFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "tavern") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["tavern_counter"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
 /** Map from furniture-item kind to the tile that gets stamped when
  * it's delivered. Extended as new furniture pipelines are wired up
  * (tables for dining halls, stoves + ovens for kitchens, etc.). */
@@ -2457,6 +2499,10 @@ const FURNITURE_TILE: Partial<Record<string, TileType>> = {
   table: TileType.Table,
   bin: TileType.Bin,
   stove: TileType.Stove,
+  library_desk: TileType.LibraryDesk,
+  throne: TileType.Throne,
+  hospital_bed: TileType.HospitalBed,
+  tavern_counter: TileType.TavernCounter,
 };
 
 /** If (px, py) lies inside a needs_furnishing blueprint's cavity
@@ -3609,26 +3655,36 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     blueprintKind = b.kind;
     break;
   }
-  // Carpenter swaps recipes based on the colony's furniture
-  // backlog. Priority: barrel (brewery — drink survival) →
-  // bin (stockpile — keeps the colony's haul flow functional)
-  // → bed (bedroom — morale) → default planks. Default
-  // carpentry resumes when every backlog is clear.
+  // Carpenter swaps recipes by demand. Priority (top is most urgent):
+  //   barrel        — brewery, drink survival
+  //   hospital cot  — treating sick / wounded
+  //   bin           — stockpile, haul flow
+  //   bed           — bedroom, morale
+  //   library desk  — research progress
+  //   tavern counter— morale / festivals
+  //   default       — plank milling
   if (blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
     if (needsBreweryFurniture(sim)) {
       recipe = CARPENTER_BARREL_RECIPE;
+    } else if (needsHospitalFurniture(sim)) {
+      recipe = CARPENTER_HOSPITAL_BED_RECIPE;
     } else if (needsStockpileFurniture(sim)) {
       recipe = CARPENTER_BIN_RECIPE;
     } else if (needsBedroomFurniture(sim)) {
       recipe = CARPENTER_BED_RECIPE;
+    } else if (needsLibraryFurniture(sim)) {
+      recipe = CARPENTER_LIBRARY_DESK_RECIPE;
+    } else if (needsTavernFurniture(sim) && sim.stockpile.planks >= CARPENTER_TAVERN_COUNTER_RECIPE.inputQty) {
+      recipe = CARPENTER_TAVERN_COUNTER_RECIPE;
     }
   }
-  // Mason swaps recipes by demand. Priority: stove (kitchen — a
-  // colony with no kitchen falls back on raw food) → table
-  // (dining hall) → default blocks. Both swaps need enough blocks
-  // in the stockpile to consume.
+  // Mason swaps recipes by demand. Priority: throne (the colony's
+  // crown jewel) → stove (kitchen — no kitchen, no cooked meals)
+  // → table (dining hall) → default blocks.
   if (blueprintKind === "mason" && recipe && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
-    if (needsKitchenFurniture(sim)) {
+    if (needsThroneRoomFurniture(sim) && sim.stockpile.blocks >= MASON_THRONE_RECIPE.inputQty) {
+      recipe = MASON_THRONE_RECIPE;
+    } else if (needsKitchenFurniture(sim)) {
       recipe = MASON_STOVE_RECIPE;
     } else if (needsDiningHallFurniture(sim)) {
       recipe = MASON_TABLE_RECIPE;
@@ -3856,6 +3912,10 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "table") return "table";
   if (resource === "bin") return "bin";
   if (resource === "stove") return "stove";
+  if (resource === "library_desk") return "library_desk";
+  if (resource === "throne") return "throne";
+  if (resource === "hospital_bed") return "hospital_bed";
+  if (resource === "tavern_counter") return "tavern_counter";
   return null;
 }
 
@@ -4090,6 +4150,18 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     }
     else if (carrying.kind === "stove") {
       sim.spawnItem({ kind: "stove", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "library_desk") {
+      sim.spawnItem({ kind: "library_desk", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "throne") {
+      sim.spawnItem({ kind: "throne", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "hospital_bed") {
+      sim.spawnItem({ kind: "hospital_bed", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "tavern_counter") {
+      sim.spawnItem({ kind: "tavern_counter", x: pos.x, y: pos.y, quality: carrying.quality });
     }
   }
   sim.carrying.remove(e);

@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin" | "stove";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk" | "throne" | "hospital_bed" | "tavern_counter";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -230,4 +230,57 @@ export const MASON_STOVE_RECIPE: Recipe = {
   ticks: 120,
   skill: "masonry",
   station: TileType.MasonStation,
+};
+
+/** Alternate carpenter recipe for library desks. Two planks make a
+ * scholar's writing desk; the library needs one before research
+ * can start. */
+export const CARPENTER_LIBRARY_DESK_RECIPE: Recipe = {
+  verb: "builds a writing desk",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "library_desk",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Mason throne — a single grand carved chair for the throne room.
+ * Four blocks reflects the king's centrepiece scale. */
+export const MASON_THRONE_RECIPE: Recipe = {
+  verb: "carves a throne",
+  inputKind: "blocks",
+  inputQty: 4,
+  outputKind: "throne",
+  outputQty: 1,
+  ticks: 200,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+/** Carpenter hospital cot — same materials as a bedroom bed but a
+ * separate item so multiple cots can be tracked per hospital and
+ * the recipe-swap priority can favour hospitals over morale. */
+export const CARPENTER_HOSPITAL_BED_RECIPE: Recipe = {
+  verb: "builds a hospital cot",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "hospital_bed",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Carpenter tavern counter — bar for the tavern barkeep. */
+export const CARPENTER_TAVERN_COUNTER_RECIPE: Recipe = {
+  verb: "builds a tavern counter",
+  inputKind: "planks",
+  inputQty: 3,
+  outputKind: "tavern_counter",
+  outputQty: 1,
+  ticks: 120,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
 };
