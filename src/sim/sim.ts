@@ -1813,10 +1813,15 @@ function tradeSystem(sim: SimWorld): void {
   // Award XP to the broker.
   if (bestBroker !== -1) awardSkillXp(sim, bestBroker, "trading", 1);
   const brokerName = bestBroker !== -1 ? sim.dwarf.get(bestBroker)?.name ?? "the broker" : "the broker";
+  // Caravan arrivals fire as "discovery" so the notification toast
+  // surfaces them — visiting traders are infrequent and easy to
+  // miss in the chronicle scroll. Position is the depot tile so
+  // the toast's Jump-to button pans the camera to the wagons.
   sim.events.add(
     sim.tick,
-    "social",
+    "discovery",
     `A caravan from ${kingdom} arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${importKind} for ${cost} ${offer.resource}.`,
+    { x: depot.cx, y: depot.cy },
   );
 }
 
@@ -1828,7 +1833,10 @@ function tradeSystem(sim: SimWorld): void {
 
 function researchPickSystem(sim: SimWorld): void {
   if (sim.research.current) return;
-  const next = nextTopic(sim.research);
+  const next = nextTopic(sim.research, {
+    cumulative: sim.cumulative,
+    discovered: sim.discoveries,
+  });
   if (!next) return;
   sim.research.current = next.id;
   sim.research.progress = 0;
@@ -2303,6 +2311,7 @@ function farmSystem(sim: SimWorld): void {
       // scarce relative to ale and meals.
       if (sim.aiRng.nextFloat() < FARM_YIELD_CHANCE * 0.25) {
         sim.stockpile.rope++;
+        bumpCumulative(sim, "rope");
       }
     }
   }
@@ -2352,6 +2361,35 @@ function deathSystem(sim: SimWorld): void {
  * planner state stays consistent. If the dwarf was bonded, also clears the
  * survivor's partnerId and emits a bereavement event.
  */
+
+/** Increment the cumulative haul total for a resource by 1. Used at
+ * stockpile-credit points (hauling and direct workshop output) to
+ * drive material-gated research thresholds. The counter is one-way
+ * — gates that pass once stay passed even if the stockpile is
+ * later spent. */
+function bumpCumulative(sim: SimWorld, resource: import("./research").MaterialResource): void {
+  sim.cumulative[resource] = (sim.cumulative[resource] ?? 0) + 1;
+}
+
+/** Same as bumpCumulative but takes a recipe outputKind (string)
+ * and only counts kinds that map to a MaterialResource. Workshop
+ * outputs that aren't material-research-relevant (food, drink,
+ * meals, tools, pots, planks, cloth, cut_gems) silently skip. */
+function bumpCumulativeForResource(sim: SimWorld, resource: string, qty: number): void {
+  const known = new Set(["ore", "stone", "dirt", "wood", "hide", "rope", "bars", "gems", "blocks", "leather"]);
+  if (!known.has(resource)) return;
+  const r = resource as import("./research").MaterialResource;
+  sim.cumulative[r] = (sim.cumulative[r] ?? 0) + qty;
+}
+
+/** Record a tile type as discovered. Triggered by mining (the dwarf
+ * has handled this material) and by visibility (the colony's seen
+ * a magma vent or ancient ruin from across the cavern). Drives
+ * tile-based material gates on research topics. */
+function noteDiscovery(sim: SimWorld, tile: number): void {
+  sim.discoveries.add(tile);
+}
+
 function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   const dw = sim.dwarf.get(e);
   const pos = sim.position.get(e);
@@ -2667,7 +2705,7 @@ function migrationSystem(sim: SimWorld): void {
   checkPopulationMilestones(sim);
 }
 
-function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
+export function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId): void {
   const mother = sim.dwarf.get(motherId);
   const father = sim.dwarf.get(fatherId);
   const motherPos = sim.position.get(motherId);
@@ -3463,6 +3501,9 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       }
     } else {
       sim.stockpile[recipe.outputKind] += outputQty;
+      // Track cumulative production for material-gated research.
+      // Only resources that map to MaterialResource are counted.
+      bumpCumulativeForResource(sim, recipe.outputKind, outputQty);
     }
     awardSkillXp(sim, e, recipe.skill, 1);
     // Workshop-firsts as named GDD milestones — Iron Mountain (first
@@ -3781,17 +3822,17 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     droppedAsItem = true;
   }
   if (!droppedAsItem) {
-    if (carrying.kind === "ore") sim.stockpile.ore++;
-    else if (carrying.kind === "stone") sim.stockpile.stone++;
-    else if (carrying.kind === "dirt") sim.stockpile.dirt++;
-    else if (carrying.kind === "gem") sim.stockpile.gems++;
-    else if (carrying.kind === "bars") sim.stockpile.bars++;
+    if (carrying.kind === "ore") { sim.stockpile.ore++; bumpCumulative(sim, "ore"); }
+    else if (carrying.kind === "stone") { sim.stockpile.stone++; bumpCumulative(sim, "stone"); }
+    else if (carrying.kind === "dirt") { sim.stockpile.dirt++; bumpCumulative(sim, "dirt"); }
+    else if (carrying.kind === "gem") { sim.stockpile.gems++; bumpCumulative(sim, "gems"); }
+    else if (carrying.kind === "bars") { sim.stockpile.bars++; bumpCumulative(sim, "bars"); }
     else if (carrying.kind === "tools") sim.stockpile.tools++;
     else if (carrying.kind === "food") sim.stockpile.food++;
     else if (carrying.kind === "drink") sim.stockpile.drink++;
     else if (carrying.kind === "meal") sim.stockpile.meals++;
-    else if (carrying.kind === "wood") sim.stockpile.wood++;
-    else if (carrying.kind === "hide") sim.stockpile.hide++;
+    else if (carrying.kind === "wood") { sim.stockpile.wood++; bumpCumulative(sim, "wood"); }
+    else if (carrying.kind === "hide") { sim.stockpile.hide++; bumpCumulative(sim, "hide"); }
   }
   sim.carrying.remove(e);
   // Hauling earns hauling XP — every successful delivery counts as
@@ -3851,6 +3892,10 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (job.progress >= ticksNeeded) {
     // What was the rock made of? Determines stockpile credit.
     const tileType = sim.grid.getTile(job.targetX, job.targetY);
+    // Material discoveries — record the first time the colony mines
+    // each notable tile type. Drives material-gated research (gem
+    // veins, magma vents, adamantite, void-ore).
+    noteDiscovery(sim, tileType);
     // Aquifer breach: replace with water rather than corridor floor,
     // mark the colony's aquifer-clock for the Survived milestone, and
     // log a chronicle line. The flood system spreads water from here

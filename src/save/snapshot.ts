@@ -212,6 +212,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     grudges: sim.grudges.size > 0
       ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick }))
       : undefined,
+    cumulative: Object.keys(sim.cumulative).length > 0 ? { ...sim.cumulative } : undefined,
+    discoveries: sim.discoveries.size > 0 ? Array.from(sim.discoveries.values()).sort((a, b) => a - b) : undefined,
   };
 }
 
@@ -505,6 +507,17 @@ export function restore(save: SaveV1): SimWorld {
     for (const g of save.grudges) {
       sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick });
     }
+  }
+  if (save.cumulative) {
+    for (const k of Object.keys(save.cumulative)) {
+      const v = save.cumulative[k];
+      if (typeof v === "number") {
+        (sim.cumulative as Record<string, number>)[k] = v;
+      }
+    }
+  }
+  if (save.discoveries) {
+    for (const t of save.discoveries) sim.discoveries.add(t);
   }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them

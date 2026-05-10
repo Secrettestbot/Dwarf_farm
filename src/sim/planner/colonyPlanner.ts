@@ -135,6 +135,11 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
 const CORRIDOR_MIN_LEN = 4;
 const CORRIDOR_MAX_LEN = 10;
 const ORE_SENSE_RADIUS = 12; // an ore tile is sense-able this many tiles from walkable
+/** Minimum thickness of solid rock above a room's ceiling. A bedroom
+ * carved one tile under the surface looks ridiculous and offers no
+ * protection from anything that comes down from above. Two tiles is
+ * a sturdy ceiling — caves, sieges, and weather all stop there. */
+const ROOM_CEILING_BUFFER = 2;
 /** Geology signal — when the planner places a corridor, it counts
  * ore + gem tiles in solid rock within this radius of the corridor's
  * exit point, and adds a bonus to the candidate's score. The colony
@@ -1076,6 +1081,19 @@ export class ColonyPlanner {
         if (!grid.inBounds(x, y)) return false;
         if (!grid.isSolid(x, y)) return false;
         if (this.isClaimed(grid, x, y)) return false;
+      }
+    }
+    // Reject placements where the cavity's ceiling is too close to
+    // the surface. We don't have surfaceY in the planner, so detect
+    // it directly: if Air sits within ROOM_CEILING_BUFFER tiles
+    // above any cavity column, the carved room would be exposed to
+    // sky. Corridors and the lumberyard reach the surface through
+    // their own placement paths and are unaffected.
+    for (let x = ox; x < ox + w; x++) {
+      for (let d = 1; d <= ROOM_CEILING_BUFFER; d++) {
+        const y = oy - d;
+        if (!grid.inBounds(x, y)) continue;
+        if (grid.getTile(x, y) === TileType.Air) return false;
       }
     }
     // The cavity must touch a walkable tile that is itself reachable from

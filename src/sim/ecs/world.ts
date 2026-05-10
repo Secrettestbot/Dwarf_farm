@@ -97,6 +97,13 @@ export class EcsWorld {
     return ((gen << GENERATION_SHIFT) | idx) >>> 0;
   }
 
+  /** Live entity count — used by SimWorld to apply graceful
+   * backpressure on optional spawns (loose items) before the cap
+   * is exceeded. */
+  liveCount(): number {
+    return this.nextIndex - this.freeIndices.length;
+  }
+
   destroy(e: EntityId, stores: ComponentStore<unknown>[]): void {
     const idx = entityIndex(e);
     if (entityGeneration(e) !== this.generations[idx]) return;

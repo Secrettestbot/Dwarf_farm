@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { generateWorld } from "./world/worldgen";
 import { SimWorld } from "./world/simWorld";
-import { tick } from "./sim";
+import { tick, birthDwarf } from "./sim";
 import { TileType } from "./world/tiles";
 import { Blueprint } from "./planner/blueprint";
 
@@ -134,26 +134,22 @@ describe("narrative milestones (GDD §10.2)", () => {
   });
 
   it("Three Generations fires when both parents were themselves born in-colony", () => {
+    // Direct check on the milestone wiring: spawn two adults flagged
+    // as in-colony births, force a child via birthDwarf, and assert
+    // the milestone landed. The earlier "run 16 in-game years and
+    // hope reproduction rolls in time" approach was both flaky
+    // (P(no birth) ≈ 1% per run) and painfully slow (~13 minutes
+    // per test). The flow under test is the parent-flag → milestone
+    // condition, not the rng-driven yearly birth roll, so calling
+    // birthDwarf directly is the right granularity.
     const w = generateWorld({ seed: 817, width: 200, height: 500 });
     const sim = new SimWorld(817, w.grid, w.surfaceY, w.spawn);
-    // Hand-spawn two adults flagged as in-colony births. Pair them, run
-    // a year, expect a child + the milestone.
     const m = sim.spawnDwarf({ name: "Mother", x: w.spawn.x, y: w.spawn.y, age: 25, bornInColony: true });
     const f = sim.spawnDwarf({ name: "Father", x: w.spawn.x + 1, y: w.spawn.y, age: 27, bornInColony: true });
     sim.dwarf.get(m)!.partnerId = f;
     sim.dwarf.get(f)!.partnerId = m;
-    let fired = false;
-    for (let y = 1; y <= 12 && !fired; y++) {
-      for (let i = 0; i < 24 * 60 * 24; i++) {
-        for (const id of sim.dwarf.entities) {
-          const n = sim.needs.get(id);
-          if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
-        }
-        tick(sim);
-      }
-      if (sim.narrativeMilestones.has("three_generations")) fired = true;
-    }
-    expect(fired).toBe(true);
+    birthDwarf(sim, m, f);
+    expect(sim.narrativeMilestones.has("three_generations")).toBe(true);
   });
 
   it("The Aquifer Survived fires after living a week past a breach", () => {
