@@ -69,6 +69,15 @@ describe("stairwells", () => {
           // Pin maintenance so neglect doesn't thrash the architect's targets.
           bp.lastMaintainedTick = t;
         }
+        // Hand-finish needs_furnishing rooms — no item-level sim is
+        // running here, but the test cares about the stairwell-pacing
+        // signal which only counts complete rooms. Pretend the
+        // furniture got delivered and flip status.
+        if (bp.status === "needs_furnishing") {
+          bp.status = "complete";
+          planner.completed++;
+          planner.completedByKind[bp.kind] = (planner.completedByKind[bp.kind] ?? 0) + 1;
+        }
         if (bp.status !== "digging") continue;
         for (let i = 0; i < bp.cavity.length; i++) {
           const c = bp.cavity[i];

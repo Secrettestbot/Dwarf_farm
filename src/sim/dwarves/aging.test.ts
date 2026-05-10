@@ -21,7 +21,17 @@ describe("dwarf aging", () => {
   it("ages by one year after TICKS_PER_YEAR ticks elapse", () => {
     const sim = buildSim(2);
     const e = sim.dwarf.entities[0];
-    for (let i = 0; i < TICKS_PER_YEAR + 5; i++) tick(sim);
+    // Pin needs each tick — without this Borin can starve / dehydrate
+    // mid-loop, freeing his entity slot for a migrant. The slot-reuse
+    // makes ageOf(e) report the migrant's age, which has nothing to
+    // do with what the test is measuring (calendar-driven aging).
+    // The need-pin is what every other long-running aging test does
+    // for the same reason.
+    for (let i = 0; i < TICKS_PER_YEAR + 5; i++) {
+      const n = sim.needs.get(e);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+    }
     expect(sim.ageOf(e)).toBe(26);
   });
 
