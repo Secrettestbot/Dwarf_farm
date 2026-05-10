@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -169,6 +169,21 @@ export const CARPENTER_BED_RECIPE: Recipe = {
   inputKind: "planks",
   inputQty: 2,
   outputKind: "bed",
+  outputQty: 1,
+  ticks: 90,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Alternate carpenter recipe that produces a Barrel item from planks.
+ * Swapped in when a brewery is waiting on its barrel furniture
+ * delivery. Same shape as the bed recipe — 2 planks, slow-ish build,
+ * delivered as an item so the hauler can route it. */
+export const CARPENTER_BARREL_RECIPE: Recipe = {
+  verb: "builds a barrel",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "barrel",
   outputQty: 1,
   ticks: 90,
   skill: "carpentry",

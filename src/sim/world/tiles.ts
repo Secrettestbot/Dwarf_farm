@@ -159,6 +159,12 @@ export const enum TileType {
    * (name, profession, age, tick of death). Walkable so visitors can
    * stand at the headstone. */
   Headstone = 52,
+  /** Brewing barrel — the wooden cask the brewer pours ale into. A
+   * Brewery is only functional once at least one Barrel has been
+   * delivered (Carpenter's Workshop recipe: 2 planks → 1 barrel).
+   * Walkable so the brewer can step around the room without
+   * tripping over the cask. */
+  BrewingBarrel = 53,
 }
 
 export interface TileInfo {
@@ -223,6 +229,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.WaterWheel]: { name: "water wheel", walkable: true, solid: false, color: 0x506080 },
   [TileType.Grave]: { name: "grave plot", walkable: true, solid: false, color: 0x504838 },
   [TileType.Headstone]: { name: "headstone", walkable: true, solid: false, color: 0x9a8a72 },
+  [TileType.BrewingBarrel]: { name: "brewing barrel", walkable: true, solid: false, color: 0x7a5028 },
 };
 
 export function tileIsGem(t: number): boolean {

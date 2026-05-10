@@ -880,6 +880,32 @@ function findWorkshopWantingInput(
   return best ? { x: best.x, y: best.y } : null;
 }
 
+/** True if this tile already holds furniture (Bed, BrewingBarrel)
+ * or a workshop station — both reserve the cell from accepting a
+ * new furniture delivery. */
+function isFurnitureOrStationTile(t: number): boolean {
+  return (
+    t === TileType.Bed
+    || t === TileType.BrewingBarrel
+    || t === TileType.BreweryStation
+    || t === TileType.KitchenStation
+    || t === TileType.SmelterStation
+    || t === TileType.ForgeStation
+    || t === TileType.MasonStation
+    || t === TileType.JewellerStation
+    || t === TileType.CarpenterStation
+    || t === TileType.KilnStation
+    || t === TileType.TannerStation
+    || t === TileType.LoomStation
+    || t === TileType.MagmaForgeStation
+    || t === TileType.PumpStation
+    || t === TileType.LibraryDesk
+    || t === TileType.ArmouryRack
+    || t === TileType.Throne
+    || t === TileType.Door
+  );
+}
+
 /** Find a needs_furnishing blueprint that wants the carried item.
  * Walks every cavity tile of every blueprint with a remaining
  * requirement matching `kind`, returns the closest. The hauler
@@ -900,17 +926,15 @@ function findFurnitureRoute(sim: SimWorld, kind: string, sx: number, sy: number)
       }
     }
     if (!stillNeeds) continue;
-    // Pick a cavity tile that's walkable (already dug) and not yet
-    // a furniture tile. Closest wins; deterministic tiebreak by
-    // (y, x).
+    // Pick a cavity tile that's walkable (already dug) and not
+    // already occupied by furniture or a workshop station. Closest
+    // wins; deterministic tiebreak by (y, x).
     for (let i = 0; i < b.cavity.length; i++) {
       const c = b.cavity[i];
       const x = c & 0xffff;
       const y = (c >>> 16) & 0xffff;
       if (!sim.grid.isWalkable(x, y)) continue;
-      // Skip cells that already hold a furniture tile (e.g. Bed).
-      const t = sim.grid.getTile(x, y);
-      if (t === TileType.Bed) continue;
+      if (isFurnitureOrStationTile(sim.grid.getTile(x, y))) continue;
       const dx = x - sx;
       const dy = y - sy;
       const d = dx * dx + dy * dy;

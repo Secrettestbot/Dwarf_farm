@@ -128,6 +128,7 @@ export interface Blueprint {
  * delivery instead. */
 export const FURNITURE_REQUIREMENTS: Partial<Record<BlueprintKind, ReadonlyArray<{ item: string; count: number }>>> = {
   bedroom: [{ item: "bed", count: 1 }],
+  brewery: [{ item: "barrel", count: 1 }],
 };
 
 /** Quality of a freshly-finished room. The architect counts the dig

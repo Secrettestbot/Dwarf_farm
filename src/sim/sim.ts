@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -2399,12 +2399,25 @@ function needsBedroomFurniture(sim: SimWorld): boolean {
   return false;
 }
 
+/** True iff the colony has at least one brewery waiting on a
+ * barrel delivery. Mirrors needsBedroomFurniture for the
+ * barrel pipeline. */
+function needsBreweryFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "brewery") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["barrel"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
 /** Map from furniture-item kind to the tile that gets stamped when
  * it's delivered. Extended as new furniture pipelines are wired up
- * (tables for dining halls, barrels for breweries, stoves +
- * ovens for kitchens, etc.). */
+ * (tables for dining halls, stoves + ovens for kitchens, etc.). */
 const FURNITURE_TILE: Partial<Record<string, TileType>> = {
   bed: TileType.Bed,
+  barrel: TileType.BrewingBarrel,
 };
 
 /** If (px, py) lies inside a needs_furnishing blueprint's cavity
@@ -3557,12 +3570,17 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     blueprintKind = b.kind;
     break;
   }
-  // Carpenter swaps to bed-building when a bedroom is waiting on
-  // furniture and the colony has planks to spend. Default carpentry
-  // (planks) resumes once every needs_furnishing bedroom has been
-  // covered and the bed pipeline runs dry.
-  if (blueprintKind === "carpenter" && recipe && needsBedroomFurniture(sim) && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
-    recipe = CARPENTER_BED_RECIPE;
+  // Carpenter swaps recipes based on the colony's furniture
+  // backlog. Priority order: barrel (brewery is a survival room —
+  // no drinks if no brewery) → bed (bedrooms gate morale recovery)
+  // → default planks. Default carpentry resumes once both backlogs
+  // are clear and the carpenter has planks to spend.
+  if (blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
+    if (needsBreweryFurniture(sim)) {
+      recipe = CARPENTER_BARREL_RECIPE;
+    } else if (needsBedroomFurniture(sim)) {
+      recipe = CARPENTER_BED_RECIPE;
+    }
   }
   if (!recipe) {
     sim.job.remove(e);
@@ -3782,6 +3800,7 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "wood") return "wood";
   if (resource === "hide") return "hide";
   if (resource === "bed") return "bed";
+  if (resource === "barrel") return "barrel";
   return null;
 }
 
@@ -4002,6 +4021,11 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       // No needs_furnishing bedroom wanted this bed — drop it as an
       // item so a later bedroom can be filled.
       sim.spawnItem({ kind: "bed", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "barrel") {
+      // Same — no brewery currently wants this barrel; sit it on
+      // the floor for the next one.
+      sim.spawnItem({ kind: "barrel", x: pos.x, y: pos.y, quality: carrying.quality });
     }
   }
   sim.carrying.remove(e);

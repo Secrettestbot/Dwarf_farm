@@ -118,4 +118,59 @@ describe("furniture pipeline", () => {
     }
     expect(placed).toBe(true);
   });
+
+  it("a needs_furnishing brewery gets a barrel delivered, then flips to complete", () => {
+    const w = generateWorld({ seed: 75, width: 200, height: 500 });
+    const sim = new SimWorld(75, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    // Pre-built barrel at spawn — represents a starter-kit barrel.
+    sim.spawnItem({ kind: "barrel", x: sx, y: sy });
+    // Carve a corridor so the hauler can reach the brewery.
+    for (let xx = sx; xx <= sx + 6; xx++) sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+    // Hand-plant a needs_furnishing brewery with its workstation stamped.
+    const ox = sx + 3;
+    const oy = sy;
+    const cavity: number[] = [];
+    for (let yy = oy; yy < oy + 3; yy++) {
+      for (let xx = ox; xx < ox + 3; xx++) {
+        cavity.push((yy << 16) | xx);
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    sim.grid.setTile(ox + 1, oy + 1, TileType.BreweryStation);
+    const brewery: Blueprint = {
+      id: 9303,
+      kind: "brewery",
+      originX: ox,
+      originY: oy,
+      width: 3,
+      height: 3,
+      cavity: new Int32Array(cavity),
+      status: "needs_furnishing",
+      priority: 1,
+      createdTick: 0,
+      furniturePlaced: {},
+    };
+    sim.planner.blueprints.push(brewery);
+    sim.spawnDwarf({ name: "Hauler", x: sx, y: sy, age: 30 });
+    let placed = false;
+    for (let i = 0; i < TICKS_PER_DAY * 2 && !placed; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (brewery.status === "complete") placed = true;
+    }
+    expect(placed).toBe(true);
+    // The cavity now has a BrewingBarrel tile somewhere.
+    let barrelFound = false;
+    for (let i = 0; i < brewery.cavity.length; i++) {
+      const c = brewery.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === TileType.BrewingBarrel) { barrelFound = true; break; }
+    }
+    expect(barrelFound).toBe(true);
+  });
 });

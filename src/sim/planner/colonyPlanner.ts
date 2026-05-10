@@ -26,7 +26,7 @@ import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
 import { Blueprint, BlueprintKind, BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, isComplete, isRoomNeglected, rectCavity, QUALITY_BASE } from "./blueprint";
-import { furnishRoom, prepareDoorForFurnishing } from "./furnish";
+import { furnishRoom, prepareInfrastructureForFurnishing } from "./furnish";
 
 export interface PlannerContext {
   grid: TileGrid;
@@ -1288,7 +1288,7 @@ export class ColonyPlanner {
           // Place the door so the room is enclosed even before its
           // furniture lands — a bedroom-shaped cavity with no door is
           // just a hallway nook.
-          prepareDoorForFurnishing(grid, b);
+          prepareInfrastructureForFurnishing(grid, b);
           if (ctx.events) {
             ctx.events.add(
               ctx.tick,
