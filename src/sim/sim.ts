@@ -3301,6 +3301,17 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (best) {
     sim.grid.setTile(best.x, best.y, TileType.CorridorFloor);
     sim.regions.invalidate();
+    // Note the drain in the chronicle so the player can see the
+    // pump actually doing work — the visual change is small and
+    // easy to miss in a dim deep tunnel. Position is the drained
+    // tile so the toast's Jump-to button pans there.
+    const dw = sim.dwarf.get(e);
+    sim.events.add(
+      sim.tick,
+      "construction",
+      `${dw?.name ?? "A dwarf"} pumps a flooded tile dry at the depot.`,
+      { x: best.x, y: best.y },
+    );
   }
   // Operating the pump is engineering work — credit the skill so a
   // dedicated pump-jockey actually levels up over months of flood

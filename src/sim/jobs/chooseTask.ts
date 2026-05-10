@@ -298,11 +298,12 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 6.75 Pump out a nearby flooded tile. Higher priority than research
-  //      so the colony actually reclaims its corridors instead of
-  //      reading books while the water rises. Only triggers when a
-  //      pump station with reachable water exists.
-  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+  // 6.75 Pump out a nearby flooded tile. Sits between crafting and
+  //      research so a colony with active workshops still drains
+  //      a breach, but doesn't pull the brewer off duty when there's
+  //      ongoing brewing to do. Engineers (via the specialty mapping
+  //      above) prioritise pumps before this branch ever fires.
+  if (age >= MIN_WORK_AGE) {
     const pumpTarget = findPumpTarget(sim, pos.x, pos.y);
     if (pumpTarget) {
       return { kind: "pump" as JobKind, targetX: pumpTarget.x, targetY: pumpTarget.y, progress: 0 };
@@ -419,6 +420,8 @@ function preferredWorkKind(dw: import("../ecs/components").Dwarf): JobKind | nul
     { kind: "craft", level: craftMax },
     { kind: "research", level: s.scholarship ?? 1 },
     { kind: "treat", level: s.medicine ?? 1 },
+    { kind: "pump", level: s.engineering ?? 1 },
+    { kind: "maintain", level: s.masonry ?? 1 },
   ];
   let best: Cand | null = null;
   for (const c of candidates) {
@@ -472,6 +475,15 @@ function trySpecialtyBranch(
       if (patient === -1) return null;
       const ppos = sim.position.get(patient)!;
       return { kind: "treat" as JobKind, targetX: ppos.x, targetY: ppos.y, progress: 0, partnerId: patient };
+    }
+    case "pump": {
+      const t = findPumpTarget(sim, pos.x, pos.y);
+      return t ? { kind: "pump" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
+    }
+    case "maintain": {
+      if (sim.sliders.construction <= 0.05) return null;
+      const t = findMaintainTarget(sim, pos.x, pos.y);
+      return t ? { kind: "maintain" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     default:
       return null;

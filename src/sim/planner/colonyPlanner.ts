@@ -268,6 +268,12 @@ export class ColonyPlanner {
     //     so a growing colony stays self-sufficient.
     if (this.needsFarm(ctx) && this.placeRoom(ctx, "farm")) return true;
 
+    // 2.6 Pump station — promoted ahead of the workshops because an
+    //     active aquifer breach is a live emergency. Without this the
+    //     planner would queue ten other workshops first while flood
+    //     water spread through the corridors.
+    if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
+
     // 2.7 Workshops — kitchen, brewery, smelter, forge. Each lands once
     //     the colony is large enough to use it. Kitchen + brewery come
     //     first (food / drink loops directly impact survival); smelter
@@ -280,7 +286,6 @@ export class ColonyPlanner {
     if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
     if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
     if (this.needsThroneRoom(ctx) && this.placeRoom(ctx, "throne_room")) return true;
-    if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
     if (this.needsMason(ctx) && this.placeRoom(ctx, "mason")) return true;
     if (this.needsJeweller(ctx) && this.placeRoom(ctx, "jeweller")) return true;
     if (this.needsCarpenter(ctx) && this.placeRoom(ctx, "carpenter")) return true;
