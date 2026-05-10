@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk" | "throne" | "hospital_bed" | "tavern_counter";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk" | "throne" | "hospital_bed" | "tavern_counter" | "armoury_rack" | "pump_part";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -281,6 +281,34 @@ export const CARPENTER_TAVERN_COUNTER_RECIPE: Recipe = {
   outputKind: "tavern_counter",
   outputQty: 1,
   ticks: 120,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Carpenter armoury rack — wooden frame to hang weapons on.
+ * Soldier-drafting reads from the global tools counter, but the
+ * rack tile is the visible marker that the colony has armed
+ * itself. */
+export const CARPENTER_ARMOURY_RACK_RECIPE: Recipe = {
+  verb: "builds an armoury rack",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "armoury_rack",
+  outputQty: 1,
+  ticks: 90,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Carpenter pump part — wooden pipework + treadle for the pump
+ * station. The pump itself is non-functional until this lands. */
+export const CARPENTER_PUMP_PART_RECIPE: Recipe = {
+  verb: "builds a pump assembly",
+  inputKind: "planks",
+  inputQty: 3,
+  outputKind: "pump_part",
+  outputQty: 1,
+  ticks: 130,
   skill: "carpentry",
   station: TileType.CarpenterStation,
 };

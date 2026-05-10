@@ -22,6 +22,7 @@ function buildSim(seed: number, dwarves: number): SimWorld {
   sim.spawnItem({ kind: "library_desk", x: w.spawn.x, y: w.spawn.y });
   sim.spawnItem({ kind: "hospital_bed", x: w.spawn.x, y: w.spawn.y });
   sim.spawnItem({ kind: "tavern_counter", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "armoury_rack", x: w.spawn.x, y: w.spawn.y });
   return sim;
 }
 

@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -2490,6 +2490,26 @@ function needsTavernFurniture(sim: SimWorld): boolean {
   return false;
 }
 
+function needsArmouryFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "armoury") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["armoury_rack"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsPumpStationFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "pump_station") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["pump_part"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
 /** Map from furniture-item kind to the tile that gets stamped when
  * it's delivered. Extended as new furniture pipelines are wired up
  * (tables for dining halls, stoves + ovens for kitchens, etc.). */
@@ -2503,6 +2523,8 @@ const FURNITURE_TILE: Partial<Record<string, TileType>> = {
   throne: TileType.Throne,
   hospital_bed: TileType.HospitalBed,
   tavern_counter: TileType.TavernCounter,
+  armoury_rack: TileType.ArmouryRack,
+  pump_part: TileType.PumpStation,
 };
 
 /** If (px, py) lies inside a needs_furnishing blueprint's cavity
@@ -3664,7 +3686,11 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   //   tavern counter— morale / festivals
   //   default       — plank milling
   if (blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
-    if (needsBreweryFurniture(sim)) {
+    if (needsPumpStationFurniture(sim) && sim.stockpile.planks >= CARPENTER_PUMP_PART_RECIPE.inputQty) {
+      // Pump beats everything else — an unpumped flood damages
+      // the entire colony, faster than any other room's miss.
+      recipe = CARPENTER_PUMP_PART_RECIPE;
+    } else if (needsBreweryFurniture(sim)) {
       recipe = CARPENTER_BARREL_RECIPE;
     } else if (needsHospitalFurniture(sim)) {
       recipe = CARPENTER_HOSPITAL_BED_RECIPE;
@@ -3674,6 +3700,8 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = CARPENTER_BED_RECIPE;
     } else if (needsLibraryFurniture(sim)) {
       recipe = CARPENTER_LIBRARY_DESK_RECIPE;
+    } else if (needsArmouryFurniture(sim)) {
+      recipe = CARPENTER_ARMOURY_RACK_RECIPE;
     } else if (needsTavernFurniture(sim) && sim.stockpile.planks >= CARPENTER_TAVERN_COUNTER_RECIPE.inputQty) {
       recipe = CARPENTER_TAVERN_COUNTER_RECIPE;
     }
@@ -3916,6 +3944,8 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "throne") return "throne";
   if (resource === "hospital_bed") return "hospital_bed";
   if (resource === "tavern_counter") return "tavern_counter";
+  if (resource === "armoury_rack") return "armoury_rack";
+  if (resource === "pump_part") return "pump_part";
   return null;
 }
 
@@ -4162,6 +4192,12 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     }
     else if (carrying.kind === "tavern_counter") {
       sim.spawnItem({ kind: "tavern_counter", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "armoury_rack") {
+      sim.spawnItem({ kind: "armoury_rack", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "pump_part") {
+      sim.spawnItem({ kind: "pump_part", x: pos.x, y: pos.y, quality: carrying.quality });
     }
   }
   sim.carrying.remove(e);

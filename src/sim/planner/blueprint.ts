@@ -136,6 +136,8 @@ export const FURNITURE_REQUIREMENTS: Partial<Record<BlueprintKind, ReadonlyArray
   throne_room: [{ item: "throne", count: 1 }],
   hospital: [{ item: "hospital_bed", count: 1 }],
   tavern: [{ item: "tavern_counter", count: 1 }],
+  armoury: [{ item: "armoury_rack", count: 1 }],
+  pump_station: [{ item: "pump_part", count: 1 }],
 };
 
 /** Quality of a freshly-finished room. The architect counts the dig

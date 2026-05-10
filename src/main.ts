@@ -174,6 +174,11 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
   // colony has to earn its crown via mason work later in the game.
   sim.spawnItem({ kind: "hospital_bed", x: spawn.x, y: spawn.y });
   sim.spawnItem({ kind: "tavern_counter", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "armoury_rack", x: spawn.x, y: spawn.y });
+  // No pre-built pump_part — pumps are an emergency response to an
+  // aquifer breach, and the carpenter prioritises them ahead of
+  // everything else when one's needed. The colony has to actually
+  // build the part when the time comes.
   sim.stockpile.planks += 8;
   sim.stockpile.wood += 4;
   // A small block cache so the mason can carve a table for a
