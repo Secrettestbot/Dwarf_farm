@@ -189,6 +189,21 @@ const REACH_DIRS: ReadonlyArray<readonly [number, number]> = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
 ];
 
+/** Count Water tiles within `radius` of (cx, cy). Used by the
+ * pump-station placement bias so the planner picks a spot that
+ * actually has water to drain rather than landing the pump room
+ * across the colony from the breach. */
+function countWaterNear(grid: TileGrid, cx: number, cy: number, radius: number): number {
+  let n = 0;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      if (dx * dx + dy * dy > radius * radius) continue;
+      if (grid.getTile(cx + dx, cy + dy) === TileType.Water) n++;
+    }
+  }
+  return n;
+}
+
 /** Perpendicular direction vector used to widen 2-wide corridors. */
 function perpendicularOf(dx: number, dy: number): { dx: number; dy: number } {
   // Rotate 90° clockwise. For vertical corridors this gives a perpendicular
@@ -659,7 +674,21 @@ export class ColonyPlanner {
         if (seen.has(key)) continue;
         seen.add(key);
         if (!this.candidateValid(ctx, ox, oy, dims.w, dims.h)) continue;
-        const score = this.scoreRoomCandidate(ox, oy, kind, ctx.spawn, xBias);
+        let score = this.scoreRoomCandidate(ox, oy, kind, ctx.spawn, xBias);
+        // Pump stations pull strongly toward water so a dwarf on the
+        // pump tile actually has something to drain. Without this
+        // bias the planner can place a pump room across the colony
+        // from the breach and findPumpTarget rejects it for "no
+        // water in range".
+        if (kind === "pump_station") {
+          const waterTiles = countWaterNear(grid, ox + halfW, oy + halfH, 14);
+          if (waterTiles === 0) {
+            // No water at all near this candidate — skip it. A pump
+            // far from any water is useless.
+            continue;
+          }
+          score += waterTiles * 5;
+        }
         if (
           best === null ||
           score > best.score ||

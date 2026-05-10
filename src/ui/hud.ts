@@ -199,23 +199,28 @@ export class Hud {
     const built = sim.planner.completed;
     this.plannerLabel.textContent = `Plans: ${active} digging · ${built} done`;
     const sp = sim.stockpile;
+    // Tooltip strings spell out what each resource is for so the
+    // player can see at a glance what produces it and what consumes
+    // it. Most "trade good" resources have no in-colony consumer
+    // beyond the visiting caravan.
     this.stockpileLabel.innerHTML =
-      `<span style="color:#9ad3a3;">Food ${sp.food}</span> · ` +
-      `<span style="color:#8aa9ff;">Drink ${sp.drink}</span> · ` +
-      (sp.meals > 0 ? `<span style="color:#e0c080;">Meals ${sp.meals}</span> · ` : "") +
-      `Ore ${sp.ore} · Stone ${sp.stone}` +
-      (sp.blocks > 0 ? ` · <span style="color:#b8b8c8;">Blocks ${sp.blocks}</span>` : "") +
-      (sp.bars > 0 ? ` · <span style="color:#e0a070;">Bars ${sp.bars}</span>` : "") +
-      (sp.tools > 0 ? ` · <span style="color:#e0c080;">Tools ${sp.tools}</span>` : "") +
-      (sp.gems > 0 ? ` · <span style="color:#a8d8e0;">Gems ${sp.gems}</span>` : "") +
-      (sp.cut_gems > 0 ? ` · <span style="color:#d8a8f0;">Cut Gems ${sp.cut_gems}</span>` : "") +
-      (sp.wood > 0 ? ` · <span style="color:#a87838;">Wood ${sp.wood}</span>` : "") +
-      (sp.planks > 0 ? ` · <span style="color:#c8a070;">Planks ${sp.planks}</span>` : "") +
-      (sp.pots > 0 ? ` · <span style="color:#c8b090;">Pots ${sp.pots}</span>` : "") +
-      (sp.hide > 0 ? ` · <span style="color:#a07050;">Hides ${sp.hide}</span>` : "") +
-      (sp.leather > 0 ? ` · <span style="color:#c08858;">Leather ${sp.leather}</span>` : "") +
-      (sp.rope > 0 ? ` · <span style="color:#c8b888;">Rope ${sp.rope}</span>` : "") +
-      (sp.cloth > 0 ? ` · <span style="color:#e0d0b0;">Cloth ${sp.cloth}</span>` : "");
+      `<span style="color:#9ad3a3;" title="Eaten by dwarves. Produced by farms; raw food can be cooked into Meals at a Kitchen.">Food ${sp.food}</span> · ` +
+      `<span style="color:#8aa9ff;" title="Drunk by dwarves. Produced by Brewery from Food.">Drink ${sp.drink}</span> · ` +
+      (sp.meals > 0 ? `<span style="color:#e0c080;" title="Cooked meals — restore more hunger than raw Food. Produced by a Kitchen from Food.">Meals ${sp.meals}</span> · ` : "") +
+      `<span title="Smelted into Bars at a Smelter (requires Iron Smelting research).">Ore ${sp.ore}</span> · ` +
+      `<span title="Cut into Blocks at a Mason's Workshop (Basic Stonecutting research).">Stone ${sp.stone}</span>` +
+      (sp.blocks > 0 ? ` · <span style="color:#b8b8c8;" title="Cut stone — trade good. Future Fortification builds will consume them.">Blocks ${sp.blocks}</span>` : "") +
+      (sp.bars > 0 ? ` · <span style="color:#e0a070;" title="Forged into Tools at a Forge (Iron Toolmaking research).">Bars ${sp.bars}</span>` : "") +
+      (sp.tools > 0 ? ` · <span style="color:#e0c080;" title="Equipped to drafted soldiers at the year-end draft. Excess can be traded.">Tools ${sp.tools}</span>` : "") +
+      (sp.gems > 0 ? ` · <span style="color:#a8d8e0;" title="Cut into Cut Gems at a Jeweller (Gem Cutting research).">Gems ${sp.gems}</span>` : "") +
+      (sp.cut_gems > 0 ? ` · <span style="color:#d8a8f0;" title="Cut gems — high-value trade good.">Cut Gems ${sp.cut_gems}</span>` : "") +
+      (sp.wood > 0 ? ` · <span style="color:#a87838;" title="Sawn into Planks at a Carpenter's Workshop (Basic Carpentry research).">Wood ${sp.wood}</span>` : "") +
+      (sp.planks > 0 ? ` · <span style="color:#c8a070;" title="Sawn timber — trade good.">Planks ${sp.planks}</span>` : "") +
+      (sp.pots > 0 ? ` · <span style="color:#c8b090;" title="Fired pottery — trade good. Produced by a Kiln from Dirt (Pottery & Kilns research).">Pots ${sp.pots}</span>` : "") +
+      (sp.hide > 0 ? ` · <span style="color:#a07050;" title="Raw hides — dropped by larger hostiles. Tanned into Leather at a Tannery.">Hides ${sp.hide}</span>` : "") +
+      (sp.leather > 0 ? ` · <span style="color:#c08858;" title="Tanned leather — trade good. Future armouring will consume it.">Leather ${sp.leather}</span>` : "") +
+      (sp.rope > 0 ? ` · <span style="color:#c8b888;" title="Rope fibre — woven into Cloth at a Loom.">Rope ${sp.rope}</span>` : "") +
+      (sp.cloth > 0 ? ` · <span style="color:#e0d0b0;" title="Woven cloth — trade good.">Cloth ${sp.cloth}</span>` : "");
     for (const [s, b] of this.speedButtons) {
       b.classList.toggle("active", s === clock.speed);
     }
