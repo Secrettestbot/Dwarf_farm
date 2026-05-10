@@ -167,6 +167,20 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     return null;
   }
 
+  // 4.6 Pump out the aquifer breach. Promoted to high priority — an
+  //     active flood is an emergency and the colony's other work is
+  //     pointless if the corridors fill with water. Fires whenever a
+  //     pump station with reachable water exists, regardless of
+  //     specialty (anyone can crank a pump). Earlier this sat at
+  //     priority 6.75 below crafting, so a colony with active
+  //     workshops never reclaimed flooded tunnels.
+  if (age >= MIN_WORK_AGE) {
+    const pumpTarget = findPumpTarget(sim, pos.x, pos.y);
+    if (pumpTarget) {
+      return { kind: "pump" as JobKind, targetX: pumpTarget.x, targetY: pumpTarget.y, progress: 0 };
+    }
+  }
+
   // 4.7 Treat a sick patient on a hospital cot. Sits above farm tending
   //     and other work — a plague spreads faster than a fallow plot
   //     starves the colony. Only fires for dwarves with at least
@@ -298,16 +312,6 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 6.75 Pump out a nearby flooded tile. Higher priority than research
-  //      so the colony actually reclaims its corridors instead of
-  //      reading books while the water rises. Only triggers when a
-  //      pump station with reachable water exists.
-  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
-    const pumpTarget = findPumpTarget(sim, pos.x, pos.y);
-    if (pumpTarget) {
-      return { kind: "pump" as JobKind, targetX: pumpTarget.x, targetY: pumpTarget.y, progress: 0 };
-    }
-  }
 
   // 6.8 Research at a Library desk. Gated by the Research slider, and
   //     only fires when there's an active topic to study.
@@ -419,6 +423,8 @@ function preferredWorkKind(dw: import("../ecs/components").Dwarf): JobKind | nul
     { kind: "craft", level: craftMax },
     { kind: "research", level: s.scholarship ?? 1 },
     { kind: "treat", level: s.medicine ?? 1 },
+    { kind: "pump", level: s.engineering ?? 1 },
+    { kind: "maintain", level: s.masonry ?? 1 },
   ];
   let best: Cand | null = null;
   for (const c of candidates) {
@@ -472,6 +478,15 @@ function trySpecialtyBranch(
       if (patient === -1) return null;
       const ppos = sim.position.get(patient)!;
       return { kind: "treat" as JobKind, targetX: ppos.x, targetY: ppos.y, progress: 0, partnerId: patient };
+    }
+    case "pump": {
+      const t = findPumpTarget(sim, pos.x, pos.y);
+      return t ? { kind: "pump" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
+    }
+    case "maintain": {
+      if (sim.sliders.construction <= 0.05) return null;
+      const t = findMaintainTarget(sim, pos.x, pos.y);
+      return t ? { kind: "maintain" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     default:
       return null;
