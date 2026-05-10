@@ -113,8 +113,12 @@ export interface Stockpile {
   cloth: number;
 }
 
-const STARTER_FOOD = 1000;
-const STARTER_DRINK = 1000;
+// Starter caches sized to give the colony comfortable runway for
+// research → library → brewery → stable production. The earlier
+// 1000 each was tight when migration boosted population past ~20
+// before the brewery + farms could keep up.
+const STARTER_FOOD = 2000;
+const STARTER_DRINK = 2000;
 
 /**
  * Aggregate of everything the deterministic tick function needs. The same

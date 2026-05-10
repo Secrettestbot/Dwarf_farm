@@ -48,10 +48,14 @@ export const RECIPES: Partial<Record<BlueprintKind, Recipe>> = {
   },
   brewery: {
     verb: "brews ale",
+    // One unit of food per brew (down from 2) and four units of drink
+    // per brew (up from 3) — a brewer working steadily produces enough
+    // for a small fortress without out-pacing the farms or piling up
+    // entities. Tuned by the colony-survives-thirst integration test.
     inputKind: "food",
-    inputQty: 2,
+    inputQty: 1,
     outputKind: "drink",
-    outputQty: 3,
+    outputQty: 4,
     ticks: 60,
     skill: "brewing",
     station: TileType.BreweryStation,

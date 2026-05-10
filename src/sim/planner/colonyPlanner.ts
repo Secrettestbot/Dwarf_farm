@@ -336,17 +336,25 @@ export class ColonyPlanner {
     // Tier 1 Basic Cooking gates the Kitchen — the colony has to know
     // how to cook before the architect lays out a kitchen. Founders'
     // starter cache feeds them through the early research window.
+    // Scales with population (one kitchen per ~10 dwarves) so meal
+    // production keeps up with a post-migration colony.
     if (ctx.population < 5) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_cooking")) return false;
-    return this.maintainedAndActiveOfKind("kitchen", ctx.tick) === 0;
+    const target = Math.max(1, Math.ceil(ctx.population / 10));
+    return this.maintainedAndActiveOfKind("kitchen", ctx.tick) < target;
   }
 
   private needsBrewery(ctx: PlannerContext): boolean {
     // Tier 1 Basic Brewing gates the Brewery. Same reasoning as the
     // kitchen — the founders' cellar lasts until research lands.
+    // One brewery per ~8 dwarves so a growing colony doesn't drink
+    // a single brewer dry between brews. Without this scaling, a
+    // post-migration colony of 25+ dwarves quietly dies of thirst
+    // while the lone brewer can't keep up.
     if (ctx.population < 5) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_brewing")) return false;
-    return this.maintainedAndActiveOfKind("brewery", ctx.tick) === 0;
+    const target = Math.max(1, Math.ceil(ctx.population / 8));
+    return this.maintainedAndActiveOfKind("brewery", ctx.tick) < target;
   }
 
   private needsSmelter(ctx: PlannerContext): boolean {
