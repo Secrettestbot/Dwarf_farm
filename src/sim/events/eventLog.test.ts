@@ -10,6 +10,15 @@ function buildSim(seed: number, dwarves: number): SimWorld {
   for (let i = 0; i < dwarves; i++) {
     sim.spawnDwarf({ name: `Dwarf${i}`, x: w.spawn.x + (i % 3), y: w.spawn.y });
   }
+  // Mirror the founder starter kit: pre-built furniture so the
+  // first bedroom / stockpile / dining hall / kitchen / brewery
+  // can furnish from day one. Without this the stockpile stays
+  // needs_furnishing and mined items can't deliver to a counter.
+  for (let i = 0; i < dwarves; i++) sim.spawnItem({ kind: "bed", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "bin", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "barrel", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "table", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "stove", x: w.spawn.x, y: w.spawn.y });
   return sim;
 }
 
