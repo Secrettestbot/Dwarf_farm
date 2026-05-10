@@ -167,20 +167,6 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     return null;
   }
 
-  // 4.6 Pump out the aquifer breach. Promoted to high priority — an
-  //     active flood is an emergency and the colony's other work is
-  //     pointless if the corridors fill with water. Fires whenever a
-  //     pump station with reachable water exists, regardless of
-  //     specialty (anyone can crank a pump). Earlier this sat at
-  //     priority 6.75 below crafting, so a colony with active
-  //     workshops never reclaimed flooded tunnels.
-  if (age >= MIN_WORK_AGE) {
-    const pumpTarget = findPumpTarget(sim, pos.x, pos.y);
-    if (pumpTarget) {
-      return { kind: "pump" as JobKind, targetX: pumpTarget.x, targetY: pumpTarget.y, progress: 0 };
-    }
-  }
-
   // 4.7 Treat a sick patient on a hospital cot. Sits above farm tending
   //     and other work — a plague spreads faster than a fallow plot
   //     starves the colony. Only fires for dwarves with at least
@@ -312,6 +298,17 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 6.75 Pump out a nearby flooded tile. Sits between crafting and
+  //      research so a colony with active workshops still drains
+  //      a breach, but doesn't pull the brewer off duty when there's
+  //      ongoing brewing to do. Engineers (via the specialty mapping
+  //      above) prioritise pumps before this branch ever fires.
+  if (age >= MIN_WORK_AGE) {
+    const pumpTarget = findPumpTarget(sim, pos.x, pos.y);
+    if (pumpTarget) {
+      return { kind: "pump" as JobKind, targetX: pumpTarget.x, targetY: pumpTarget.y, progress: 0 };
+    }
+  }
 
   // 6.8 Research at a Library desk. Gated by the Research slider, and
   //     only fires when there's an active topic to study.
