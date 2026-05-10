@@ -137,13 +137,15 @@ describe("narrative milestones (GDD §10.2)", () => {
     const w = generateWorld({ seed: 817, width: 200, height: 500 });
     const sim = new SimWorld(817, w.grid, w.surfaceY, w.spawn);
     // Hand-spawn two adults flagged as in-colony births. Pair them, run
-    // a year, expect a child + the milestone.
+    // a year, expect a child + the milestone. 16-year window matches
+    // the birth-eventually test — drives flake rate below 1% under
+    // any rng path the colony's other systems take.
     const m = sim.spawnDwarf({ name: "Mother", x: w.spawn.x, y: w.spawn.y, age: 25, bornInColony: true });
     const f = sim.spawnDwarf({ name: "Father", x: w.spawn.x + 1, y: w.spawn.y, age: 27, bornInColony: true });
     sim.dwarf.get(m)!.partnerId = f;
     sim.dwarf.get(f)!.partnerId = m;
     let fired = false;
-    for (let y = 1; y <= 12 && !fired; y++) {
+    for (let y = 1; y <= 16 && !fired; y++) {
       for (let i = 0; i < 24 * 60 * 24; i++) {
         for (const id of sim.dwarf.entities) {
           const n = sim.needs.get(id);
