@@ -321,7 +321,7 @@ export class SimWorld {
   // Spawn point.
   readonly spawn: { x: number; y: number };
 
-  constructor(seed: number, grid: TileGrid, surfaceY: Int32Array, spawn: { x: number; y: number }, maxEntities = 16384) {
+  constructor(seed: number, grid: TileGrid, surfaceY: Int32Array, spawn: { x: number; y: number }, maxEntities = 32768) {
     this.seed = seed;
     this.grid = grid;
     this.surfaceY = surfaceY;
@@ -376,6 +376,11 @@ export class SimWorld {
     parentNames?: [string, string];
   }): EntityId {
     const e = this.ecs.create();
+    // Entity table full — the migration / birth / founder spawn
+    // skips, the colony stops growing for now. Caller code that
+    // checks the return value can react; everything else just
+    // misses one spawn attempt.
+    if (e === -1) return -1;
     this.position.set(e, { x: spec.x, y: spec.y });
     const age = spec.age ?? 25;
     const bornAtTick = spec.bornAtTick ?? this.tick - age * TICKS_PER_YEAR;
@@ -450,6 +455,13 @@ export class SimWorld {
       return -1;
     }
     const e = this.ecs.create();
+    // ecs.create returns -1 when the table is genuinely full (the
+    // 10% buffer above is for early backpressure; the cap itself
+    // is the hard limit). Same fallback: credit the counter.
+    if (e === -1) {
+      this.creditItemToStockpile(spec.kind);
+      return -1;
+    }
     this.position.set(e, { x: spec.x, y: spec.y });
     this.item.set(e, { kind: spec.kind, claimedBy: -1, quality: spec.quality });
     return e;
@@ -524,7 +536,9 @@ export class SimWorld {
 
   // ---- Hostile spawning --------------------------------------------------
 
-  /** Spawn a new hostile entity. Returns the new entity id. */
+  /** Spawn a new hostile entity. Returns the new entity id, or -1 if
+   * the entity table is full — the periodic spawn just misses this
+   * cycle and tries again later. */
   spawnHostile(spec: {
     kind: HostileKind;
     x: number;
@@ -535,6 +549,7 @@ export class SimWorld {
   }): EntityId {
     const def = HOSTILE_DEFS[spec.kind];
     const e = this.ecs.create();
+    if (e === -1) return -1;
     this.position.set(e, { x: spec.x, y: spec.y });
     this.hostile.set(e, {
       kind: spec.kind,
@@ -561,6 +576,7 @@ export class SimWorld {
     maxHp?: number;
   }): EntityId {
     const e = this.ecs.create();
+    if (e === -1) return -1;
     this.position.set(e, { x: spec.x, y: spec.y });
     this.pet.set(e, {
       kind: spec.kind,

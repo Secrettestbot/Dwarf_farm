@@ -2688,7 +2688,7 @@ function migrationSystem(sim: SimWorld): void {
   for (let i = 0; i < count; i++) {
     const f = generateFounder(sim.aiRng, used);
     used.add(f.name.split(" ")[0]);
-    sim.spawnDwarf({
+    const id = sim.spawnDwarf({
       name: f.name,
       x: sim.spawn.x,
       y: sim.spawn.y,
@@ -2697,8 +2697,14 @@ function migrationSystem(sim: SimWorld): void {
       profession: f.profession,
       age: f.age,
     });
+    // Skip the would-be immigrant if the entity table refused —
+    // no narration line for someone who didn't actually arrive.
+    if (id === -1) continue;
     names.push(f.name);
   }
+  // No arrivals landed (e.g. cap saturated). Skip the chronicle line
+  // entirely rather than narrate an empty group.
+  if (names.length === 0) return;
   sim.events.add(sim.tick, "social", narrateArrival(sim.aiRng, names));
   // Population threshold may have just been crossed — let the milestone
   // system fire its event the same tick, not the next year boundary.
@@ -2728,7 +2734,10 @@ export function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId
     bornInColony: true,
     parentNames: [mother.name, father.name],
   });
-  void childId;
+  // Spawn failed (entity table full). Skip the narration + milestones
+  // — claiming a child was born when none exists would lie to the
+  // chronicle. The reproduction roll just misses this year.
+  if (childId === -1) return;
   sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));
   // Population milestones (GDD §10.2). One-shot per threshold via Set.
   checkPopulationMilestones(sim);
