@@ -21,6 +21,11 @@ export interface LogEvent {
   tick: number;
   category: EventCategory;
   text: string;
+  /** Optional tile coordinates the event happened at — when present
+   * the notification UI can offer a "jump to" camera pan. Omitted for
+   * non-spatial events (research completing, milestones, etc.). */
+  x?: number;
+  y?: number;
 }
 
 export class EventLog {
@@ -28,8 +33,13 @@ export class EventLog {
   /** Cap to bound save size. Per GDD §12.4 the save stores the last 10k. */
   private readonly maxEvents = 10000;
 
-  add(tick: number, category: EventCategory, text: string): void {
-    this.events.push({ tick, category, text });
+  add(tick: number, category: EventCategory, text: string, pos?: { x: number; y: number }): void {
+    const event: LogEvent = { tick, category, text };
+    if (pos) {
+      event.x = pos.x;
+      event.y = pos.y;
+    }
+    this.events.push(event);
     if (this.events.length > this.maxEvents) {
       // Drop the oldest entries when the cap is exceeded.
       this.events.splice(0, this.events.length - this.maxEvents);

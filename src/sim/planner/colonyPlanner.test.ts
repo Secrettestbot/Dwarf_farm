@@ -285,6 +285,54 @@ describe("ColonyPlanner", () => {
     expect(horizontals).toBeGreaterThan(0);
   });
 
+  it("the geology signal pulls corridors toward dense ore clusters", () => {
+    // Plant a dense ore cluster off to the right, far enough that the
+    // colony only reaches it if its corridor placement is biased
+    // toward the rumour. Run a baseline (cluster absent) and a treatment
+    // (cluster present) from the same seed; the treatment's tunnels
+    // should reach noticeably further right than the baseline.
+    function runWithCluster(seed: number, cluster: boolean): number {
+      const world = generateWorld({ seed, width: 200, height: 500 });
+      if (cluster) {
+        const cx = world.spawn.x + 18;
+        const cy = world.spawn.y;
+        for (let dy = -3; dy <= 3; dy++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            if (dx * dx + dy * dy > 9) continue;
+            world.grid.setTile(cx + dx, cy + dy, 5 /* TileType.Ore */);
+          }
+        }
+      }
+      const planner = new ColonyPlanner();
+      const localRng = Rng.fromSeed(2024);
+      let maxX = world.spawn.x;
+      for (let t = 1; t <= 2400; t++) {
+        planner.tick({ grid: world.grid, spawn: world.spawn, tick: t, population: POP_DEFAULT, rng: localRng });
+        for (const bp of planner.blueprints) {
+          if (bp.status !== "digging") continue;
+          for (let i = 0; i < bp.cavity.length; i++) {
+            const c = bp.cavity[i];
+            const x = c & 0xffff;
+            const y = (c >>> 16) & 0xffff;
+            world.grid.setTile(x, y, 7);
+          }
+        }
+        for (const bp of planner.blueprints) {
+          if (bp.kind !== "corridor") continue;
+          const r = bp.originX + bp.width - 1;
+          if (r > maxX) maxX = r;
+        }
+      }
+      return maxX - world.spawn.x;
+    }
+    const baseline = runWithCluster(91, false);
+    const withCluster = runWithCluster(91, true);
+    // Treatment world should have reached at least as far right as baseline,
+    // and should have crossed into the cluster's column.
+    expect(withCluster).toBeGreaterThanOrEqual(baseline);
+    expect(withCluster).toBeGreaterThan(15);
+  });
+
   it("emits corridors below 80 tiles deep — no Skin-layer cap", () => {
     // Regression: the planner used to cap its corridor scan to ±50 tiles
     // around spawn, so once the deepest walkable was 50+ tiles down, no

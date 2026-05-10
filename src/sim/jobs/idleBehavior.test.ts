@@ -91,4 +91,37 @@ describe("idle behaviors", () => {
     }
     expect(socialiseObserved).toBe(true);
   });
+
+  it("a starved-of-social dwarf in a busy colony actually gets to chat", () => {
+    // Regression for "social never goes up": in any non-trivial colony
+    // every dwarf always has a mining / hauling / crafting job, so the
+    // priority-8 socialise branch never fires. The fix is the
+    // critical-social branch (priority 3.5) plus a lenient partner
+    // search that accepts working dwarves as chat targets.
+    const sim = buildSim(23, 5);
+    // Run a while so the planner emits work and dwarves dispatch into it.
+    for (let i = 0; i < 200; i++) tick(sim);
+    const subject = sim.dwarf.entities[0];
+    const startSocial = 5;
+    const subjectNeeds = sim.needs.get(subject)!;
+    subjectNeeds.social = startSocial;
+    // Pin the subject's other needs high so social is the only one in the red.
+    subjectNeeds.hunger = 100;
+    subjectNeeds.thirst = 100;
+    subjectNeeds.sleep = 100;
+    // Run forward; the subject should land a socialise job and their
+    // social need should rise above where it started.
+    let socialiseObserved = false;
+    for (let i = 0; i < 600; i++) {
+      tick(sim);
+      // Keep the survival needs pinned high so other interrupts don't fire.
+      subjectNeeds.hunger = 100;
+      subjectNeeds.thirst = 100;
+      subjectNeeds.sleep = 100;
+      const j = sim.job.get(subject);
+      if (j?.kind === "socialise") socialiseObserved = true;
+    }
+    expect(socialiseObserved).toBe(true);
+    expect(subjectNeeds.social).toBeGreaterThan(startSocial);
+  });
 });

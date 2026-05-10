@@ -14,6 +14,7 @@ import { recipeFor } from "../planner/recipes";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
+const SOCIAL_CRITICAL = 15;
 const SOCIAL_RANGE = 10; // tiles
 const HUNGER_CRITICAL = 30;
 const THIRST_CRITICAL = 35;
@@ -116,6 +117,27 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 3.5 Critical social — when isolation has dropped social very low,
+  //     drop work to find someone. Sits above work but below sleep /
+  //     hunger / thirst. Uses the lenient partner search so a busy
+  //     colony (where every other dwarf has a mining or hauling job)
+  //     still produces matches: a working partner doesn't need to
+  //     stop, the chooser just walks over and chats at them while
+  //     they work. Both dwarves' social ticks up the whole time.
+  if (needs && needs.social <= SOCIAL_CRITICAL) {
+    const partner = findSocialPartner(sim, e, pos.x, pos.y, true);
+    if (partner !== -1) {
+      const partnerPos = sim.position.get(partner)!;
+      return {
+        kind: "socialise" as JobKind,
+        targetX: partnerPos.x,
+        targetY: partnerPos.y,
+        progress: 0,
+        partnerId: partner,
+      };
+    }
+  }
+
   // 4. Circadian rest — at night, a dwarf with at-least-mildly-low sleep
   //    heads to bed instead of starting a new mining job. The Rest slider
   //    raises (or lowers) the threshold: a high-Rest colony goes to bed
@@ -143,6 +165,30 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       return { kind: "wander" as JobKind, targetX: wanderTarget.x, targetY: wanderTarget.y, progress: 0 };
     }
     return null;
+  }
+
+  // 4.7 Treat a sick patient on a hospital cot. Sits above farm tending
+  //     and other work — a plague spreads faster than a fallow plot
+  //     starves the colony. Only fires for dwarves with at least
+  //     Apprentice-level medicine; the patient must already be on a
+  //     Hospital cot (their own findSleepTarget routed them there); and
+  //     no other medic is already on the way. Walks adjacent to the
+  //     patient and stays until the disease clears.
+  if (age >= MIN_WORK_AGE) {
+    const selfDw = sim.dwarf.get(e);
+    if (selfDw && (selfDw.skills.medicine ?? 1) >= MEDIC_MIN_SKILL) {
+      const patient = findPatientForTreatment(sim, e, pos.x, pos.y);
+      if (patient !== -1) {
+        const ppos = sim.position.get(patient)!;
+        return {
+          kind: "treat" as JobKind,
+          targetX: ppos.x,
+          targetY: ppos.y,
+          progress: 0,
+          partnerId: patient,
+        };
+      }
+    }
   }
 
   // 5. Tend a farm cell that's getting close to fallow. Higher priority
@@ -243,10 +289,14 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   }
 
   // 8. Social: find an idle nearby dwarf to talk to. Slider scales the
-  //    threshold so a high-Socialising colony chats more eagerly.
+  //    threshold so a high-Socialising colony chats more eagerly. The
+  //    moderate-tier branch keeps the strict idle-only partner rule
+  //    so a healthy colony doesn't constantly interrupt productive
+  //    work for casual chats — the critical branch above handles the
+  //    "really needs people" case differently.
   const socialThreshold = SOCIAL_THRESHOLD * (sim.sliders.socialising * 1.6 + 0.2);
   if (needs && needs.social <= socialThreshold) {
-    const partner = findSocialPartner(sim, e, pos.x, pos.y);
+    const partner = findSocialPartner(sim, e, pos.x, pos.y, false);
     if (partner !== -1) {
       const partnerPos = sim.position.get(partner)!;
       return {
@@ -304,6 +354,53 @@ const GRAVE_VISIT_MORALE_THRESHOLD = 65;
 /** One in-game season between visits — once a quarter is the
  * natural mourning rhythm. */
 const GRAVE_VISIT_COOLDOWN_TICKS = 60 * 24 * 6; // ~6 in-game days
+/** Minimum medicine skill to count as a medic. Apprentice-tier (4) is
+ * the bar — a colony usually has at least one capable healer once it
+ * grows past the founders. Below this, a dwarf stays out of the
+ * hospital and the patient lies on the cot recovering passively. */
+const MEDIC_MIN_SKILL = 4;
+
+/** Find a sick dwarf lying on a Hospital cot who isn't already being
+ * treated by another medic. Returns the patient's entity id, or -1 if
+ * none is available. The medic walks adjacent to the patient and
+ * begins a `treat` job — the disease system credits the medic's
+ * supervised progress while they stay put. */
+function findPatientForTreatment(
+  sim: SimWorld,
+  medic: EntityId,
+  sx: number,
+  sy: number,
+): EntityId {
+  // Patients already claimed by an in-flight treat job.
+  const claimed = new Set<EntityId>();
+  const jEnts = sim.job.entities;
+  for (let i = 0; i < jEnts.length; i++) {
+    const j = sim.job.get(jEnts[i]);
+    if (!j || j.kind !== "treat") continue;
+    if (j.partnerId !== undefined && jEnts[i] !== medic) {
+      claimed.add(j.partnerId);
+    }
+  }
+  let best = -1;
+  let bestDist = Infinity;
+  const sick = sim.disease.entities;
+  for (let i = 0; i < sick.length; i++) {
+    const id = sick[i];
+    if (id === medic) continue; // a medic can't treat themselves
+    if (claimed.has(id)) continue;
+    const ppos = sim.position.get(id);
+    if (!ppos) continue;
+    if (sim.grid.getTile(ppos.x, ppos.y) !== TileType.HospitalBed) continue;
+    const dx = ppos.x - sx;
+    const dy = ppos.y - sy;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist || (d === bestDist && id < best)) {
+      best = id;
+      bestDist = d;
+    }
+  }
+  return best;
+}
 
 /**
  * Find the nearest walkable cavity tile inside a *neglected* completed room
@@ -889,10 +986,16 @@ function findRestSpot(sim: SimWorld, sx: number, sy: number): { x: number; y: nu
 }
 
 /**
- * Find another idle dwarf nearby (no current job) to socialise with.
- * Returns -1 if none found.
+ * Find a nearby dwarf to socialise with. By default ("strict") only
+ * idle dwarves count — chat is leisure, leisure shouldn't interrupt
+ * work. When `lenient` is true (called from the critical-social
+ * branch in chooseTask), accept any nearby dwarf whose current job
+ * isn't a survival or combat one. The chooser walks over and gets
+ * social ticks regardless of what the partner is doing — both
+ * dwarves' social bumps each tick of progressSocialise. Returns -1
+ * if no suitable partner is in range.
  */
-function findSocialPartner(sim: SimWorld, self: EntityId, sx: number, sy: number): EntityId {
+function findSocialPartner(sim: SimWorld, self: EntityId, sx: number, sy: number, lenient: boolean): EntityId {
   const ents = sim.dwarf.entities;
   // Iterate dense array for determinism.
   let best = -1;
@@ -900,7 +1003,16 @@ function findSocialPartner(sim: SimWorld, self: EntityId, sx: number, sy: number
   for (let i = 0; i < ents.length; i++) {
     const other = ents[i];
     if (other === self) continue;
-    if (sim.job.has(other)) continue; // already busy
+    const otherJob = sim.job.get(other);
+    if (otherJob) {
+      if (!lenient) continue; // strict mode: any job disqualifies
+      // Lenient mode: skip survival / combat / shelter jobs but
+      // accept work jobs (mine, haul, craft, tend, maintain, etc.).
+      const k = otherJob.kind;
+      if (k === "eat" || k === "drink" || k === "sleep" || k === "shelter" || k === "engage" || k === "treat") {
+        continue;
+      }
+    }
     const op = sim.position.get(other);
     if (!op) continue;
     const dx = op.x - sx;

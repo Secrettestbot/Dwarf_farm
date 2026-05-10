@@ -159,7 +159,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     cameraX: input.cameraX,
     cameraY: input.cameraY,
     zoomIndex: input.zoomIndex,
-    events: sim.events.events.map((e) => ({ tick: e.tick, category: e.category, text: e.text })),
+    events: sim.events.events.map((e) => ({ tick: e.tick, category: e.category, text: e.text, x: e.x, y: e.y })),
     stockpile: {
       ore: sim.stockpile.ore,
       stone: sim.stockpile.stone,
@@ -209,6 +209,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
     mayorName: sim.mayorName || undefined,
     kingName: sim.kingName || undefined,
+    grudges: sim.grudges.size > 0
+      ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick }))
+      : undefined,
   };
 }
 
@@ -420,11 +423,14 @@ export function restore(save: SaveV1): SimWorld {
   // Event log + stockpile.
   if (save.events) {
     for (const e of save.events) {
-      sim.events.events.push({
+      const ev: import("../sim/events/eventLog").LogEvent = {
         tick: e.tick,
         category: e.category as import("../sim/events/eventLog").EventCategory,
         text: e.text,
-      });
+      };
+      if (e.x !== undefined) ev.x = e.x;
+      if (e.y !== undefined) ev.y = e.y;
+      sim.events.events.push(ev);
     }
   }
   if (save.stockpile) {
@@ -495,6 +501,11 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.mayorName) sim.mayorName = save.mayorName;
   if (save.kingName) sim.kingName = save.kingName;
+  if (save.grudges) {
+    for (const g of save.grudges) {
+      sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick });
+    }
+  }
 
   // Restore dwarf HP if it was saved (otherwise spawnDwarf gave them
   // default 100/100 above).

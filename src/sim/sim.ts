@@ -890,11 +890,11 @@ function diseaseSystem(sim: SimWorld): void {
         killDwarf(sim, id, def.label);
         continue;
       }
-      // Recovery: if the dwarf is on a Hospital cot (the room marker
-      // for medical care) and not actively walking somewhere else,
-      // they are considered "in treatment" — a medic on duty applies
-      // their skill toward the cure. Sleeping in a regular bed gives
-      // a small recovery bonus too.
+      // Passive recovery: lying on a Hospital cot, or just sleeping
+      // anywhere, accrues a slow tick of treatProgress on its own.
+      // The medic-driven boost — bigger numbers — comes from a
+      // dwarf with an active `treat` job standing adjacent, awarded
+      // by progressTreat itself rather than here.
       const pos = sim.position.get(id);
       const job = sim.job.get(id);
       const path = sim.pathing.get(id);
@@ -903,20 +903,11 @@ function diseaseSystem(sim: SimWorld): void {
       const stationary = !path || path.pathIndex >= path.path.length - 1;
       let progress = 0;
       if (onCot && stationary) {
-        const medic = findBestMedic(sim);
-        if (medic !== -1 && medic !== id) {
-          const medDw = sim.dwarf.get(medic);
-          const medSkill = medDw?.skills.medicine ?? 1;
-          // Skilled medic: 1 progress/hour. Higher skills speed up.
-          progress = 1 + Math.floor((medSkill - 1) / 4);
-          // Award medicine XP for active treatment.
-          awardSkillXp(sim, medic, "medicine", 1);
-        } else {
-          // Lying on the cot without a medic is still better than nothing.
-          progress = 1;
-        }
+        // Lying on the cot is the medical baseline — better than a
+        // regular bed because the room is set up for it.
+        progress = 1;
       } else if (sleeping) {
-        // A bed (any kind) helps a little even without a medic.
+        // A bed (any kind) helps a little.
         progress = 1;
       }
       d.treatProgress += progress;
@@ -999,6 +990,44 @@ const ARGUMENT_MORALE_HIT = 5;
 const BRAWL_TANTRUM_CHANCE = 0.5;
 const BRAWL_DAMAGE = 4;
 const BRAWL_MORALE_HIT = 10;
+/** Grudge mechanics — every argument adds 1 to the pair's grudge,
+ * every brawl adds 2. The recurring chance of arguing scales with
+ * grudge so a feuding pair argues more often, and once a grudge
+ * crosses GRUDGE_BRAWL_THRESHOLD an argument may escalate into a
+ * brawl even without a tantrum. Grudges decay 1 point per
+ * GRUDGE_DECAY_TICKS of quiet between this pair. */
+const GRUDGE_PER_ARGUMENT = 1;
+const GRUDGE_PER_BRAWL = 2;
+const GRUDGE_ARGUMENT_SCALE = 0.15; // each grudge point adds 15% to the daily argument chance
+const GRUDGE_BRAWL_THRESHOLD = 4;
+const GRUDGE_BRAWL_BASE_CHANCE = 0.2;
+const GRUDGE_DECAY_TICKS = 30 * TICKS_PER_DAY; // an in-game month of quiet shaves a point
+
+/** Canonical key for a grudge between two dwarves. Smaller id first
+ * so (a,b) and (b,a) resolve to the same entry. */
+function grudgeKey(a: EntityId, b: EntityId): string {
+  return a < b ? `${a}:${b}` : `${b}:${a}`;
+}
+
+/** Read the current grudge count between two dwarves, applying any
+ * pending decay since the last incident. Decay is computed lazily on
+ * read so a thousand peaceful pairs don't burn ticks every day. */
+export function grudgeCount(sim: SimWorld, a: EntityId, b: EntityId): number {
+  const entry = sim.grudges.get(grudgeKey(a, b));
+  if (!entry) return 0;
+  const elapsed = sim.tick - entry.lastIncidentTick;
+  const decayed = Math.floor(elapsed / GRUDGE_DECAY_TICKS);
+  return Math.max(0, entry.count - decayed);
+}
+
+/** Bump a pair's grudge by `delta` and record this tick as the most
+ * recent incident. Lazy-decays first so a stale entry doesn't accrue
+ * indefinitely. */
+function bumpGrudge(sim: SimWorld, a: EntityId, b: EntityId, delta: number): void {
+  const key = grudgeKey(a, b);
+  const cur = grudgeCount(sim, a, b);
+  sim.grudges.set(key, { count: cur + delta, lastIncidentTick: sim.tick });
+}
 
 function argumentSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
@@ -1034,48 +1063,83 @@ function argumentSystem(sim: SimWorld): void {
       const bAntag = otherDw.traitIds.includes("antagonistic");
       const inTantrumA = sim.tantrum.has(id);
       const inTantrumB = sim.tantrum.has(other);
+      const grudge = grudgeCount(sim, id, other);
       // Tantrum brawl: one of the pair is broken and lashes out.
       if (inTantrumA || inTantrumB) {
         if (sim.aiRng.nextFloat() < BRAWL_TANTRUM_CHANCE) {
           const aggressor = inTantrumA ? id : other;
           const victim = inTantrumA ? other : id;
-          const aDw = sim.dwarf.get(aggressor)!;
-          const vDw = sim.dwarf.get(victim)!;
-          const vHp = sim.health.get(victim);
-          if (vHp) vHp.hp = Math.max(0, vHp.hp - BRAWL_DAMAGE);
-          const aN = sim.needs.get(aggressor);
-          const vN = sim.needs.get(victim);
-          if (aN) aN.morale = Math.max(0, aN.morale - BRAWL_MORALE_HIT);
-          if (vN) vN.morale = Math.max(0, vN.morale - BRAWL_MORALE_HIT);
-          sim.events.add(
-            sim.tick,
-            "crisis",
-            `${aDw.name} strikes ${vDw.name} in their fury. The colony watches in silence.`,
-          );
-          // If the victim dropped to zero HP, the brawl killed them.
-          // killDwarf records it with a specific cause so the
-          // chronicle reads as homicide rather than vague death.
-          if (vHp && vHp.hp <= 0) {
-            killDwarf(sim, victim, `struck dead by ${aDw.name}`);
-          }
+          resolveBrawl(sim, aggressor, victim, "fury");
         }
         continue;
       }
-      // Argument: at least one Antagonistic, regular morale hit.
-      if (aAntag || bAntag) {
-        if (sim.aiRng.nextFloat() < ARGUMENT_DAILY_CHANCE) {
+      // Grudge brawl: a long-feuding pair throws hands without a
+      // tantrum once the ledger crosses the threshold.
+      if (grudge >= GRUDGE_BRAWL_THRESHOLD) {
+        const brawlChance = GRUDGE_BRAWL_BASE_CHANCE + (grudge - GRUDGE_BRAWL_THRESHOLD) * 0.05;
+        if (sim.aiRng.nextFloat() < brawlChance) {
+          // The dwarf with lower morale throws the first punch —
+          // matches the lived experience of a brawl breaking out.
+          const aN = sim.needs.get(id);
+          const bN = sim.needs.get(other);
+          const aMorale = aN?.morale ?? 50;
+          const bMorale = bN?.morale ?? 50;
+          const aggressor = aMorale <= bMorale ? id : other;
+          const victim = aggressor === id ? other : id;
+          resolveBrawl(sim, aggressor, victim, "grudge");
+          continue;
+        }
+      }
+      // Argument: needs at least an Antagonistic dwarf or an existing
+      // grudge to be eligible. Grudge inflates the chance so a
+      // feuding pair argues weekly, then daily, then escalates.
+      const eligibleForArgument = aAntag || bAntag || grudge > 0;
+      if (eligibleForArgument) {
+        const chance = ARGUMENT_DAILY_CHANCE * (1 + GRUDGE_ARGUMENT_SCALE * grudge);
+        if (sim.aiRng.nextFloat() < chance) {
           const aN = sim.needs.get(id);
           const bN = sim.needs.get(other);
           if (aN) aN.morale = Math.max(0, aN.morale - ARGUMENT_MORALE_HIT);
           if (bN) bN.morale = Math.max(0, bN.morale - ARGUMENT_MORALE_HIT);
-          sim.events.add(
-            sim.tick,
-            "social",
-            `${dw.name} and ${otherDw.name} argue heatedly. Old grievances surface.`,
-          );
+          bumpGrudge(sim, id, other, GRUDGE_PER_ARGUMENT);
+          // Wording shifts as grievances pile up — the colony's
+          // chronicle reads differently for a one-off snip vs. a
+          // years-deep feud.
+          const text = grudge >= 6
+            ? `${dw.name} and ${otherDw.name} clash again. The whole colony has stopped pretending the feud isn't there.`
+            : grudge >= 2
+              ? `${dw.name} and ${otherDw.name} argue once more. Old grievances surface.`
+              : `${dw.name} and ${otherDw.name} argue heatedly.`;
+          sim.events.add(sim.tick, "social", text);
         }
       }
     }
+  }
+}
+
+/** Apply a brawl outcome between two dwarves: HP drain on the
+ * victim, morale hit on both, chronicle line, and grudge bump.
+ * Triggers killDwarf if the victim's HP reaches zero. The cause
+ * string lets the chronicle distinguish a tantrum strike from a
+ * long-grudge fight. */
+function resolveBrawl(sim: SimWorld, aggressor: EntityId, victim: EntityId, kind: "fury" | "grudge"): void {
+  const aDw = sim.dwarf.get(aggressor);
+  const vDw = sim.dwarf.get(victim);
+  if (!aDw || !vDw) return;
+  const vHp = sim.health.get(victim);
+  if (vHp) vHp.hp = Math.max(0, vHp.hp - BRAWL_DAMAGE);
+  const aN = sim.needs.get(aggressor);
+  const vN = sim.needs.get(victim);
+  if (aN) aN.morale = Math.max(0, aN.morale - BRAWL_MORALE_HIT);
+  if (vN) vN.morale = Math.max(0, vN.morale - BRAWL_MORALE_HIT);
+  bumpGrudge(sim, aggressor, victim, GRUDGE_PER_BRAWL);
+  const line = kind === "fury"
+    ? `${aDw.name} strikes ${vDw.name} in their fury. The colony watches in silence.`
+    : `${aDw.name} swings on ${vDw.name}. The grudge between them spills into blood.`;
+  const aPos = sim.position.get(aggressor);
+  sim.events.add(sim.tick, "crisis", line, aPos ? { x: aPos.x, y: aPos.y } : undefined);
+  if (vHp && vHp.hp <= 0) {
+    killDwarf(sim, victim, `struck dead by ${aDw.name}`);
   }
 }
 
@@ -2317,7 +2381,16 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   if (sim.grid.isWalkable(pos.x, pos.y)) {
     sim.grid.setTile(pos.x, pos.y, TileType.Memorial);
   }
-  sim.events.add(sim.tick, "social", narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause));
+  // Violent deaths fire as crisis so the player gets a notification;
+  // peaceful deaths (old age, disease) stay social so the chronicle
+  // is the place to read them. The position lets the UI offer a
+  // camera-jump to the death tile.
+  sim.events.add(
+    sim.tick,
+    violentCause ? "crisis" : "social",
+    narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause),
+    { x: pos.x, y: pos.y },
+  );
   // Burial: if a Cemetery exists with an empty Grave plot, mark a
   // Headstone there and register the dead dwarf in the colony's
   // gravestones registry. The Memorial tile on the spot they fell
@@ -2355,6 +2428,13 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
   const carrying = sim.carrying.get(e);
   if (carrying) {
     sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+  }
+  // Prune grudge entries involving this dwarf — the feud dies with
+  // them. The other party feels relieved, not vindicated; we don't
+  // bump morale here because grief from buryDwarf already runs.
+  for (const key of sim.grudges.keys()) {
+    const [a, b] = key.split(":").map(Number);
+    if (a === e || b === e) sim.grudges.delete(key);
   }
   // Remove from the ECS, which strips all component stores.
   sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession, sim.tantrum, sim.disease]);
@@ -2977,6 +3057,9 @@ function workSystem(sim: SimWorld): void {
       case "visit_grave":
         progressVisitGrave(sim, e, job, pos);
         break;
+      case "treat":
+        progressTreat(sim, e, job, pos);
+        break;
     }
   }
 }
@@ -3032,6 +3115,48 @@ function progressVisitGrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos:
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
+  }
+}
+
+/** Stand adjacent to a sick patient on a Hospital cot and tend them.
+ * The medic must remain in range; if the patient leaves the cot or
+ * recovers (or dies), the job ends. The disease system credits the
+ * medic's supervised treatProgress on its hourly tick by reading
+ * `treaterId` off the patient's disease component, which we maintain
+ * here for the duration of the job.
+ *
+ * Job progress also doubles as the medic's medicine XP timer — once
+ * an in-game hour of supervised work, +1 XP. */
+function progressTreat(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  const patient = job.partnerId;
+  // Bail if the patient was lost in any way the disease system would
+  // also bail on — death, removal of disease, no longer on the cot.
+  if (patient === undefined || !sim.ecs.isAlive(patient) || !sim.disease.has(patient)) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  const ppos = sim.position.get(patient);
+  if (!ppos || sim.grid.getTile(ppos.x, ppos.y) !== TileType.HospitalBed) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // Medic must be adjacent — otherwise we're still walking up and
+  // give credit for nothing this tick.
+  const dx = Math.abs(pos.x - ppos.x);
+  const dy = Math.abs(pos.y - ppos.y);
+  if (dx > 1 || dy > 1) return;
+  job.progress++;
+  // Once per in-game hour, advance the patient's treatment.
+  if (job.progress % TICKS_PER_HOUR === 0) {
+    const dw = sim.dwarf.get(e);
+    const skill = dw?.skills.medicine ?? 1;
+    const d = sim.disease.get(patient);
+    if (d) {
+      d.treatProgress += 1 + Math.floor((skill - 1) / 4);
+    }
+    awardSkillXp(sim, e, "medicine", 1);
   }
 }
 

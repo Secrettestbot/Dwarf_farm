@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat";
     targetX: number;
     targetY: number;
     progress: number;
@@ -149,6 +149,11 @@ export interface SavedLogEvent {
   tick: number;
   category: string;
   text: string;
+  /** Optional tile coordinates the event happened at — added so the
+   * notification UI's camera-jump survives a save/restore. Older
+   * saves without these fields restore as non-spatial events. */
+  x?: number;
+  y?: number;
 }
 
 export interface SavedStockpile {
@@ -285,6 +290,10 @@ export interface SaveV1 {
   mayorName?: string;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
+  /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
+   * count rises with each spat. Round-trips so a feud survives a
+   * reload (or a worker catch-up) instead of resetting to peace. */
+  grudges?: Array<{ key: string; count: number; lastIncidentTick: number }>;
 }
 
 export const CURRENT_SAVE_VERSION = 2 as const;

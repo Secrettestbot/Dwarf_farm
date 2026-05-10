@@ -253,7 +253,7 @@ export type DiseaseKind =
    * drain; the colony's most lethal disease without medicine. */
   | "wound_sickness";
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave";
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat";
 
 export interface JobAssignment {
   kind: JobKind;
@@ -262,6 +262,6 @@ export interface JobAssignment {
   targetY: number;
   // Progress in ticks toward completion. Per-kind thresholds in sim.ts.
   progress: number;
-  /** For socialise jobs, the partner dwarf entity id. */
+  /** For socialise + treat jobs, the partner / patient dwarf entity id. */
   partnerId?: number;
 }

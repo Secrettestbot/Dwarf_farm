@@ -113,8 +113,12 @@ export interface Stockpile {
   cloth: number;
 }
 
-const STARTER_FOOD = 1000;
-const STARTER_DRINK = 1000;
+// Starter caches sized to give the colony comfortable runway for
+// research → library → brewery → stable production. The earlier
+// 1000 each was tight when migration boosted population past ~20
+// before the brewery + farms could keep up.
+const STARTER_FOOD = 2000;
+const STARTER_DRINK = 2000;
 
 /**
  * Aggregate of everything the deterministic tick function needs. The same
@@ -287,6 +291,14 @@ export class SimWorld {
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */
   voidShadesSlain = 0;
+
+  /** Pairwise grudge ledger keyed by `${minId}:${maxId}` (smaller
+   * entity id first). Each argument bumps the count by 1, each brawl
+   * by 2. The argument system reads back the count so a feuding pair
+   * argues more frequently and can escalate to a brawl even without
+   * a tantrum. Grudges decay slowly so a one-off spat doesn't follow
+   * the dwarves forever. Round-trips through save. */
+  grudges: Map<string, { count: number; lastIncidentTick: number }> = new Map();
 
   // Total ticks elapsed (kept here so the worker doesn't need a separate clock).
   tick = 0;

@@ -18,6 +18,10 @@ export interface HudHandlers {
   onShowTutorial(): void;
   /** Open the history panel — artifacts, books, graves. */
   onShowHistory(): void;
+  /** Open the research panel — research tree status. */
+  onShowResearch(): void;
+  /** Open the population panel — every living dwarf. */
+  onShowPopulation(): void;
   /** Player wants to rename the fortress; the host pops a prompt
    * and, on a non-empty answer, calls `setFortressName`. */
   onRenameFortress(): void;
@@ -142,6 +146,24 @@ export class Hud {
     historyButton.title = "Browse the colony's artifacts, books, and graves";
     historyButton.addEventListener("click", () => handlers.onShowHistory());
     tools.appendChild(historyButton);
+
+    // Research — tier-by-tier view of completed topics and current
+    // study. Cross-references books to show which scholar wrote
+    // each topic up.
+    const researchButton = document.createElement("button");
+    researchButton.className = "btn";
+    researchButton.textContent = "Research";
+    researchButton.title = "Browse the colony's research progress";
+    researchButton.addEventListener("click", () => handlers.onShowResearch());
+    tools.appendChild(researchButton);
+
+    // Population — every living dwarf, click to inspect + camera-jump.
+    const populationButton = document.createElement("button");
+    populationButton.className = "btn";
+    populationButton.textContent = "Population";
+    populationButton.title = "Browse the colony's living dwarves";
+    populationButton.addEventListener("click", () => handlers.onShowPopulation());
+    tools.appendChild(populationButton);
 
     // Tutorial replay — opens the new-player overlay any time.
     const helpButton = document.createElement("button");
