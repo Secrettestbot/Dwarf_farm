@@ -117,11 +117,18 @@ export class NotificationCenter {
   }
 }
 
-/** Decide whether an event deserves a toast. Crisis and milestone
- * categories surface always; founding events surface too because
- * they're rare and important. Everything else stays in the chronicle. */
+/** Decide whether an event deserves a toast. Crisis, milestone,
+ * founding, and discovery categories all surface — they're the
+ * landmark moments the player would otherwise scroll past in the
+ * chronicle. Discovery fires for first ore strike, cavern reveals,
+ * caravan arrivals, etc. — all rare enough that the toast's
+ * signal-to-noise stays high. Everything else stays in the
+ * chronicle. */
 function shouldToast(e: LogEvent): boolean {
-  return e.category === "crisis" || e.category === "milestone" || e.category === "founding";
+  return e.category === "crisis"
+    || e.category === "milestone"
+    || e.category === "founding"
+    || e.category === "discovery";
 }
 
 function categoryLabel(c: string): string {

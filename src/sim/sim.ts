@@ -1813,10 +1813,15 @@ function tradeSystem(sim: SimWorld): void {
   // Award XP to the broker.
   if (bestBroker !== -1) awardSkillXp(sim, bestBroker, "trading", 1);
   const brokerName = bestBroker !== -1 ? sim.dwarf.get(bestBroker)?.name ?? "the broker" : "the broker";
+  // Caravan arrivals fire as "discovery" so the notification toast
+  // surfaces them — visiting traders are infrequent and easy to
+  // miss in the chronicle scroll. Position is the depot tile so
+  // the toast's Jump-to button pans the camera to the wagons.
   sim.events.add(
     sim.tick,
-    "social",
+    "discovery",
     `A caravan from ${kingdom} arrives at the Trade Depot. ${brokerName} negotiates ${gain} ${importKind} for ${cost} ${offer.resource}.`,
+    { x: depot.cx, y: depot.cy },
   );
 }
 
