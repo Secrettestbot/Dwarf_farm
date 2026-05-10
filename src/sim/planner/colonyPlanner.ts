@@ -631,16 +631,27 @@ export class ColonyPlanner {
   private wantsStairwell(): boolean {
     if ((this.activeByKind()["stairwell"] ?? 0) > 0) return false;
     const stairwellTotal = this.totalOfKind("stairwell");
-    const completedRooms =
-      (this.completedByKind["bedroom"] ?? 0) +
-      (this.completedByKind["dining_hall"] ?? 0) +
-      (this.completedByKind["stockpile"] ?? 0) +
-      (this.completedByKind["mine"] ?? 0) +
-      (this.completedByKind["kitchen"] ?? 0) +
-      (this.completedByKind["brewery"] ?? 0) +
-      (this.completedByKind["smelter"] ?? 0) +
-      (this.completedByKind["forge"] ?? 0);
-    const stairwellTarget = Math.floor(completedRooms / 5);
+    // Count dug rooms — anything past the digging stage. A bedroom
+    // waiting on a bed delivery still counts toward the colony's
+    // growth: the cavity exists, the architect should keep adding
+    // stairwells in step with the colony's footprint.
+    let dugRooms = 0;
+    for (const b of this.blueprints) {
+      if (b.status !== "complete" && b.status !== "needs_furnishing") continue;
+      switch (b.kind) {
+        case "bedroom":
+        case "dining_hall":
+        case "stockpile":
+        case "mine":
+        case "kitchen":
+        case "brewery":
+        case "smelter":
+        case "forge":
+          dugRooms++;
+          break;
+      }
+    }
+    const stairwellTarget = Math.floor(dugRooms / 5);
     return stairwellTotal < stairwellTarget;
   }
 
