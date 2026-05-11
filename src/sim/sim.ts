@@ -4703,19 +4703,25 @@ function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void
     return;
   }
   job.progress++;
-  // Both dwarves gain social each tick of conversation. Trait-driven
-  // appetite — Gregarious gains 2× from chat, Solitary gains nothing.
+  // Both dwarves' social need refills each tick of conversation —
+  // unconditionally, because being around other dwarves IS what
+  // fills the social need. The trait-driven `socialMoraleScale`
+  // only modulates the morale lift on top: Gregarious doubles the
+  // morale boost, Solitary skips it entirely. Earlier this scale
+  // also gated the social-need refill, which trapped Solitary
+  // dwarves in an infinite chat loop — their social would stay low,
+  // chooseTask kept picking socialise, but the gain was 0 so they
+  // never recovered.
   const myDw = sim.dwarf.get(e);
   const myEffects = myDw ? effectsFor(myDw.traitIds) : null;
-  myNeeds.social = Math.min(100, myNeeds.social + 2 * (myEffects?.socialMoraleScale ?? 1));
-  // A pleasant chat also nudges morale upward.
+  myNeeds.social = Math.min(100, myNeeds.social + 2);
   myNeeds.morale = Math.min(100, myNeeds.morale + 1 * (myEffects?.socialMoraleScale ?? 1));
   if (job.partnerId !== undefined) {
     const partnerNeeds = sim.needs.get(job.partnerId);
     const partnerDw = sim.dwarf.get(job.partnerId);
     const partnerEffects = partnerDw ? effectsFor(partnerDw.traitIds) : null;
     if (partnerNeeds) {
-      partnerNeeds.social = Math.min(100, partnerNeeds.social + 2 * (partnerEffects?.socialMoraleScale ?? 1));
+      partnerNeeds.social = Math.min(100, partnerNeeds.social + 2);
       partnerNeeds.morale = Math.min(100, partnerNeeds.morale + 1 * (partnerEffects?.socialMoraleScale ?? 1));
     }
   }
