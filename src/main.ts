@@ -146,6 +146,44 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
       age: f.age,
     });
   }
+  // Starter equipment — the founders arrive with one bed each
+  // (placed as items at spawn so the first bedrooms can be
+  // furnished without first standing up a carpenter) and a couple
+  // of brewing barrels (one for the first brewery, one for an
+  // expansion later). Plus a small planks + wood reserve so the
+  // carpenter can keep crafting furniture for migrants without
+  // running dry on day one.
+  const starterBeds = founders.length;
+  for (let i = 0; i < starterBeds; i++) {
+    sim.spawnItem({ kind: "bed", x: spawn.x, y: spawn.y });
+  }
+  for (let i = 0; i < 2; i++) {
+    sim.spawnItem({ kind: "barrel", x: spawn.x, y: spawn.y });
+  }
+  // One pre-built table for the first dining hall; one pre-built
+  // bin so the first stockpile is operational on day one too;
+  // one pre-built stove for the first kitchen. The founders bring
+  // a small starter kit of finished pieces; the rest the colony
+  // has to craft as it grows.
+  sim.spawnItem({ kind: "table", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "bin", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "stove", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "library_desk", x: spawn.x, y: spawn.y });
+  // Hospital cot + tavern counter pre-built so those rooms can stand
+  // up without waiting on a carpenter. Throne is NOT pre-built — the
+  // colony has to earn its crown via mason work later in the game.
+  sim.spawnItem({ kind: "hospital_bed", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "tavern_counter", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "armoury_rack", x: spawn.x, y: spawn.y });
+  // No pre-built pump_part — pumps are an emergency response to an
+  // aquifer breach, and the carpenter prioritises them ahead of
+  // everything else when one's needed. The colony has to actually
+  // build the part when the time comes.
+  sim.stockpile.planks += 8;
+  sim.stockpile.wood += 4;
+  // A small block cache so the mason can carve a table for a
+  // dining hall expansion before mining catches up.
+  sim.stockpile.blocks += 4;
   // Reveal the founders' immediate surroundings before the first frame so
   // the New Game screen doesn't open onto an all-black mountain.
   sim.revealAroundDwarves();

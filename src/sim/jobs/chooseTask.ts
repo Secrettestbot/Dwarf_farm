@@ -8,7 +8,7 @@ import { EntityId } from "../ecs/world";
 import { findMineTarget } from "./chooseJob";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
-import { BlueprintKind, isRoomNeglected } from "../planner/blueprint";
+import { BlueprintKind, FURNITURE_REQUIREMENTS, isRoomNeglected } from "../planner/blueprint";
 import { isShelterMode } from "../emergency";
 import { recipeFor } from "../planner/recipes";
 
@@ -276,10 +276,25 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
           return { kind: "haul" as JobKind, targetX: rack.x, targetY: rack.y, progress: 1 };
         }
       }
+      // Furniture items (Bed, etc.) route to a needs_furnishing
+      // blueprint waiting on that exact item kind. Falls through to
+      // the regular stockpile drop if no such blueprint exists.
+      const furn = findFurnitureRoute(sim, carrying.kind, pos.x, pos.y);
+      if (furn) {
+        return { kind: "haul" as JobKind, targetX: furn.x, targetY: furn.y, progress: 1 };
+      }
       const drop = findStockpileDrop(sim, pos.x, pos.y);
       if (drop) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
       }
+      // Nothing wants this item right now. Drop it on the floor at
+      // the current tile so the dwarf is free to pick up other
+      // things — without this every hauler ends up stuck carrying
+      // a stone or a barrel when the destination room hasn't been
+      // built yet, and the bin / barrel / table that WOULD
+      // complete that room can't be picked up.
+      sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+      sim.carrying.remove(e);
     } else {
       const haul = findHaulTarget(sim, e, pos.x, pos.y);
       if (haul) {
@@ -873,6 +888,81 @@ function findWorkshopWantingInput(
   return best ? { x: best.x, y: best.y } : null;
 }
 
+/** True if this tile already holds furniture (Bed, BrewingBarrel)
+ * or a workshop station — both reserve the cell from accepting a
+ * new furniture delivery. */
+function isFurnitureOrStationTile(t: number): boolean {
+  return (
+    t === TileType.Bed
+    || t === TileType.BrewingBarrel
+    || t === TileType.Stove
+    || t === TileType.Table
+    || t === TileType.Bin
+    || t === TileType.HospitalBed
+    || t === TileType.TavernCounter
+    || t === TileType.BreweryStation
+    || t === TileType.KitchenStation
+    || t === TileType.SmelterStation
+    || t === TileType.ForgeStation
+    || t === TileType.MasonStation
+    || t === TileType.JewellerStation
+    || t === TileType.CarpenterStation
+    || t === TileType.KilnStation
+    || t === TileType.TannerStation
+    || t === TileType.LoomStation
+    || t === TileType.MagmaForgeStation
+    || t === TileType.PumpStation
+    || t === TileType.LibraryDesk
+    || t === TileType.ArmouryRack
+    || t === TileType.Throne
+    || t === TileType.Door
+  );
+}
+
+/** Find a needs_furnishing blueprint that wants the carried item.
+ * Walks every cavity tile of every blueprint with a remaining
+ * requirement matching `kind`, returns the closest. The hauler
+ * walks onto that cavity tile; progressHaul recognises the
+ * delivery and stamps the corresponding furniture tile. */
+function findFurnitureRoute(sim: SimWorld, kind: string, sx: number, sy: number): { x: number; y: number } | null {
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "needs_furnishing") continue;
+    const reqs = FURNITURE_REQUIREMENTS[b.kind];
+    if (!reqs) continue;
+    let stillNeeds = false;
+    for (const r of reqs) {
+      const placed = b.furniturePlaced?.[r.item] ?? 0;
+      if (r.item === kind && placed < r.count) {
+        stillNeeds = true;
+        break;
+      }
+    }
+    if (!stillNeeds) continue;
+    // Pick a cavity tile that's walkable (already dug) and not
+    // already occupied by furniture or a workshop station. Closest
+    // wins; deterministic tiebreak by (y, x).
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (!sim.grid.isWalkable(x, y)) continue;
+      if (isFurnitureOrStationTile(sim.grid.getTile(x, y))) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
 /** Find the nearest walkable cell inside a completed stockpile to drop a
  * carried item. Falls back to standing-on-the-spot delivery (item just
  * gets credited to the global counter) if no stockpile exists yet. */
@@ -1025,7 +1115,7 @@ function findCraftTarget(sim: SimWorld, sx: number, sy: number): { x: number; y:
       if (sim.grid.getTile(x, y) === recipe.station) stationCells.push({ x, y });
     }
     if (stationCells.length === 0) continue;
-    const stockpileHasInput = sim.stockpile[recipe.inputKind] >= recipe.inputQty;
+    const stockpileHasInput = (sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] >= recipe.inputQty;
     let routedItemPresent = false;
     if (!stockpileHasInput) {
       const ents = sim.item.entities;

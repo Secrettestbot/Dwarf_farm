@@ -251,6 +251,46 @@ function cavityContains(b: Blueprint, x: number, y: number): boolean {
   return false;
 }
 
+/** Place the room's auto-stamped infrastructure: the threshold door
+ * plus any workstation / surface tiles that aren't player-crafted
+ * furniture. Called by harvestCompleted when a blueprint enters
+ * needs_furnishing so the room is partly-built even before haulers
+ * deliver the deliverable pieces (beds, barrels, etc.). Per-kind
+ * extension lives here too — brewery gets its BreweryStation
+ * stamped up front because the brewer's workstation isn't a hauled
+ * item, just an architectural feature of the room.
+ *
+ * The list below is the inverse of FURNITURE_REQUIREMENTS: this
+ * function stamps everything the room needs that DOESN'T arrive
+ * via the hauler pipeline. */
+export function prepareInfrastructureForFurnishing(grid: TileGrid, b: Blueprint): void {
+  if (isMaintainable(b.kind)) placeDoorAtEntrance(grid, b);
+  switch (b.kind) {
+    case "brewery":
+      // The brewer's workstation is a feature of the room shape, not
+      // a hauled item. Stamp it now so the room reads as a brewery
+      // even while it waits for its barrel.
+      stampWorkshopStationCentre(grid, b, TileType.BreweryStation);
+      break;
+    case "kitchen":
+      // Cook's workstation. Same reasoning as the brewery — the
+      // station is a fixed feature, the stove is the deliverable.
+      stampWorkshopStationCentre(grid, b, TileType.KitchenStation);
+      break;
+    // Bedroom, dining hall, stockpile: door only. The bed / table /
+    // bin is the deliverable furniture and the rest of the cavity
+    // is plain CorridorFloor until the haul lands.
+    default:
+      break;
+  }
+}
+
+function stampWorkshopStationCentre(grid: TileGrid, b: Blueprint, station: TileType): void {
+  const cx = b.originX + Math.floor(b.width / 2);
+  const cy = b.originY + Math.floor(b.height / 2);
+  if (cavityContains(b, cx, cy)) grid.setTile(cx, cy, station);
+}
+
 /** Place a Door tile at the cavity cell that has the most walkable
  * non-cavity neighbours — that's the doorway between the room and the
  * rest of the colony. If no cell has any external walkable neighbours

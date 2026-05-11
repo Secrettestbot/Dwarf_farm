@@ -131,6 +131,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       cellTendedAt: b.cellTendedAt ? Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
       quality: b.quality,
+      furniturePlaced: b.furniturePlaced,
     };
   });
 
@@ -419,12 +420,13 @@ export function restore(save: SaveV1): SimWorld {
       width: b.width,
       height: b.height,
       cavity,
-      status: b.status,
+      status: b.status as import("../sim/planner/blueprint").BlueprintStatus,
       priority: b.priority,
       createdTick: b.createdTick,
       cellTendedAt: b.cellTendedAt ? Int32Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
       quality: b.quality,
+      furniturePlaced: b.furniturePlaced ? { ...b.furniturePlaced } : undefined,
     };
   });
   sim.planner.blueprints = blueprints;

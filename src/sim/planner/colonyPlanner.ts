@@ -25,8 +25,8 @@ import { TileType, tileIsGem } from "../world/tiles";
 import { Rng } from "../rng";
 import { EventLog } from "../events/eventLog";
 import { narrateBlueprintBegin, narrateBlueprintComplete } from "../events/narrator";
-import { Blueprint, BlueprintKind, isComplete, isRoomNeglected, rectCavity, QUALITY_BASE } from "./blueprint";
-import { furnishRoom } from "./furnish";
+import { Blueprint, BlueprintKind, BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, isComplete, isRoomNeglected, rectCavity, QUALITY_BASE } from "./blueprint";
+import { furnishRoom, prepareInfrastructureForFurnishing } from "./furnish";
 
 export interface PlannerContext {
   grid: TileGrid;
@@ -332,12 +332,12 @@ export class ColonyPlanner {
 
   private needsDiningHall(ctx: PlannerContext): boolean {
     if (ctx.population < 4) return false;
-    return this.maintainedAndActiveOfKind("dining_hall", ctx.tick) === 0;
+    return this.existingByKind("dining_hall") === 0;
   }
 
   private needsStockpile(ctx: PlannerContext): boolean {
     if (ctx.population < 5) return false;
-    return this.maintainedAndActiveOfKind("stockpile", ctx.tick) === 0;
+    return this.existingByKind("stockpile") === 0;
   }
 
   private needsFarm(ctx: PlannerContext): boolean {
@@ -382,7 +382,15 @@ export class ColonyPlanner {
     // dry once neglect-driven emissions added up over the long run.
     if (ctx.population < 5) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_brewing")) return false;
-    const target = Math.max(1, Math.ceil(ctx.population / 8));
+    // One brewery per ~14 dwarves. A 4-drink-per-brew brewery
+    // running steadily covers ~120 dwarves of demand, so the cap
+    // mostly exists to add a second brewery when one isn't enough
+    // to outpace consumption (the brewers themselves aren't always
+    // at the station — they get pulled to eat, sleep, etc.).
+    // Earlier ratios (1 per 7-8) were over-aggressive: many
+    // breweries × 1 food/brew × 24 brews/day drained food before
+    // farms could keep up.
+    const target = Math.max(1, Math.ceil(ctx.population / 14));
     const built = (this.completedByKind["brewery"] ?? 0) + (this.activeByKind()["brewery"] ?? 0);
     return built < target;
   }
@@ -394,7 +402,7 @@ export class ColonyPlanner {
     // ore stays raw.
     if (ctx.population < 8) return false;
     if (!(ctx.research?.completed ?? []).includes("iron_smelting")) return false;
-    return this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0;
+    return this.existingByKind("smelter") === 0;
   }
 
   private needsForge(ctx: PlannerContext): boolean {
@@ -403,15 +411,15 @@ export class ColonyPlanner {
     // know how before it builds a forge.
     if (ctx.population < 10) return false;
     if (!(ctx.research?.completed ?? []).includes("iron_toolmaking")) return false;
-    if (this.maintainedAndActiveOfKind("smelter", ctx.tick) === 0) return false;
-    return this.maintainedAndActiveOfKind("forge", ctx.tick) === 0;
+    if (this.existingByKind("smelter") === 0) return false;
+    return this.existingByKind("forge") === 0;
   }
 
   private needsTradeDepot(ctx: PlannerContext): boolean {
     // Caravans only show up once the colony is large enough to be worth
     // visiting — and only one depot per fortress.
     if (ctx.population < 6) return false;
-    return this.maintainedAndActiveOfKind("trade_depot", ctx.tick) === 0;
+    return this.existingByKind("trade_depot") === 0;
   }
 
   private needsLibrary(ctx: PlannerContext): boolean {
@@ -432,7 +440,7 @@ export class ColonyPlanner {
     // soldiers' tools have somewhere to live. One per fortress.
     if (ctx.population < 7) return false;
     if (!(ctx.research?.completed ?? []).includes("armoury_basics")) return false;
-    return this.maintainedAndActiveOfKind("armoury", ctx.tick) === 0;
+    return this.existingByKind("armoury") === 0;
   }
 
   private needsThroneRoom(ctx: PlannerContext): boolean {
@@ -443,7 +451,7 @@ export class ColonyPlanner {
     // how to lay a proper hall. One per fortress.
     if (ctx.population < 30) return false;
     if (!(ctx.research?.completed ?? []).includes("masonry_and_mortaring")) return false;
-    return this.maintainedAndActiveOfKind("throne_room", ctx.tick) === 0;
+    return this.existingByKind("throne_room") === 0;
   }
 
   private needsPumpStation(ctx: PlannerContext): boolean {
@@ -454,7 +462,7 @@ export class ColonyPlanner {
     if (ctx.population < 5) return false;
     if (!ctx.aquiferBreached) return false;
     if (!(ctx.research?.completed ?? []).includes("hydraulic_basics")) return false;
-    return this.maintainedAndActiveOfKind("pump_station", ctx.tick) === 0;
+    return this.existingByKind("pump_station") === 0;
   }
 
   private needsMason(ctx: PlannerContext): boolean {
@@ -464,7 +472,7 @@ export class ColonyPlanner {
     // turning rough stone into blocks.
     if (ctx.population < 6) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_stonecutting")) return false;
-    return this.maintainedAndActiveOfKind("mason", ctx.tick) === 0;
+    return this.existingByKind("mason") === 0;
   }
 
   private needsJeweller(ctx: PlannerContext): boolean {
@@ -473,7 +481,7 @@ export class ColonyPlanner {
     // before any gems exist would be ornament for ornament's sake.
     if (ctx.population < 10) return false;
     if (!(ctx.research?.completed ?? []).includes("gem_cutting")) return false;
-    return this.maintainedAndActiveOfKind("jeweller", ctx.tick) === 0;
+    return this.existingByKind("jeweller") === 0;
   }
 
   private needsCarpenter(ctx: PlannerContext): boolean {
@@ -482,7 +490,7 @@ export class ColonyPlanner {
     // a sawyer.
     if (ctx.population < 6) return false;
     if (!(ctx.research?.completed ?? []).includes("basic_carpentry")) return false;
-    return this.maintainedAndActiveOfKind("carpenter", ctx.tick) === 0;
+    return this.existingByKind("carpenter") === 0;
   }
 
   private needsKiln(ctx: PlannerContext): boolean {
@@ -491,7 +499,7 @@ export class ColonyPlanner {
     // until the colony's a bit larger before laying one out.
     if (ctx.population < 8) return false;
     if (!(ctx.research?.completed ?? []).includes("pottery_and_kilns")) return false;
-    return this.maintainedAndActiveOfKind("kiln", ctx.tick) === 0;
+    return this.existingByKind("kiln") === 0;
   }
 
   private needsTannery(ctx: PlannerContext): boolean {
@@ -499,7 +507,7 @@ export class ColonyPlanner {
     // unlocks the future Loom for cloth. Pop ≥ 8 mirrors the kiln.
     if (ctx.population < 8) return false;
     if (!(ctx.research?.completed ?? []).includes("textile_craft")) return false;
-    return this.maintainedAndActiveOfKind("tannery", ctx.tick) === 0;
+    return this.existingByKind("tannery") === 0;
   }
 
   private needsLoom(ctx: PlannerContext): boolean {
@@ -508,7 +516,7 @@ export class ColonyPlanner {
     // a weaver.
     if (ctx.population < 6) return false;
     if (!(ctx.research?.completed ?? []).includes("rope_and_fibre")) return false;
-    return this.maintainedAndActiveOfKind("loom", ctx.tick) === 0;
+    return this.existingByKind("loom") === 0;
   }
 
   private needsHospital(ctx: PlannerContext): boolean {
@@ -516,14 +524,14 @@ export class ColonyPlanner {
     // colony's large enough to spare a medic.
     if (ctx.population < 10) return false;
     if (!(ctx.research?.completed ?? []).includes("medical_practice")) return false;
-    return this.maintainedAndActiveOfKind("hospital", ctx.tick) === 0;
+    return this.existingByKind("hospital") === 0;
   }
 
   private needsTavern(ctx: PlannerContext): boolean {
     // Tavern: a social space. No research gate — the architect drops one
     // once the colony's big enough to want a centralised hangout.
     if (ctx.population < 8) return false;
-    return this.maintainedAndActiveOfKind("tavern", ctx.tick) === 0;
+    return this.existingByKind("tavern") === 0;
   }
 
   private needsMagmaForge(ctx: PlannerContext): boolean {
@@ -533,7 +541,7 @@ export class ColonyPlanner {
     if (ctx.population < 12) return false;
     if (!(ctx.research?.completed ?? []).includes("magma_forge_craft")) return false;
     if (!this.hasReachableTileOfKind(ctx, TileType.MagmaVent, 6)) return false;
-    return this.maintainedAndActiveOfKind("magma_forge", ctx.tick) === 0;
+    return this.existingByKind("magma_forge") === 0;
   }
 
   /** True iff any tile of `kind` exists within `radius` of a
@@ -558,7 +566,7 @@ export class ColonyPlanner {
     if (ctx.population < 8) return false;
     if (!(ctx.research?.completed ?? []).includes("carpentry_mechanisms")) return false;
     if (!this.hasReachableTileOfKind(ctx, TileType.Water, 4)) return false;
-    return this.maintainedAndActiveOfKind("water_wheel", ctx.tick) === 0;
+    return this.existingByKind("water_wheel") === 0;
   }
 
   private needsCemetery(ctx: PlannerContext): boolean {
@@ -567,7 +575,7 @@ export class ColonyPlanner {
     // first old-age deaths, large enough that a one-dwarf founder
     // colony isn't carving graves first thing. No research gate.
     if (ctx.population < 6) return false;
-    return this.maintainedAndActiveOfKind("cemetery", ctx.tick) === 0;
+    return this.existingByKind("cemetery") === 0;
   }
 
   /** Lumberyards land any time a tree is reachable from the colony's
@@ -576,7 +584,7 @@ export class ColonyPlanner {
    * the research to build one, suppress new lumberyards so wood
    * doesn't pile up uselessly. */
   private wantsLumberyard(ctx: PlannerContext): boolean {
-    const hasCarpenter = this.maintainedAndActiveOfKind("carpenter", ctx.tick) > 0;
+    const hasCarpenter = this.existingByKind("carpenter") > 0;
     const willBuildOne = (ctx.research?.completed ?? []).includes("basic_carpentry");
     return hasCarpenter || willBuildOne;
   }
@@ -587,11 +595,30 @@ export class ColonyPlanner {
    * needs-X predicates so the architect doesn't expand past the colony's
    * maintenance capacity.
    */
+  /** Count blueprints of this kind in any post-dig state (digging,
+   * needs_furnishing, complete) regardless of upkeep. Use this for
+   * "is there one at all?" gates — workshops, depots, libraries —
+   * where the colony should stop after one and never re-emit a
+   * duplicate even if the existing one falls into neglect. The
+   * neglect-aware `maintainedAndActiveOfKind` still drives bedrooms
+   * and farms where neglect SHOULD trigger fresh emissions. */
+  private existingByKind(kind: BlueprintKind): number {
+    let n = 0;
+    for (const b of this.blueprints) {
+      if (b.kind !== kind) continue;
+      if (b.status === "digging" || b.status === "needs_furnishing" || b.status === "complete") n++;
+    }
+    return n;
+  }
+
   private maintainedAndActiveOfKind(kind: BlueprintKind, currentTick: number): number {
     let n = 0;
     for (const b of this.blueprints) {
       if (b.kind !== kind) continue;
-      if (b.status === "digging") {
+      if (b.status === "digging" || b.status === "needs_furnishing") {
+        // In-progress rooms (digging or waiting for furniture) count
+        // toward the active total so the planner doesn't emit a
+        // duplicate while the first one is still being completed.
         n++;
         continue;
       }
@@ -1246,7 +1273,12 @@ export class ColonyPlanner {
   private activeByKind(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const b of this.blueprints) {
-      if (b.status !== "digging") continue;
+      // A blueprint waiting on furniture (needs_furnishing) is
+      // still in flight — the cavity is dug and a hauler is en
+      // route. Count it toward the per-kind emission cap so the
+      // planner doesn't keep spawning duplicate breweries while
+      // the first one is waiting for its barrel to land.
+      if (b.status !== "digging" && b.status !== "needs_furnishing") continue;
       out[b.kind] = (out[b.kind] ?? 0) + 1;
     }
     return out;
@@ -1260,9 +1292,6 @@ export class ColonyPlanner {
     const grid = ctx.grid;
     for (const b of this.blueprints) {
       if (b.status === "digging" && isComplete(b, grid)) {
-        b.status = "complete";
-        this.completed++;
-        this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
         // A freshly-dug room counts as fully maintained — the dig itself
         // exercised every cell. The maintenance clock starts now, and
         // quality starts at the freshly-dug baseline. Later sessions
@@ -1275,11 +1304,35 @@ export class ColonyPlanner {
           const y = (c >>> 16) & 0xffff;
           grid.setDesignation(x, y, 0);
         }
-        // The room is dug; now furnish it. Beds in bedrooms, tables in
-        // dining halls, bins in stockpiles. Tunnels and mines stay bare.
-        furnishRoom(grid, b);
-        if (ctx.events) {
-          ctx.events.add(ctx.tick, "construction", narrateBlueprintComplete(ctx.rng, b, ctx.spawn.y));
+        // Two paths now. Kinds that take crafted furniture
+        // (FURNITURE_REQUIREMENTS) flip to needs_furnishing and wait
+        // for haulers to deliver beds / barrels / etc. Other kinds
+        // still auto-stamp via furnishRoom and go straight to
+        // complete — they'll get migrated to the new pipeline in
+        // follow-up commits.
+        const reqs = FURNITURE_REQUIREMENTS[b.kind];
+        if (reqs && reqs.length > 0) {
+          b.status = "needs_furnishing";
+          b.furniturePlaced = {};
+          // Place the door so the room is enclosed even before its
+          // furniture lands — a bedroom-shaped cavity with no door is
+          // just a hallway nook.
+          prepareInfrastructureForFurnishing(grid, b);
+          if (ctx.events) {
+            ctx.events.add(
+              ctx.tick,
+              "construction",
+              `${BLUEPRINT_KIND_LABELS[b.kind]} dug. Awaiting ${reqs.map((r) => `${r.count} ${r.item}`).join(", ")}.`,
+            );
+          }
+        } else {
+          b.status = "complete";
+          this.completed++;
+          this.completedByKind[b.kind] = (this.completedByKind[b.kind] ?? 0) + 1;
+          furnishRoom(grid, b);
+          if (ctx.events) {
+            ctx.events.add(ctx.tick, "construction", narrateBlueprintComplete(ctx.rng, b, ctx.spawn.y));
+          }
         }
       }
     }

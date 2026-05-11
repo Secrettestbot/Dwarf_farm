@@ -17,7 +17,7 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth";
+export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk" | "throne" | "hospital_bed" | "tavern_counter" | "armoury_rack" | "pump_part";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -158,3 +158,157 @@ export const RECIPES: Partial<Record<BlueprintKind, Recipe>> = {
 export function recipeFor(kind: BlueprintKind): Recipe | undefined {
   return RECIPES[kind];
 }
+
+/** Alternate carpenter recipe that produces a Bed item from planks.
+ * progressCraft swaps the default `carpenter` recipe for this one
+ * when a needs_furnishing bedroom is waiting AND the colony has
+ * planks to spend — so the carpenter spends idle time milling logs
+ * but switches to bed-building the moment beds are needed. */
+export const CARPENTER_BED_RECIPE: Recipe = {
+  verb: "builds a bed",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "bed",
+  outputQty: 1,
+  ticks: 90,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Alternate carpenter recipe that produces a Barrel item from planks.
+ * Swapped in when a brewery is waiting on its barrel furniture
+ * delivery. Same shape as the bed recipe — 2 planks, slow-ish build,
+ * delivered as an item so the hauler can route it. */
+export const CARPENTER_BARREL_RECIPE: Recipe = {
+  verb: "builds a barrel",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "barrel",
+  outputQty: 1,
+  ticks: 90,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Alternate carpenter recipe for stockpile bins. Swapped in when a
+ * stockpile is waiting on a bin delivery. */
+export const CARPENTER_BIN_RECIPE: Recipe = {
+  verb: "builds a storage bin",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "bin",
+  outputQty: 1,
+  ticks: 80,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Alternate mason recipe for dining-hall tables. Swapped in when a
+ * dining hall is waiting on a table delivery. Stone blocks are
+ * cheaper than other crafting inputs but the mason has to be
+ * built first (Basic Stonecutting research). */
+export const MASON_TABLE_RECIPE: Recipe = {
+  verb: "carves a table",
+  inputKind: "blocks",
+  inputQty: 2,
+  outputKind: "table",
+  outputQty: 1,
+  ticks: 100,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+/** Alternate mason recipe for kitchen stoves. Two stone blocks
+ * become a single carved hearth, slightly more involved than a
+ * table (more ticks). */
+export const MASON_STOVE_RECIPE: Recipe = {
+  verb: "builds a stove",
+  inputKind: "blocks",
+  inputQty: 2,
+  outputKind: "stove",
+  outputQty: 1,
+  ticks: 120,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+/** Alternate carpenter recipe for library desks. Two planks make a
+ * scholar's writing desk; the library needs one before research
+ * can start. */
+export const CARPENTER_LIBRARY_DESK_RECIPE: Recipe = {
+  verb: "builds a writing desk",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "library_desk",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Mason throne — a single grand carved chair for the throne room.
+ * Four blocks reflects the king's centrepiece scale. */
+export const MASON_THRONE_RECIPE: Recipe = {
+  verb: "carves a throne",
+  inputKind: "blocks",
+  inputQty: 4,
+  outputKind: "throne",
+  outputQty: 1,
+  ticks: 200,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+/** Carpenter hospital cot — same materials as a bedroom bed but a
+ * separate item so multiple cots can be tracked per hospital and
+ * the recipe-swap priority can favour hospitals over morale. */
+export const CARPENTER_HOSPITAL_BED_RECIPE: Recipe = {
+  verb: "builds a hospital cot",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "hospital_bed",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Carpenter tavern counter — bar for the tavern barkeep. */
+export const CARPENTER_TAVERN_COUNTER_RECIPE: Recipe = {
+  verb: "builds a tavern counter",
+  inputKind: "planks",
+  inputQty: 3,
+  outputKind: "tavern_counter",
+  outputQty: 1,
+  ticks: 120,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Carpenter armoury rack — wooden frame to hang weapons on.
+ * Soldier-drafting reads from the global tools counter, but the
+ * rack tile is the visible marker that the colony has armed
+ * itself. */
+export const CARPENTER_ARMOURY_RACK_RECIPE: Recipe = {
+  verb: "builds an armoury rack",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "armoury_rack",
+  outputQty: 1,
+  ticks: 90,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Carpenter pump part — wooden pipework + treadle for the pump
+ * station. The pump itself is non-functional until this lands. */
+export const CARPENTER_PUMP_PART_RECIPE: Recipe = {
+  verb: "builds a pump assembly",
+  inputKind: "planks",
+  inputQty: 3,
+  outputKind: "pump_part",
+  outputQty: 1,
+  ticks: 130,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};

@@ -12,8 +12,8 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor } from "./planner/recipes";
-import { QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE } from "./planner/recipes";
+import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
 
@@ -2386,6 +2386,197 @@ function bumpCumulative(sim: SimWorld, resource: import("./research").MaterialRe
   sim.cumulative[resource] = (sim.cumulative[resource] ?? 0) + 1;
 }
 
+/** True iff the colony has at least one bedroom waiting on a bed
+ * delivery. progressCraft consults this to decide whether the
+ * carpenter should swap to bed-building. */
+function needsBedroomFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "bedroom") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["bed"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+/** True iff the colony has at least one brewery waiting on a
+ * barrel delivery. Mirrors needsBedroomFurniture for the
+ * barrel pipeline. */
+function needsBreweryFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "brewery") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["barrel"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+/** True iff the colony has at least one stockpile waiting on a
+ * bin delivery. */
+function needsStockpileFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "stockpile") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["bin"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+/** True iff the colony has at least one dining hall waiting on a
+ * table delivery. */
+function needsDiningHallFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "dining_hall") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["table"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+/** True iff the colony has at least one kitchen waiting on a
+ * stove delivery. */
+function needsKitchenFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "kitchen") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["stove"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+/** True iff the colony has at least one library waiting on a
+ * desk delivery. */
+function needsLibraryFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "library") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["library_desk"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsThroneRoomFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "throne_room") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["throne"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsHospitalFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "hospital") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["hospital_bed"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsTavernFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "tavern") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["tavern_counter"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsArmouryFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "armoury") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["armoury_rack"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsPumpStationFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "pump_station") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["pump_part"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+/** Map from furniture-item kind to the tile that gets stamped when
+ * it's delivered. Extended as new furniture pipelines are wired up
+ * (tables for dining halls, stoves + ovens for kitchens, etc.). */
+const FURNITURE_TILE: Partial<Record<string, TileType>> = {
+  bed: TileType.Bed,
+  barrel: TileType.BrewingBarrel,
+  table: TileType.Table,
+  bin: TileType.Bin,
+  stove: TileType.Stove,
+  library_desk: TileType.LibraryDesk,
+  throne: TileType.Throne,
+  hospital_bed: TileType.HospitalBed,
+  tavern_counter: TileType.TavernCounter,
+  armoury_rack: TileType.ArmouryRack,
+  pump_part: TileType.PumpStation,
+};
+
+/** If (px, py) lies inside a needs_furnishing blueprint's cavity
+ * and that blueprint still wants `kind`, stamp the furniture tile,
+ * record the placement, and possibly flip the blueprint to
+ * complete. Returns true if a delivery was consumed. */
+function tryPlaceFurniture(sim: SimWorld, kind: string, px: number, py: number): boolean {
+  const tile = FURNITURE_TILE[kind];
+  if (tile === undefined) return false;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "needs_furnishing") continue;
+    const reqs = FURNITURE_REQUIREMENTS[b.kind];
+    if (!reqs) continue;
+    // The dwarf must be standing on a cavity tile of this blueprint.
+    if (px < b.originX || px >= b.originX + b.width) continue;
+    if (py < b.originY || py >= b.originY + b.height) continue;
+    let inCavity = false;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      if ((c & 0xffff) === px && ((c >>> 16) & 0xffff) === py) { inCavity = true; break; }
+    }
+    if (!inCavity) continue;
+    // Does this blueprint still need this kind of furniture?
+    const placed = b.furniturePlaced?.[kind] ?? 0;
+    let need = 0;
+    for (const r of reqs) if (r.item === kind) need = r.count;
+    if (placed >= need) continue;
+    // Stamp the furniture tile and record the placement.
+    sim.grid.setTile(px, py, tile);
+    if (!b.furniturePlaced) b.furniturePlaced = {};
+    b.furniturePlaced[kind] = placed + 1;
+    // All requirements satisfied? Flip to complete.
+    let satisfied = true;
+    for (const r of reqs) {
+      if ((b.furniturePlaced[r.item] ?? 0) < r.count) { satisfied = false; break; }
+    }
+    if (satisfied) {
+      b.status = "complete";
+      sim.planner.completed++;
+      sim.planner.completedByKind[b.kind] = (sim.planner.completedByKind[b.kind] ?? 0) + 1;
+      sim.events.add(
+        sim.tick,
+        "construction",
+        `${BLUEPRINT_KIND_LABELS[b.kind]} furnished and ready.`,
+        { x: b.originX + Math.floor(b.width / 2), y: b.originY + Math.floor(b.height / 2) },
+      );
+    }
+    return true;
+  }
+  return false;
+}
+
 /** Same as bumpCumulative but takes a recipe outputKind (string)
  * and only counts kinds that map to a MaterialResource. Workshop
  * outputs that aren't material-research-relevant (food, drink,
@@ -3486,6 +3677,47 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     blueprintKind = b.kind;
     break;
   }
+  // Carpenter swaps recipes by demand. Priority (top is most urgent):
+  //   barrel        — brewery, drink survival
+  //   hospital cot  — treating sick / wounded
+  //   bin           — stockpile, haul flow
+  //   bed           — bedroom, morale
+  //   library desk  — research progress
+  //   tavern counter— morale / festivals
+  //   default       — plank milling
+  if (blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
+    if (needsPumpStationFurniture(sim) && sim.stockpile.planks >= CARPENTER_PUMP_PART_RECIPE.inputQty) {
+      // Pump beats everything else — an unpumped flood damages
+      // the entire colony, faster than any other room's miss.
+      recipe = CARPENTER_PUMP_PART_RECIPE;
+    } else if (needsBreweryFurniture(sim)) {
+      recipe = CARPENTER_BARREL_RECIPE;
+    } else if (needsHospitalFurniture(sim)) {
+      recipe = CARPENTER_HOSPITAL_BED_RECIPE;
+    } else if (needsStockpileFurniture(sim)) {
+      recipe = CARPENTER_BIN_RECIPE;
+    } else if (needsBedroomFurniture(sim)) {
+      recipe = CARPENTER_BED_RECIPE;
+    } else if (needsLibraryFurniture(sim)) {
+      recipe = CARPENTER_LIBRARY_DESK_RECIPE;
+    } else if (needsArmouryFurniture(sim)) {
+      recipe = CARPENTER_ARMOURY_RACK_RECIPE;
+    } else if (needsTavernFurniture(sim) && sim.stockpile.planks >= CARPENTER_TAVERN_COUNTER_RECIPE.inputQty) {
+      recipe = CARPENTER_TAVERN_COUNTER_RECIPE;
+    }
+  }
+  // Mason swaps recipes by demand. Priority: throne (the colony's
+  // crown jewel) → stove (kitchen — no kitchen, no cooked meals)
+  // → table (dining hall) → default blocks.
+  if (blueprintKind === "mason" && recipe && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
+    if (needsThroneRoomFurniture(sim) && sim.stockpile.blocks >= MASON_THRONE_RECIPE.inputQty) {
+      recipe = MASON_THRONE_RECIPE;
+    } else if (needsKitchenFurniture(sim)) {
+      recipe = MASON_STOVE_RECIPE;
+    } else if (needsDiningHallFurniture(sim)) {
+      recipe = MASON_TABLE_RECIPE;
+    }
+  }
   if (!recipe) {
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -3514,12 +3746,12 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       break;
     }
     if (!consumedItem) {
-      if (sim.stockpile[recipe.inputKind] < recipe.inputQty) {
+      if ((sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] < recipe.inputQty) {
         sim.job.remove(e);
         sim.pathing.remove(e);
         return;
       }
-      sim.stockpile[recipe.inputKind] -= recipe.inputQty;
+      (sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] -= recipe.inputQty;
     }
   }
   const dw = sim.dwarf.get(e);
@@ -3577,7 +3809,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
         }
       }
     } else {
-      sim.stockpile[recipe.outputKind] += outputQty;
+      (sim.stockpile as unknown as Record<string, number>)[recipe.outputKind] += outputQty;
       // Track cumulative production for material-gated research.
       // Only resources that map to MaterialResource are counted.
       bumpCumulativeForResource(sim, recipe.outputKind, outputQty);
@@ -3703,6 +3935,17 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "meals") return "meal";
   if (resource === "wood") return "wood";
   if (resource === "hide") return "hide";
+  if (resource === "bed") return "bed";
+  if (resource === "barrel") return "barrel";
+  if (resource === "table") return "table";
+  if (resource === "bin") return "bin";
+  if (resource === "stove") return "stove";
+  if (resource === "library_desk") return "library_desk";
+  if (resource === "throne") return "throne";
+  if (resource === "hospital_bed") return "hospital_bed";
+  if (resource === "tavern_counter") return "tavern_counter";
+  if (resource === "armoury_rack") return "armoury_rack";
+  if (resource === "pump_part") return "pump_part";
   return null;
 }
 
@@ -3898,6 +4141,15 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.spawnItem({ kind: "tools", x: pos.x, y: pos.y, quality: carrying.quality });
     droppedAsItem = true;
   }
+  // Furniture delivery: if we're standing on a cavity tile of a
+  // needs_furnishing blueprint that wants this item kind, stamp
+  // the corresponding furniture tile and consume the item. The
+  // blueprint's status flips to complete once every requirement
+  // is satisfied.
+  if (!droppedAsItem) {
+    const placed = tryPlaceFurniture(sim, carrying.kind, pos.x, pos.y);
+    if (placed) droppedAsItem = true;
+  }
   if (!droppedAsItem) {
     if (carrying.kind === "ore") { sim.stockpile.ore++; bumpCumulative(sim, "ore"); }
     else if (carrying.kind === "stone") { sim.stockpile.stone++; bumpCumulative(sim, "stone"); }
@@ -3910,6 +4162,43 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     else if (carrying.kind === "meal") sim.stockpile.meals++;
     else if (carrying.kind === "wood") { sim.stockpile.wood++; bumpCumulative(sim, "wood"); }
     else if (carrying.kind === "hide") { sim.stockpile.hide++; bumpCumulative(sim, "hide"); }
+    else if (carrying.kind === "bed") {
+      // No needs_furnishing bedroom wanted this bed — drop it as an
+      // item so a later bedroom can be filled.
+      sim.spawnItem({ kind: "bed", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "barrel") {
+      // Same — no brewery currently wants this barrel; sit it on
+      // the floor for the next one.
+      sim.spawnItem({ kind: "barrel", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "table") {
+      sim.spawnItem({ kind: "table", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "bin") {
+      sim.spawnItem({ kind: "bin", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "stove") {
+      sim.spawnItem({ kind: "stove", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "library_desk") {
+      sim.spawnItem({ kind: "library_desk", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "throne") {
+      sim.spawnItem({ kind: "throne", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "hospital_bed") {
+      sim.spawnItem({ kind: "hospital_bed", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "tavern_counter") {
+      sim.spawnItem({ kind: "tavern_counter", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "armoury_rack") {
+      sim.spawnItem({ kind: "armoury_rack", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    else if (carrying.kind === "pump_part") {
+      sim.spawnItem({ kind: "pump_part", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
   }
   sim.carrying.remove(e);
   // Hauling earns hauling XP — every successful delivery counts as
