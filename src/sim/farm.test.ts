@@ -36,7 +36,11 @@ describe("farms", () => {
     for (let i = 0; i < 4; i++) {
       sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + i, y: w.spawn.y, age: 30 });
     }
-    // Hand-excavate any farm blueprint emitted so the planner harvests it.
+    // Hand-excavate any farm blueprint emitted, and once it reaches
+    // needs_furnishing hand-stamp the FarmTile + flip status so the
+    // test measures the post-furnishing state without depending on a
+    // hauler pathing to a synthetically-carved cavity (slice 8 added
+    // the seed_bag delivery requirement).
     for (let i = 0; i < 600; i++) {
       tick(sim);
       for (const bp of sim.planner.blueprints) {
@@ -47,6 +51,18 @@ describe("farms", () => {
           const y = (c >>> 16) & 0xffff;
           sim.grid.setTile(x, y, TileType.CorridorFloor);
         }
+      }
+      for (const bp of sim.planner.blueprints) {
+        if (bp.kind !== "farm" || bp.status !== "needs_furnishing") continue;
+        for (let k = 0; k < bp.cavity.length; k++) {
+          const c = bp.cavity[k];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          sim.grid.setTile(x, y, TileType.FarmTile);
+        }
+        bp.status = "complete";
+        bp.furniturePlaced = { seed_bag: 1 };
+        bp.cellTendedAt = new Int32Array(bp.cavity.length).fill(-1);
       }
     }
     const farm = sim.planner.blueprints.find((b) => b.kind === "farm");

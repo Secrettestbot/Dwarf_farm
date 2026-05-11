@@ -23,6 +23,21 @@ function buildSim(seed: number, dwarves: number): SimWorld {
   sim.spawnItem({ kind: "hospital_bed", x: w.spawn.x, y: w.spawn.y });
   sim.spawnItem({ kind: "tavern_counter", x: w.spawn.x, y: w.spawn.y });
   sim.spawnItem({ kind: "armoury_rack", x: w.spawn.x, y: w.spawn.y });
+  // Slice 8: workshop / depot / wheel / farm deliverables. Without
+  // these the carpenter and mason rooms sit needs_furnishing
+  // forever (their benches are bootstrapped by the founder kit).
+  sim.spawnItem({ kind: "carpenter_bench", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "mason_bench", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "smelter_furnace", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "forge_anvil", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "magma_anvil", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "jeweller_bench", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "kiln_firebox", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "tannery_vat", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "loom_frame", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "trade_scales", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "water_wheel_axle", x: w.spawn.x, y: w.spawn.y });
+  sim.spawnItem({ kind: "seed_bag", x: w.spawn.x, y: w.spawn.y });
   return sim;
 }
 

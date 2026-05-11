@@ -170,6 +170,9 @@ export const enum TileType {
    * been delivered (Mason's Workshop recipe: 2 blocks → 1 stove).
    * Walkable so the cook can step around it. */
   Stove = 54,
+  /** Trade depot's weigh-station counter. A Trade Depot only
+   * counts as functional once trade_scales have been delivered. */
+  TradeScales = 55,
 }
 
 export interface TileInfo {
@@ -236,6 +239,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Headstone]: { name: "headstone", walkable: true, solid: false, color: 0x9a8a72 },
   [TileType.BrewingBarrel]: { name: "brewing barrel", walkable: true, solid: false, color: 0x7a5028 },
   [TileType.Stove]: { name: "stove", walkable: true, solid: false, color: 0x504030 },
+  [TileType.TradeScales]: { name: "trade scales", walkable: true, solid: false, color: 0xa08858 },
 };
 
 export function tileIsGem(t: number): boolean {

@@ -127,6 +127,7 @@ export interface Blueprint {
  * disable that auto-stamp for the corresponding tiles and rely on
  * delivery instead. */
 export const FURNITURE_REQUIREMENTS: Partial<Record<BlueprintKind, ReadonlyArray<{ item: string; count: number }>>> = {
+  // Slice 1–7: support rooms.
   bedroom: [{ item: "bed", count: 1 }],
   brewery: [{ item: "barrel", count: 1 }],
   dining_hall: [{ item: "table", count: 1 }],
@@ -138,6 +139,25 @@ export const FURNITURE_REQUIREMENTS: Partial<Record<BlueprintKind, ReadonlyArray
   tavern: [{ item: "tavern_counter", count: 1 }],
   armoury: [{ item: "armoury_rack", count: 1 }],
   pump_station: [{ item: "pump_part", count: 1 }],
+  // Slice 8: workshops, trade depot, water wheel, farm. Each
+  // workshop needs its bench / anvil / firebox before the
+  // workstation tile is stamped — the carpenter / mason swap
+  // recipes to produce these on demand.
+  carpenter: [{ item: "carpenter_bench", count: 1 }],
+  mason: [{ item: "mason_bench", count: 1 }],
+  smelter: [{ item: "smelter_furnace", count: 1 }],
+  forge: [{ item: "forge_anvil", count: 1 }],
+  magma_forge: [{ item: "magma_anvil", count: 1 }],
+  jeweller: [{ item: "jeweller_bench", count: 1 }],
+  kiln: [{ item: "kiln_firebox", count: 1 }],
+  tannery: [{ item: "tannery_vat", count: 1 }],
+  loom: [{ item: "loom_frame", count: 1 }],
+  trade_depot: [{ item: "trade_scales", count: 1 }],
+  water_wheel: [{ item: "water_wheel_axle", count: 1 }],
+  // Farms need a seed bag delivery. Seeds come from the founder
+  // cache, then yield-as-byproduct from existing farms, then
+  // from caravan trade — there's no workshop recipe.
+  farm: [{ item: "seed_bag", count: 1 }],
 };
 
 /** Quality of a freshly-finished room. The architect counts the dig

@@ -179,6 +179,26 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
   // aquifer breach, and the carpenter prioritises them ahead of
   // everything else when one's needed. The colony has to actually
   // build the part when the time comes.
+  // Slice 8 starter kit — one of each workshop bench / anvil /
+  // firebox so the first carpenter / mason / smelter / etc. can
+  // stand up the moment their cavity finishes digging. Without
+  // these the chain dead-locks: a mason_bench can only be made by
+  // a carpenter, a carpenter_bench can only be made by a mason,
+  // and the first colony has neither. One trade-scales for the
+  // first depot, one water-wheel axle for the first wheel, and
+  // one seed bag so the first farm goes productive on day one.
+  sim.spawnItem({ kind: "carpenter_bench", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "mason_bench", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "smelter_furnace", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "forge_anvil", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "magma_anvil", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "jeweller_bench", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "kiln_firebox", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "tannery_vat", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "loom_frame", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "trade_scales", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "water_wheel_axle", x: spawn.x, y: spawn.y });
+  sim.spawnItem({ kind: "seed_bag", x: spawn.x, y: spawn.y });
   sim.stockpile.planks += 8;
   sim.stockpile.wood += 4;
   // A small block cache so the mason can carve a table for a
