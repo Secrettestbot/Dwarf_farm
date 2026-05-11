@@ -27,6 +27,11 @@ export class DwarfInspector {
   private root: HTMLElement;
   private host: HTMLElement;
   private targetId: EntityId | null = null;
+  /** Whether the "show all skills" `<details>` is open. Tracked on
+   * the instance because update() rewrites innerHTML every frame —
+   * without preserving this, the dropdown collapses one frame after
+   * the user clicks it. */
+  private skillsExpanded = false;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -42,6 +47,7 @@ export class DwarfInspector {
   }
 
   open(id: EntityId): void {
+    if (this.targetId !== id) this.skillsExpanded = false;
     this.targetId = id;
     this.root.style.display = "block";
   }
@@ -127,7 +133,7 @@ export class DwarfInspector {
     const restRows = ordered.slice(5).map(renderSkillRow).join("");
     const topSkills = restRows
       ? `${visibleRows}
-        <details style="margin-top:6px;">
+        <details id="inspector-skills-toggle" style="margin-top:6px;"${this.skillsExpanded ? " open" : ""}>
           <summary style="font-size:10px;color:#888;cursor:pointer;list-style:none;">show all ${ordered.length} skills</summary>
           ${restRows}
         </details>`
@@ -203,6 +209,15 @@ export class DwarfInspector {
     `;
     const closeBtn = this.root.querySelector("#inspector-close") as HTMLButtonElement | null;
     if (closeBtn) closeBtn.onclick = () => this.close();
+    // Persist the skills dropdown's open state across the inspector's
+    // per-frame innerHTML rewrite. Listening for `toggle` rather than
+    // `click` catches keyboard activation too.
+    const skillsToggle = this.root.querySelector("#inspector-skills-toggle") as HTMLDetailsElement | null;
+    if (skillsToggle) {
+      skillsToggle.ontoggle = () => {
+        this.skillsExpanded = skillsToggle.open;
+      };
+    }
     const renameBtn = this.root.querySelector("#inspector-rename") as HTMLButtonElement | null;
     if (renameBtn) {
       renameBtn.onclick = () => {
