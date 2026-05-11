@@ -46,6 +46,39 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   cemetery: { fill: "rgba(120, 110, 100, 0.16)", stroke: "rgba(160, 150, 140, 0.7)" },
 };
 
+/** Per-kind floor tint painted over a completed room's cavity tiles.
+ * Same hue family as the digging-stage BLUEPRINT_COLORS fill but with
+ * a slightly higher alpha so the room reads clearly when stable. The
+ * tint is subtle (~12% alpha) so it doesn't fight the central
+ * furniture / station sprite — just enough that a glance picks the
+ * room apart from neighbouring corridor floor. */
+const ROOM_FLOOR_TINT: Partial<Record<BlueprintKind, string>> = {
+  bedroom: "rgba(220, 180, 90, 0.12)",
+  dining_hall: "rgba(140, 200, 230, 0.14)",
+  stockpile: "rgba(180, 230, 130, 0.12)",
+  farm: "rgba(140, 200, 90, 0.14)",
+  kitchen: "rgba(220, 110, 80, 0.14)",
+  brewery: "rgba(120, 180, 90, 0.14)",
+  smelter: "rgba(190, 90, 60, 0.16)",
+  forge: "rgba(220, 140, 80, 0.16)",
+  trade_depot: "rgba(180, 200, 220, 0.12)",
+  library: "rgba(120, 160, 220, 0.12)",
+  armoury: "rgba(180, 180, 220, 0.12)",
+  throne_room: "rgba(160, 100, 200, 0.14)",
+  pump_station: "rgba(60, 130, 170, 0.14)",
+  mason: "rgba(140, 140, 160, 0.14)",
+  jeweller: "rgba(180, 130, 220, 0.14)",
+  carpenter: "rgba(180, 130, 70, 0.14)",
+  kiln: "rgba(200, 110, 70, 0.16)",
+  tannery: "rgba(140, 100, 60, 0.16)",
+  loom: "rgba(200, 190, 170, 0.14)",
+  hospital: "rgba(220, 200, 200, 0.14)",
+  tavern: "rgba(200, 160, 100, 0.16)",
+  magma_forge: "rgba(220, 80, 40, 0.18)",
+  water_wheel: "rgba(80, 110, 160, 0.18)",
+  cemetery: "rgba(120, 110, 100, 0.16)",
+};
+
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   mine: { glyph: "⛏", color: "#e0c080" },
   sleep: { glyph: "z", color: "#8aa9ff" },
@@ -125,31 +158,53 @@ export function renderWorld(
     }
   }
 
-  // Blueprints (active only). Color-coded by kind so the colony's intent is
-  // legible at a glance: a yellow rectangle is a bedroom, blue is a dining
-  // hall, green is a stockpile.
+  // Blueprints. Active (digging) blueprints get a dashed outline + label so
+  // the colony's intent is legible. Needs-furnishing and complete rooms
+  // get a soft floor tint so each finished room reads as its kind even
+  // when its central furniture tile is faint or off-screen. Without the
+  // tint, half a dozen workshops look like indistinguishable corridor
+  // grids — the room-character lives in the tint, not the centre tile.
   const planner = sim.planner;
   if (planner.blueprints.length > 0) {
     ctx.save();
     for (const b of planner.blueprints) {
-      if (b.status !== "digging") continue;
-      const colors = BLUEPRINT_COLORS[b.kind];
-      const ax = (b.originX - camera.x) * pt + viewW / 2;
-      const ay = (b.originY - camera.y) * pt + viewH / 2;
-      const bw = b.width * pt;
-      const bh = b.height * pt;
-      ctx.fillStyle = colors.fill;
-      ctx.fillRect(ax, ay, bw, bh);
-      ctx.strokeStyle = colors.stroke;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
-      ctx.strokeRect(ax + 0.5, ay + 0.5, bw - 1, bh - 1);
-      ctx.setLineDash([]);
-      // Kind label, top-left of cavity, only when zoomed in enough.
-      if (pt >= 8) {
-        ctx.fillStyle = colors.stroke;
-        ctx.font = "10px monospace";
-        ctx.fillText(formatKindLabel(b.kind), ax + 3, ay + 11);
+      if (b.status === "digging") {
+        const colors = BLUEPRINT_COLORS[b.kind];
+        const ax = (b.originX - camera.x) * pt + viewW / 2;
+        const ay = (b.originY - camera.y) * pt + viewH / 2;
+        const bw = b.width * pt;
+        const bh = b.height * pt;
+        ctx.fillStyle = colors.fill;
+        ctx.fillRect(ax, ay, bw, bh);
+        ctx.strokeStyle = colors.stroke;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(ax + 0.5, ay + 0.5, bw - 1, bh - 1);
+        ctx.setLineDash([]);
+        // Kind label, top-left of cavity, only when zoomed in enough.
+        if (pt >= 8) {
+          ctx.fillStyle = colors.stroke;
+          ctx.font = "10px monospace";
+          ctx.fillText(formatKindLabel(b.kind), ax + 3, ay + 11);
+        }
+      } else {
+        // needs_furnishing and complete: soft per-cell tint so the
+        // room's identity carries across its whole floor. Corridors
+        // and other passages skip the tint — they're not rooms.
+        if (b.kind === "corridor" || b.kind === "mine" || b.kind === "stairwell" || b.kind === "lumberyard") continue;
+        const tint = ROOM_FLOOR_TINT[b.kind];
+        if (!tint) continue;
+        ctx.fillStyle = tint;
+        for (let i = 0; i < b.cavity.length; i++) {
+          const c = b.cavity[i];
+          const x = c & 0xffff;
+          const y = (c >>> 16) & 0xffff;
+          if (x < x0 || x >= x1 || y < y0 || y >= y1) continue;
+          if (!grid.isSeen(x, y)) continue;
+          const sx = (x - camera.x) * pt + viewW / 2;
+          const sy = (y - camera.y) * pt + viewH / 2;
+          ctx.fillRect(sx, sy, pt, pt);
+        }
       }
     }
     ctx.restore();
