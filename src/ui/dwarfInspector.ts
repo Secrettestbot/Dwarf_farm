@@ -134,7 +134,7 @@ export class DwarfInspector {
     const topSkills = restRows
       ? `${visibleRows}
         <details id="inspector-skills-toggle" style="margin-top:6px;"${this.skillsExpanded ? " open" : ""}>
-          <summary style="font-size:10px;color:#888;cursor:pointer;list-style:none;">show all ${ordered.length} skills</summary>
+          <summary id="inspector-skills-summary" style="font-size:10px;color:#888;cursor:pointer;list-style:none;">show all ${ordered.length} skills</summary>
           ${restRows}
         </details>`
       : visibleRows;
@@ -210,12 +210,23 @@ export class DwarfInspector {
     const closeBtn = this.root.querySelector("#inspector-close") as HTMLButtonElement | null;
     if (closeBtn) closeBtn.onclick = () => this.close();
     // Persist the skills dropdown's open state across the inspector's
-    // per-frame innerHTML rewrite. Listening for `toggle` rather than
-    // `click` catches keyboard activation too.
-    const skillsToggle = this.root.querySelector("#inspector-skills-toggle") as HTMLDetailsElement | null;
-    if (skillsToggle) {
-      skillsToggle.ontoggle = () => {
-        this.skillsExpanded = skillsToggle.open;
+    // per-frame innerHTML rewrite. We listen for `click` on the
+    // <summary> rather than `toggle` on the <details> because the
+    // `toggle` event is dispatched asynchronously per the HTML spec —
+    // by the time the browser fires it, the next animation frame's
+    // innerHTML rewrite has often already replaced the <details>
+    // element, so the handler never runs. `click` fires synchronously
+    // before any frame redraw, so the state captures reliably. We
+    // also preventDefault and toggle .open ourselves so the visual
+    // state matches without depending on the browser's native
+    // double-handling.
+    const skillsSummary = this.root.querySelector("#inspector-skills-summary") as HTMLElement | null;
+    const skillsDetails = this.root.querySelector("#inspector-skills-toggle") as HTMLDetailsElement | null;
+    if (skillsSummary && skillsDetails) {
+      skillsSummary.onclick = (ev) => {
+        ev.preventDefault();
+        this.skillsExpanded = !this.skillsExpanded;
+        skillsDetails.open = this.skillsExpanded;
       };
     }
     const renameBtn = this.root.querySelector("#inspector-rename") as HTMLButtonElement | null;
