@@ -308,4 +308,206 @@ describe("furniture pipeline", () => {
     }
     expect(barrelFound).toBe(true);
   });
+
+  it("a needs_furnishing mason workshop takes a mason_bench delivery and stamps the station tile", () => {
+    const w = generateWorld({ seed: 87, width: 200, height: 500 });
+    const sim = new SimWorld(87, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    sim.spawnItem({ kind: "mason_bench", x: sx, y: sy });
+    for (let xx = sx; xx <= sx + 12; xx++) sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+    const ox = sx + 3;
+    const oy = sy;
+    const cavity: number[] = [];
+    for (let yy = oy; yy < oy + 3; yy++) {
+      for (let xx = ox; xx < ox + 3; xx++) {
+        cavity.push((yy << 16) | xx);
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    // Slice 8: the MasonStation tile is NOT stamped up front — the
+    // mason_bench delivery is what creates it.
+    const shop: Blueprint = {
+      id: 9320,
+      kind: "mason",
+      originX: ox,
+      originY: oy,
+      width: 3,
+      height: 3,
+      cavity: new Int32Array(cavity),
+      status: "needs_furnishing",
+      priority: 1,
+      createdTick: 0,
+      furniturePlaced: {},
+    };
+    sim.planner.blueprints.push(shop);
+    sim.spawnDwarf({ name: "Hauler", x: sx, y: sy, age: 30 });
+    let placed = false;
+    for (let i = 0; i < TICKS_PER_DAY * 2 && !placed; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (shop.status === "complete") placed = true;
+    }
+    expect(placed).toBe(true);
+    let stationFound = false;
+    for (let i = 0; i < shop.cavity.length; i++) {
+      const c = shop.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === TileType.MasonStation) { stationFound = true; break; }
+    }
+    expect(stationFound).toBe(true);
+  });
+
+  it("a needs_furnishing farm takes a seed_bag delivery and stamps every cavity cell as FarmTile", () => {
+    const w = generateWorld({ seed: 91, width: 200, height: 500 });
+    const sim = new SimWorld(91, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    sim.spawnItem({ kind: "seed_bag", x: sx, y: sy });
+    for (let xx = sx; xx <= sx + 12; xx++) sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+    const ox = sx + 3;
+    const oy = sy;
+    const cavity: number[] = [];
+    for (let yy = oy; yy < oy + 3; yy++) {
+      for (let xx = ox; xx < ox + 4; xx++) {
+        cavity.push((yy << 16) | xx);
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    const farm: Blueprint = {
+      id: 9330,
+      kind: "farm",
+      originX: ox,
+      originY: oy,
+      width: 4,
+      height: 3,
+      cavity: new Int32Array(cavity),
+      status: "needs_furnishing",
+      priority: 1,
+      createdTick: 0,
+      furniturePlaced: {},
+    };
+    sim.planner.blueprints.push(farm);
+    sim.spawnDwarf({ name: "Hauler", x: sx, y: sy, age: 30 });
+    let placed = false;
+    for (let i = 0; i < TICKS_PER_DAY * 2 && !placed; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (farm.status === "complete") placed = true;
+    }
+    expect(placed).toBe(true);
+    // Every cavity cell should now be a FarmTile, and cellTendedAt
+    // should be initialised parallel to the cavity.
+    for (let i = 0; i < farm.cavity.length; i++) {
+      const c = farm.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      expect(sim.grid.getTile(x, y)).toBe(TileType.FarmTile);
+    }
+    expect(farm.cellTendedAt).toBeTruthy();
+    expect(farm.cellTendedAt!.length).toBe(farm.cavity.length);
+  });
+
+  it("a needs_furnishing water wheel takes an axle delivery and stamps every cavity cell as WaterWheel", () => {
+    const w = generateWorld({ seed: 93, width: 200, height: 500 });
+    const sim = new SimWorld(93, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    sim.spawnItem({ kind: "water_wheel_axle", x: sx, y: sy });
+    for (let xx = sx; xx <= sx + 12; xx++) sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+    const ox = sx + 3;
+    const oy = sy;
+    const cavity: number[] = [];
+    for (let yy = oy; yy < oy + 2; yy++) {
+      for (let xx = ox; xx < ox + 3; xx++) {
+        cavity.push((yy << 16) | xx);
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    const wheel: Blueprint = {
+      id: 9340,
+      kind: "water_wheel",
+      originX: ox,
+      originY: oy,
+      width: 3,
+      height: 2,
+      cavity: new Int32Array(cavity),
+      status: "needs_furnishing",
+      priority: 1,
+      createdTick: 0,
+      furniturePlaced: {},
+    };
+    sim.planner.blueprints.push(wheel);
+    sim.spawnDwarf({ name: "Hauler", x: sx, y: sy, age: 30 });
+    let placed = false;
+    for (let i = 0; i < TICKS_PER_DAY * 2 && !placed; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (wheel.status === "complete") placed = true;
+    }
+    expect(placed).toBe(true);
+    for (let i = 0; i < wheel.cavity.length; i++) {
+      const c = wheel.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      expect(sim.grid.getTile(x, y)).toBe(TileType.WaterWheel);
+    }
+  });
+
+  it("a needs_furnishing trade depot takes a trade_scales delivery", () => {
+    const w = generateWorld({ seed: 95, width: 200, height: 500 });
+    const sim = new SimWorld(95, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    sim.spawnItem({ kind: "trade_scales", x: sx, y: sy });
+    for (let xx = sx; xx <= sx + 12; xx++) sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+    const ox = sx + 3;
+    const oy = sy;
+    const cavity: number[] = [];
+    for (let yy = oy; yy < oy + 3; yy++) {
+      for (let xx = ox; xx < ox + 3; xx++) {
+        cavity.push((yy << 16) | xx);
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    const depot: Blueprint = {
+      id: 9350,
+      kind: "trade_depot",
+      originX: ox,
+      originY: oy,
+      width: 3,
+      height: 3,
+      cavity: new Int32Array(cavity),
+      status: "needs_furnishing",
+      priority: 1,
+      createdTick: 0,
+      furniturePlaced: {},
+    };
+    sim.planner.blueprints.push(depot);
+    sim.spawnDwarf({ name: "Hauler", x: sx, y: sy, age: 30 });
+    let placed = false;
+    for (let i = 0; i < TICKS_PER_DAY * 2 && !placed; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (depot.status === "complete") placed = true;
+    }
+    expect(placed).toBe(true);
+    let scalesFound = false;
+    for (let i = 0; i < depot.cavity.length; i++) {
+      const c = depot.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === TileType.TradeScales) { scalesFound = true; break; }
+    }
+    expect(scalesFound).toBe(true);
+  });
 });

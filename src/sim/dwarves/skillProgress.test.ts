@@ -70,6 +70,13 @@ describe("population milestones", () => {
     for (let i = 0; i < 25; i++) {
       sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x, y: w.spawn.y, age: 30 });
     }
+    // Generous starter stockpile so the population doesn't dip from
+    // hunger / thirst while the slice-8 furniture chain bootstraps.
+    sim.stockpile.food = 60000;
+    sim.stockpile.drink = 60000;
+    sim.spawnItem({ kind: "carpenter_bench", x: w.spawn.x, y: w.spawn.y });
+    sim.spawnItem({ kind: "mason_bench", x: w.spawn.x, y: w.spawn.y });
+    sim.spawnItem({ kind: "seed_bag", x: w.spawn.x, y: w.spawn.y });
     // Run one in-game year so populationMilestoneSystem fires.
     for (let i = 0; i < 1440 * 24 + 5; i++) tick(sim);
     expect(sim.populationMilestones.has(25)).toBe(true);

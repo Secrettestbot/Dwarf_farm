@@ -107,7 +107,17 @@ export interface Needs {
  * to hauling jobs. The kind matches the stockpile counter that the item
  * eventually credits when a hauler delivers it. Items are entities so
  * pathfinding and the renderer can locate them by Position. */
-export type ItemKind = "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink" | "meal" | "wood" | "hide" | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk" | "throne" | "hospital_bed" | "tavern_counter" | "armoury_rack" | "pump_part";
+export type ItemKind =
+  | "stone" | "ore" | "dirt" | "gem" | "bars" | "tools" | "food" | "drink"
+  | "meal" | "wood" | "hide"
+  // Slice 1–7 furniture deliverables.
+  | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk"
+  | "throne" | "hospital_bed" | "tavern_counter" | "armoury_rack" | "pump_part"
+  // Slice 8: workshop deliverables, trade depot, water wheel, farm.
+  | "carpenter_bench" | "mason_bench"
+  | "smelter_furnace" | "forge_anvil" | "magma_anvil"
+  | "jeweller_bench" | "kiln_firebox" | "tannery_vat" | "loom_frame"
+  | "trade_scales" | "water_wheel_axle" | "seed_bag";
 
 export interface Item {
   kind: ItemKind;

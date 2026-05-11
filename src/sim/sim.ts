@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -88,6 +88,12 @@ export function tick(sim: SimWorld): void {
     research: { completed: sim.research.completed },
     aquiferBreached: sim.aquiferBreachTick >= 0,
   });
+  // Refresh the hauler's furniture-demand cache once per tick.
+  // Blueprint transitions during sim.planner.tick (digging →
+  // needs_furnishing → complete) and during the per-tick haul / craft
+  // systems can both shift demand; rebuilding here means every dwarf
+  // that calls chooseTask this tick gets the latest set.
+  sim.planner.refreshFurnitureDemand();
   yearRolloverSystem(sim);
   seasonRolloverSystem(sim);
   emergencySystem(sim);
@@ -2328,6 +2334,20 @@ function farmSystem(sim: SimWorld): void {
         sim.stockpile.rope++;
         bumpCumulative(sim, "rope");
       }
+      // Slice 8: each tended farm cell has a small chance of yielding
+      // a seed_bag — the byproduct that lets the colony stand up new
+      // farms without a workshop recipe. Rare on purpose: one farm
+      // produces enough seeds for about one new farm per in-game day,
+      // so expansion is paced by the existing harvest. Cap at one
+      // seed_bag per cell at a time so haulers can catch up. The
+      // worldRng (not aiRng) is used so the seed_bag roll doesn't
+      // perturb the AI's tie-break ordering — farms are a worldgen
+      // byproduct, not a decision the dwarves make.
+      if (sim.worldRng.nextFloat() < FARM_YIELD_CHANCE * 0.04) {
+        if (countItemsAt(sim, x, y, "seed_bag") < 1) {
+          sim.spawnItem({ kind: "seed_bag", x, y });
+        }
+      }
     }
   }
 }
@@ -2510,6 +2530,122 @@ function needsPumpStationFurniture(sim: SimWorld): boolean {
   return false;
 }
 
+/** Slice 8 demand helpers — one per workshop / utility room that
+ * now waits on a delivered bench / anvil / firebox before its
+ * workstation tile lands. The carpenter and mason recipe-swaps in
+ * progressCraft consult these in priority order so the colony's
+ * crafters dynamically retool to whichever bottleneck the planner
+ * has exposed. */
+function needsCarpenterFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "carpenter") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["carpenter_bench"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsMasonFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "mason") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["mason_bench"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsSmelterFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "smelter") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["smelter_furnace"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsForgeFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "forge") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["forge_anvil"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsMagmaForgeFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "magma_forge") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["magma_anvil"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsJewellerFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "jeweller") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["jeweller_bench"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsKilnFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "kiln") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["kiln_firebox"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsTanneryFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "tannery") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["tannery_vat"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsLoomFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "loom") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["loom_frame"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsTradeDepotFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "trade_depot") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["trade_scales"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
+function needsWaterWheelFurniture(sim: SimWorld): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "water_wheel") continue;
+    if (b.status !== "needs_furnishing") continue;
+    const placed = b.furniturePlaced?.["water_wheel_axle"] ?? 0;
+    if (placed < 1) return true;
+  }
+  return false;
+}
+
 /** Map from furniture-item kind to the tile that gets stamped when
  * it's delivered. Extended as new furniture pipelines are wired up
  * (tables for dining halls, stoves + ovens for kitchens, etc.). */
@@ -2525,6 +2661,24 @@ const FURNITURE_TILE: Partial<Record<string, TileType>> = {
   tavern_counter: TileType.TavernCounter,
   armoury_rack: TileType.ArmouryRack,
   pump_part: TileType.PumpStation,
+  // Slice 8 workshop deliverables — each stamps its respective
+  // station tile. The auto-stamp path in furnishRoom no longer
+  // fires for these kinds (they have FURNITURE_REQUIREMENTS), so
+  // the station only appears after the deliverable lands.
+  carpenter_bench: TileType.CarpenterStation,
+  mason_bench: TileType.MasonStation,
+  smelter_furnace: TileType.SmelterStation,
+  forge_anvil: TileType.ForgeStation,
+  magma_anvil: TileType.MagmaForgeStation,
+  jeweller_bench: TileType.JewellerStation,
+  kiln_firebox: TileType.KilnStation,
+  tannery_vat: TileType.TannerStation,
+  loom_frame: TileType.LoomStation,
+  trade_scales: TileType.TradeScales,
+  // water_wheel_axle and seed_bag have special-case stamping in
+  // tryPlaceFurniture — they affect more than one tile in the
+  // cavity, so the simple FURNITURE_TILE map can't carry the
+  // logic.
 };
 
 /** If (px, py) lies inside a needs_furnishing blueprint's cavity
@@ -2532,8 +2686,12 @@ const FURNITURE_TILE: Partial<Record<string, TileType>> = {
  * record the placement, and possibly flip the blueprint to
  * complete. Returns true if a delivery was consumed. */
 function tryPlaceFurniture(sim: SimWorld, kind: string, px: number, py: number): boolean {
+  // Special multi-tile deliverables: seed_bag stamps every farm
+  // cavity cell to FarmTile, water_wheel_axle stamps every water-
+  // wheel cavity cell to WaterWheel. Both are handled inline
+  // before the FURNITURE_TILE single-tile path.
   const tile = FURNITURE_TILE[kind];
-  if (tile === undefined) return false;
+  if (tile === undefined && kind !== "seed_bag" && kind !== "water_wheel_axle") return false;
   for (const b of sim.planner.blueprints) {
     if (b.status !== "needs_furnishing") continue;
     const reqs = FURNITURE_REQUIREMENTS[b.kind];
@@ -2552,10 +2710,27 @@ function tryPlaceFurniture(sim: SimWorld, kind: string, px: number, py: number):
     let need = 0;
     for (const r of reqs) if (r.item === kind) need = r.count;
     if (placed >= need) continue;
-    // Stamp the furniture tile and record the placement.
-    sim.grid.setTile(px, py, tile);
+    // Stamp tile(s). Single-tile is the default; the two multi-
+    // tile deliverables fill every cavity cell at once.
+    if (kind === "seed_bag") {
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        sim.grid.setTile(c & 0xffff, (c >>> 16) & 0xffff, TileType.FarmTile);
+      }
+      // Farms also use the per-cell tend tracker — initialise it
+      // here since the original furnishRoom path is bypassed.
+      b.cellTendedAt = new Int32Array(b.cavity.length).fill(-1);
+    } else if (kind === "water_wheel_axle") {
+      for (let i = 0; i < b.cavity.length; i++) {
+        const c = b.cavity[i];
+        sim.grid.setTile(c & 0xffff, (c >>> 16) & 0xffff, TileType.WaterWheel);
+      }
+    } else if (tile !== undefined) {
+      sim.grid.setTile(px, py, tile);
+    }
     if (!b.furniturePlaced) b.furniturePlaced = {};
     b.furniturePlaced[kind] = placed + 1;
+    sim.planner.furnitureDemandDirty = true;
     // All requirements satisfied? Flip to complete.
     let satisfied = true;
     for (const r of reqs) {
@@ -3678,12 +3853,24 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     break;
   }
   // Carpenter swaps recipes by demand. Priority (top is most urgent):
+  //   pump part     — flood control
   //   barrel        — brewery, drink survival
   //   hospital cot  — treating sick / wounded
   //   bin           — stockpile, haul flow
   //   bed           — bedroom, morale
+  //   mason bench   — recovery: if the colony's mason has been lost,
+  //                   the carpenter is the only place that can rebuild
+  //                   its partner workshop. In a normal game the
+  //                   founder kit ships one, so this branch rarely
+  //                   fires after the first hour.
   //   library desk  — research progress
+  //   armoury rack  — military equipment
   //   tavern counter— morale / festivals
+  //   jeweller bench— luxury production
+  //   tannery vat   — leather chain
+  //   loom frame    — cloth chain
+  //   trade scales  — caravan revenue
+  //   water-wheel   — power
   //   default       — plank milling
   if (blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
     if (needsPumpStationFurniture(sim) && sim.stockpile.planks >= CARPENTER_PUMP_PART_RECIPE.inputQty) {
@@ -3698,17 +3885,36 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = CARPENTER_BIN_RECIPE;
     } else if (needsBedroomFurniture(sim)) {
       recipe = CARPENTER_BED_RECIPE;
+    } else if (needsMasonFurniture(sim) && sim.stockpile.planks >= CARPENTER_MASON_BENCH_RECIPE.inputQty) {
+      recipe = CARPENTER_MASON_BENCH_RECIPE;
     } else if (needsLibraryFurniture(sim)) {
       recipe = CARPENTER_LIBRARY_DESK_RECIPE;
     } else if (needsArmouryFurniture(sim)) {
       recipe = CARPENTER_ARMOURY_RACK_RECIPE;
     } else if (needsTavernFurniture(sim) && sim.stockpile.planks >= CARPENTER_TAVERN_COUNTER_RECIPE.inputQty) {
       recipe = CARPENTER_TAVERN_COUNTER_RECIPE;
+    } else if (needsJewellerFurniture(sim) && sim.stockpile.planks >= CARPENTER_JEWELLER_BENCH_RECIPE.inputQty) {
+      recipe = CARPENTER_JEWELLER_BENCH_RECIPE;
+    } else if (needsTanneryFurniture(sim) && sim.stockpile.planks >= CARPENTER_TANNERY_VAT_RECIPE.inputQty) {
+      recipe = CARPENTER_TANNERY_VAT_RECIPE;
+    } else if (needsLoomFurniture(sim) && sim.stockpile.planks >= CARPENTER_LOOM_FRAME_RECIPE.inputQty) {
+      recipe = CARPENTER_LOOM_FRAME_RECIPE;
+    } else if (needsTradeDepotFurniture(sim) && sim.stockpile.planks >= CARPENTER_TRADE_SCALES_RECIPE.inputQty) {
+      recipe = CARPENTER_TRADE_SCALES_RECIPE;
+    } else if (needsWaterWheelFurniture(sim) && sim.stockpile.planks >= CARPENTER_WATER_WHEEL_AXLE_RECIPE.inputQty) {
+      recipe = CARPENTER_WATER_WHEEL_AXLE_RECIPE;
     }
   }
-  // Mason swaps recipes by demand. Priority: throne (the colony's
-  // crown jewel) → stove (kitchen — no kitchen, no cooked meals)
-  // → table (dining hall) → default blocks.
+  // Mason swaps recipes by demand. Priority:
+  //   throne          — the colony's crown jewel
+  //   stove           — kitchen, no kitchen → no cooked meals
+  //   table           — dining hall
+  //   carpenter bench — recovery (rare; founder kit covers normal play)
+  //   smelter furnace — first metalworking station
+  //   forge anvil     — weapons / tools, military readiness
+  //   magma anvil     — Tier-4 high-end production
+  //   kiln firebox    — ceramics, trade goods
+  //   default         — plain blocks
   if (blueprintKind === "mason" && recipe && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
     if (needsThroneRoomFurniture(sim) && sim.stockpile.blocks >= MASON_THRONE_RECIPE.inputQty) {
       recipe = MASON_THRONE_RECIPE;
@@ -3716,6 +3922,16 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = MASON_STOVE_RECIPE;
     } else if (needsDiningHallFurniture(sim)) {
       recipe = MASON_TABLE_RECIPE;
+    } else if (needsCarpenterFurniture(sim) && sim.stockpile.blocks >= MASON_CARPENTER_BENCH_RECIPE.inputQty) {
+      recipe = MASON_CARPENTER_BENCH_RECIPE;
+    } else if (needsSmelterFurniture(sim) && sim.stockpile.blocks >= MASON_SMELTER_FURNACE_RECIPE.inputQty) {
+      recipe = MASON_SMELTER_FURNACE_RECIPE;
+    } else if (needsForgeFurniture(sim) && sim.stockpile.blocks >= MASON_FORGE_ANVIL_RECIPE.inputQty) {
+      recipe = MASON_FORGE_ANVIL_RECIPE;
+    } else if (needsMagmaForgeFurniture(sim) && sim.stockpile.blocks >= MASON_MAGMA_ANVIL_RECIPE.inputQty) {
+      recipe = MASON_MAGMA_ANVIL_RECIPE;
+    } else if (needsKilnFurniture(sim) && sim.stockpile.blocks >= MASON_KILN_FIREBOX_RECIPE.inputQty) {
+      recipe = MASON_KILN_FIREBOX_RECIPE;
     }
   }
   if (!recipe) {
@@ -3946,6 +4162,18 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "tavern_counter") return "tavern_counter";
   if (resource === "armoury_rack") return "armoury_rack";
   if (resource === "pump_part") return "pump_part";
+  if (resource === "carpenter_bench") return "carpenter_bench";
+  if (resource === "mason_bench") return "mason_bench";
+  if (resource === "smelter_furnace") return "smelter_furnace";
+  if (resource === "forge_anvil") return "forge_anvil";
+  if (resource === "magma_anvil") return "magma_anvil";
+  if (resource === "jeweller_bench") return "jeweller_bench";
+  if (resource === "kiln_firebox") return "kiln_firebox";
+  if (resource === "tannery_vat") return "tannery_vat";
+  if (resource === "loom_frame") return "loom_frame";
+  if (resource === "trade_scales") return "trade_scales";
+  if (resource === "water_wheel_axle") return "water_wheel_axle";
+  if (resource === "seed_bag") return "seed_bag";
   return null;
 }
 
@@ -4198,6 +4426,25 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     }
     else if (carrying.kind === "pump_part") {
       sim.spawnItem({ kind: "pump_part", x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    // Slice 8 fallbacks. The needs_furnishing route in tryPlaceFurniture
+    // takes the happy path; if every workshop / depot / wheel / farm of
+    // the relevant kind is already furnished, sit the deliverable on the
+    // floor so the next planner emission can pick it up. Keeps the
+    // hauler from dead-locking with a non-routable item.
+    else if (carrying.kind === "carpenter_bench"
+      || carrying.kind === "mason_bench"
+      || carrying.kind === "smelter_furnace"
+      || carrying.kind === "forge_anvil"
+      || carrying.kind === "magma_anvil"
+      || carrying.kind === "jeweller_bench"
+      || carrying.kind === "kiln_firebox"
+      || carrying.kind === "tannery_vat"
+      || carrying.kind === "loom_frame"
+      || carrying.kind === "trade_scales"
+      || carrying.kind === "water_wheel_axle"
+      || carrying.kind === "seed_bag") {
+      sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
     }
   }
   sim.carrying.remove(e);

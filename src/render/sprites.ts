@@ -1,5 +1,5 @@
 import { PALETTE } from "./palette";
-import { TileType } from "../sim/world/tiles";
+import { TileType, TILE_INFO } from "../sim/world/tiles";
 
 // All sprites are drawn into 16×16 OffscreenCanvases (or HTMLCanvasElement
 // fallback) and cached. Pixel data is described as 16-row strings of palette
@@ -65,7 +65,493 @@ const TILE_PIXELS: Partial<Record<TileType, string[]>> = {
   [TileType.DoorBarred]: doorSprite(true),
   [TileType.Grave]: gravePlotSprite(),
   [TileType.Headstone]: headstoneSprite(),
+  [TileType.BrewingBarrel]: barrelSprite(),
+  [TileType.Stove]: stoveSprite(),
+  [TileType.Throne]: throneSprite(),
+  [TileType.HospitalBed]: hospitalBedSprite(),
+  [TileType.LibraryDesk]: libraryDeskSprite(),
+  [TileType.ArmouryRack]: armouryRackSprite(),
+  [TileType.WaterWheel]: waterWheelSprite(),
+  [TileType.TradeScales]: tradeScalesSprite(),
+  [TileType.PumpStation]: pumpStationSprite(),
+  [TileType.TavernCounter]: tavernCounterSprite(),
+  [TileType.ForgeStation]: anvilSprite("E"),
+  [TileType.MagmaForgeStation]: anvilSprite("E"),
+  [TileType.SmelterStation]: smelterStationSprite(),
+  [TileType.MasonStation]: workbenchSprite("9"),
+  [TileType.CarpenterStation]: workbenchSprite("6"),
+  [TileType.JewellerStation]: jewellerStationSprite(),
+  [TileType.KitchenStation]: stoveSprite(),
+  [TileType.BreweryStation]: brewKettleSprite(),
+  [TileType.KilnStation]: kilnStationSprite(),
+  [TileType.TannerStation]: tanneryVatSprite(),
+  [TileType.LoomStation]: loomFrameSprite(),
+  [TileType.RawDiamond]: gemVeinSprite("B"),
+  [TileType.RawRuby]: gemVeinSprite("E"),
+  [TileType.RawEmerald]: gemVeinSprite("C"),
+  [TileType.Gold]: oreVeinSprite("D"),
+  [TileType.Silver]: oreVeinSprite("B"),
+  [TileType.Coal]: oreVeinSprite("1"),
 };
+
+/** Wooden barrel: vertical cylinder with three iron hoops. */
+function barrelSprite(): string[] {
+  const base = noisyFill(3, 2);
+  for (let y = 3; y <= 13; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const onEdge = x === 4 || x === 11 || y === 3 || y === 13;
+      row = row.substring(0, x) + (onEdge ? "1" : "5") + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Iron hoops at rows 5, 8, 11.
+  for (const y of [5, 8, 11]) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) row = row.substring(0, x) + "1" + row.substring(x + 1);
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Stone stove / hearth: box with a glowing firebox and a chimney column. */
+function stoveSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Body rows 5-13, cols 3-12. Dark stone outline + grey interior.
+  for (let y = 5; y <= 13; y++) {
+    let row = base[y];
+    for (let x = 3; x <= 12; x++) {
+      const onEdge = x === 3 || x === 12 || y === 5 || y === 13;
+      row = row.substring(0, x) + (onEdge ? "1" : "9") + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Firebox glow rows 9-11, cols 6-9.
+  for (let y = 9; y <= 11; y++) {
+    let row = base[y];
+    for (let x = 6; x <= 9; x++) row = row.substring(0, x) + "E" + row.substring(x + 1);
+    base[y] = row;
+  }
+  // Chimney column rows 1-4, col 7-8.
+  for (let y = 1; y <= 4; y++) {
+    let row = base[y];
+    row = row.substring(0, 7) + "11" + row.substring(9);
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Throne: high-backed seat with regal accents. */
+function throneSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // High back rows 1-9, cols 4-11. Purple body, dark outline.
+  for (let y = 1; y <= 9; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) {
+      const onEdge = x === 4 || x === 11 || y === 1 || y === 9;
+      row = row.substring(0, x) + (onEdge ? "1" : "F") + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Seat rows 9-12, cols 2-13.
+  for (let y = 9; y <= 12; y++) {
+    let row = base[y];
+    for (let x = 2; x <= 13; x++) {
+      const onEdge = x === 2 || x === 13 || y === 12;
+      row = row.substring(0, x) + (onEdge ? "1" : "F") + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Gold trim at top of backrest.
+  let row = base[2];
+  for (let x = 5; x <= 10; x++) row = row.substring(0, x) + "D" + row.substring(x + 1);
+  base[2] = row;
+  return base;
+}
+
+/** Hospital cot: white bed with a red-cross. */
+function hospitalBedSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Body rows 4-12, cols 2-13.
+  for (let y = 4; y <= 12; y++) {
+    let row = base[y];
+    for (let x = 2; x <= 13; x++) {
+      const onEdge = x === 2 || x === 13 || y === 4 || y === 12;
+      row = row.substring(0, x) + (onEdge ? "1" : "B") + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Red cross in the middle.
+  base[7] = base[7].substring(0, 7) + "EE" + base[7].substring(9);
+  base[8] = base[8].substring(0, 6) + "EEEE" + base[8].substring(10);
+  base[9] = base[9].substring(0, 7) + "EE" + base[9].substring(9);
+  return base;
+}
+
+/** Library desk: writing surface with a scroll/book on top. */
+function libraryDeskSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Desktop rows 6-9, cols 1-14.
+  for (let y = 6; y <= 9; y++) {
+    let row = base[y];
+    for (let x = 1; x <= 14; x++) {
+      row = row.substring(0, x) + (y === 6 ? "6" : "5") + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Legs rows 10-13.
+  for (let y = 10; y <= 13; y++) {
+    let row = base[y];
+    row = row.substring(0, 2) + "1" + row.substring(3);
+    row = row.substring(0, 13) + "1" + row.substring(14);
+    base[y] = row;
+  }
+  // Open book / scroll on top — two pale rectangles.
+  base[4] = base[4].substring(0, 5) + "BBBBBB" + base[4].substring(11);
+  base[5] = base[5].substring(0, 5) + "B11BB1B" + base[5].substring(12);
+  return base;
+}
+
+/** Armoury rack: vertical wood frame with weapons hung from it. */
+function armouryRackSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Frame uprights cols 3 + 12, rows 2-13.
+  for (let y = 2; y <= 13; y++) {
+    let row = base[y];
+    row = row.substring(0, 3) + "1" + row.substring(4);
+    row = row.substring(0, 12) + "1" + row.substring(13);
+    base[y] = row;
+  }
+  // Top + bottom rails rows 2, 13.
+  for (const y of [2, 13]) {
+    let row = base[y];
+    for (let x = 3; x <= 12; x++) row = row.substring(0, x) + "1" + row.substring(x + 1);
+    base[y] = row;
+  }
+  // Two weapons hanging: a sword (silver) and a pick (silver). Render
+  // as vertical bars with brown grips.
+  for (let y = 4; y <= 11; y++) {
+    let row = base[y];
+    row = row.substring(0, 6) + "B" + row.substring(7);
+    row = row.substring(0, 9) + "B" + row.substring(10);
+    base[y] = row;
+  }
+  base[4] = base[4].substring(0, 6) + "6" + base[4].substring(7);
+  base[4] = base[4].substring(0, 9) + "6" + base[4].substring(10);
+  return base;
+}
+
+/** Water wheel: large circular spoked wheel against a dark backdrop. */
+function waterWheelSprite(): string[] {
+  const base = noisyFill(2, 1);
+  // Hub at centre col 7-8, row 7-8.
+  base[7] = base[7].substring(0, 7) + "DD" + base[7].substring(9);
+  base[8] = base[8].substring(0, 7) + "DD" + base[8].substring(9);
+  // Rim — approximation of a circle radius 6.
+  const cx = 7.5;
+  const cy = 7.5;
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 5.5 && d < 7) {
+        base[y] = base[y].substring(0, x) + "B" + base[y].substring(x + 1);
+      }
+    }
+  }
+  // Spokes — vertical, horizontal, and diagonals.
+  for (let i = -5; i <= 5; i++) {
+    const ax = Math.round(cx + i);
+    const ay = Math.round(cy);
+    base[ay] = base[ay].substring(0, ax) + "B" + base[ay].substring(ax + 1);
+    const bx = Math.round(cx);
+    const by = Math.round(cy + i);
+    base[by] = base[by].substring(0, bx) + "B" + base[by].substring(bx + 1);
+  }
+  return base;
+}
+
+/** Trade scales: two pans on a beam. */
+function tradeScalesSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Stand col 7-8, rows 5-13.
+  for (let y = 5; y <= 13; y++) {
+    let row = base[y];
+    row = row.substring(0, 7) + "66" + row.substring(9);
+    base[y] = row;
+  }
+  // Crossbar row 5, cols 2-13.
+  let row = base[5];
+  for (let x = 2; x <= 13; x++) row = row.substring(0, x) + "6" + row.substring(x + 1);
+  base[5] = row;
+  // Base row 13, cols 5-10.
+  row = base[13];
+  for (let x = 5; x <= 10; x++) row = row.substring(0, x) + "6" + row.substring(x + 1);
+  base[13] = row;
+  // Pans rows 6-8.
+  for (let x = 1; x <= 4; x++) base[7] = base[7].substring(0, x) + "D" + base[7].substring(x + 1);
+  for (let x = 11; x <= 14; x++) base[7] = base[7].substring(0, x) + "D" + base[7].substring(x + 1);
+  return base;
+}
+
+/** Pump station: a vertical pipe with a hand crank on top. */
+function pumpStationSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Pipe col 7-8, rows 3-13.
+  for (let y = 3; y <= 13; y++) {
+    let row = base[y];
+    row = row.substring(0, 7) + "BB" + row.substring(9);
+    base[y] = row;
+  }
+  // Crank handle row 2-3, cols 4-11.
+  let r = base[2];
+  for (let x = 4; x <= 11; x++) r = r.substring(0, x) + "1" + r.substring(x + 1);
+  base[2] = r;
+  // Flange row 13, cols 4-11.
+  r = base[13];
+  for (let x = 4; x <= 11; x++) r = r.substring(0, x) + "1" + r.substring(x + 1);
+  base[13] = r;
+  // Water drop at base.
+  base[12] = base[12].substring(0, 7) + "FF" + base[12].substring(9);
+  return base;
+}
+
+/** Tavern counter: low wooden bar with bottles. */
+function tavernCounterSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Counter top rows 7-9, full width.
+  for (let y = 7; y <= 9; y++) {
+    let row = base[y];
+    for (let x = 0; x < 16; x++) row = row.substring(0, x) + (y === 7 ? "6" : "5") + row.substring(x + 1);
+    base[y] = row;
+  }
+  // Bottles on top — three small pips.
+  base[5] = base[5].substring(0, 3) + "C" + base[5].substring(4);
+  base[6] = base[6].substring(0, 3) + "C" + base[6].substring(4);
+  base[5] = base[5].substring(0, 8) + "E" + base[5].substring(9);
+  base[6] = base[6].substring(0, 8) + "E" + base[6].substring(9);
+  base[5] = base[5].substring(0, 12) + "D" + base[5].substring(13);
+  base[6] = base[6].substring(0, 12) + "D" + base[6].substring(13);
+  return base;
+}
+
+/** Anvil sprite — black silhouette with optional glow underneath
+ * (E = lava red) for the magma forge. Use any single-char palette
+ * key for the glow colour. */
+function anvilSprite(glowChar: string): string[] {
+  const base = noisyFill(3, 2);
+  // Anvil body — wide top, narrow waist, flared base.
+  base[6] = base[6].substring(0, 2) + "111111111111" + base[6].substring(14);
+  base[7] = base[7].substring(0, 2) + "1" + "AAAAAAAAAA" + "1" + base[7].substring(14);
+  base[8] = base[8].substring(0, 4) + "11111111" + base[8].substring(12);
+  base[9] = base[9].substring(0, 5) + "111111" + base[9].substring(11);
+  base[10] = base[10].substring(0, 5) + "1AAAAA" + "1" + base[10].substring(12);
+  base[11] = base[11].substring(0, 4) + "11111111" + base[11].substring(12);
+  base[12] = base[12].substring(0, 3) + "1111111111" + base[12].substring(13);
+  // Glow underneath for magma forge.
+  if (glowChar === "E") {
+    base[13] = base[13].substring(0, 4) + "EEEEEEEE" + base[13].substring(12);
+  }
+  return base;
+}
+
+/** Smelter station: stone furnace with a wide bottom and a chimney. */
+function smelterStationSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Body rows 4-13.
+  for (let y = 4; y <= 13; y++) {
+    let row = base[y];
+    for (let x = 2; x <= 13; x++) {
+      const onEdge = x === 2 || x === 13 || y === 4 || y === 13;
+      row = row.substring(0, x) + (onEdge ? "1" : "9") + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Glowing firebox rows 8-11, cols 6-9.
+  for (let y = 8; y <= 11; y++) {
+    let row = base[y];
+    for (let x = 6; x <= 9; x++) row = row.substring(0, x) + "E" + row.substring(x + 1);
+    base[y] = row;
+  }
+  // Chimney col 7-8, rows 1-3.
+  for (let y = 1; y <= 3; y++) {
+    let row = base[y];
+    row = row.substring(0, 7) + "11" + row.substring(9);
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Workbench: a wooden bench with two legs and a small tool on top.
+ * `topColorChar` selects the palette index for the top surface so we
+ * can distinguish carpenter (wood) from mason (stone) at a glance. */
+function workbenchSprite(topColorChar: string): string[] {
+  const base = noisyFill(3, 2);
+  // Top rows 6-7, cols 1-14.
+  for (let y = 6; y <= 7; y++) {
+    let row = base[y];
+    for (let x = 1; x <= 14; x++) row = row.substring(0, x) + topColorChar + row.substring(x + 1);
+    base[y] = row;
+  }
+  // Edge row 6 highlight.
+  let row = base[6];
+  for (let x = 1; x <= 14; x++) row = row.substring(0, x) + "6" + row.substring(x + 1);
+  base[6] = row;
+  // Legs rows 8-13 at cols 2 and 13.
+  for (let y = 8; y <= 13; y++) {
+    let r = base[y];
+    r = r.substring(0, 2) + "1" + r.substring(3);
+    r = r.substring(0, 13) + "1" + r.substring(14);
+    base[y] = r;
+  }
+  // Small tool icon on top — a hammer outline.
+  base[4] = base[4].substring(0, 6) + "111" + base[4].substring(9);
+  base[5] = base[5].substring(0, 7) + "1" + base[5].substring(8);
+  return base;
+}
+
+/** Jeweller's bench: small table with a glittering gem on top. */
+function jewellerStationSprite(): string[] {
+  const base = workbenchSprite("B");
+  // Gem cluster — a few bright pips.
+  base[4] = base[4].substring(0, 7) + "B" + base[4].substring(8);
+  base[5] = base[5].substring(0, 6) + "BCB" + base[5].substring(9);
+  base[3] = base[3].substring(0, 7) + "C" + base[3].substring(8);
+  return base;
+}
+
+/** Brewer's kettle: round copper pot on a low fire. */
+function brewKettleSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Kettle body rows 4-11.
+  const cx = 7.5;
+  const cy = 8;
+  for (let y = 4; y <= 11; y++) {
+    for (let x = 0; x < 16; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 5) {
+        base[y] = base[y].substring(0, x) + "6" + base[y].substring(x + 1);
+      } else if (d < 5.8) {
+        base[y] = base[y].substring(0, x) + "1" + base[y].substring(x + 1);
+      }
+    }
+  }
+  // Steam tendrils rows 0-3, top centre.
+  base[2] = base[2].substring(0, 7) + "BB" + base[2].substring(9);
+  base[1] = base[1].substring(0, 8) + "B" + base[1].substring(9);
+  // Fire rows 12-13.
+  base[12] = base[12].substring(0, 5) + "EEEEEE" + base[12].substring(11);
+  base[13] = base[13].substring(0, 6) + "EDEE" + base[13].substring(10);
+  return base;
+}
+
+/** Kiln: dome-shaped clay firing kiln with an opening. */
+function kilnStationSprite(): string[] {
+  const base = noisyFill(3, 2);
+  const cx = 7.5;
+  const cy = 9;
+  for (let y = 4; y <= 13; y++) {
+    for (let x = 1; x <= 14; x++) {
+      const dx = x - cx;
+      const dy = (y - cy) * 1.1;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 6 && y <= 13) {
+        const onEdge = d > 5.3;
+        base[y] = base[y].substring(0, x) + (onEdge ? "1" : "6") + base[y].substring(x + 1);
+      }
+    }
+  }
+  // Glowing opening rows 8-11, cols 6-9.
+  for (let y = 8; y <= 11; y++) {
+    let row = base[y];
+    for (let x = 6; x <= 9; x++) row = row.substring(0, x) + "E" + row.substring(x + 1);
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Tannery vat: open wooden tub with a brownish liquid surface. */
+function tanneryVatSprite(): string[] {
+  const base = noisyFill(3, 2);
+  for (let y = 5; y <= 13; y++) {
+    let row = base[y];
+    for (let x = 2; x <= 13; x++) {
+      const onEdge = x === 2 || x === 13 || y === 13;
+      const onTop = y === 5 && x > 2 && x < 13;
+      row = row.substring(0, x) + (onEdge ? "1" : (onTop ? "1" : "4")) + row.substring(x + 1);
+    }
+    base[y] = row;
+  }
+  // Tanning liquid in middle rows 7-12.
+  for (let y = 7; y <= 12; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) row = row.substring(0, x) + "5" + row.substring(x + 1);
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Loom: vertical frame with strung warps. */
+function loomFrameSprite(): string[] {
+  const base = noisyFill(3, 2);
+  // Uprights at cols 2 and 13.
+  for (let y = 1; y <= 14; y++) {
+    let row = base[y];
+    row = row.substring(0, 2) + "6" + row.substring(3);
+    row = row.substring(0, 13) + "6" + row.substring(14);
+    base[y] = row;
+  }
+  // Top and bottom crossbars.
+  for (const y of [1, 14]) {
+    let row = base[y];
+    for (let x = 2; x <= 13; x++) row = row.substring(0, x) + "6" + row.substring(x + 1);
+    base[y] = row;
+  }
+  // Warp strings at cols 5, 8, 11.
+  for (let y = 2; y <= 13; y++) {
+    let row = base[y];
+    for (const x of [5, 8, 11]) row = row.substring(0, x) + "B" + row.substring(x + 1);
+    base[y] = row;
+  }
+  // Half-finished cloth panel rows 8-11.
+  for (let y = 8; y <= 11; y++) {
+    let row = base[y];
+    for (let x = 4; x <= 11; x++) row = row.substring(0, x) + "D" + row.substring(x + 1);
+    base[y] = row;
+  }
+  return base;
+}
+
+/** Gem-bearing ore vein in solid rock. Stone noise + a small cluster
+ * of bright pips in the gem's colour. */
+function gemVeinSprite(gemChar: string): string[] {
+  const base = noisyFill(10, 8);
+  const cluster: Array<[number, number]> = [
+    [6, 6], [7, 6], [8, 7], [7, 8], [6, 9], [9, 8], [10, 9],
+  ];
+  for (const [x, y] of cluster) {
+    base[y] = base[y].substring(0, x) + gemChar + base[y].substring(x + 1);
+  }
+  // A sparkle pip slightly off-cluster.
+  base[4] = base[4].substring(0, 11) + "B" + base[4].substring(12);
+  return base;
+}
+
+/** Metal / coal vein in solid rock — same noisy stone with a
+ * scattering of brighter pips in the vein's colour. */
+function oreVeinSprite(veinChar: string): string[] {
+  const base = noisyFill(10, 8);
+  const pips: Array<[number, number]> = [
+    [3, 4], [4, 5], [11, 6], [10, 5], [7, 9], [13, 12], [5, 11], [12, 3],
+  ];
+  for (const [x, y] of pips) {
+    base[y] = base[y].substring(0, x) + veinChar + base[y].substring(x + 1);
+  }
+  return base;
+}
 
 /** Empty grave plot — a darker patch of disturbed earth with a small
  * sunken outline. Reads as "ready for an interment". */
@@ -376,10 +862,101 @@ export function getTileSprite(t: TileType): HTMLCanvasElement | OffscreenCanvas 
   const key = `t:${t}`;
   let s = cache.get(key);
   if (!s) {
-    s = paintFromRows(TILE_PIXELS[t] ?? rep("F", 16, 16, "F"));
+    const pixels = TILE_PIXELS[t];
+    if (pixels) {
+      s = paintFromRows(pixels);
+    } else {
+      // No hand-drawn sprite for this tile — paint a generic
+      // "object on floor" silhouette in the tile's TILE_INFO colour.
+      // Previously this branch returned a flat fill of palette index F
+      // (clothes blue), which made every workshop / furniture / ore
+      // tile read like a water tile.
+      const info = TILE_INFO[t];
+      s = procedurallyColoredSprite(info?.color ?? 0xa0a0a0, info?.walkable ?? false);
+    }
     cache.set(key, s);
   }
   return s;
+}
+
+/** Procedural object-on-floor sprite tinted to `color`. Walkable
+ * tiles (furniture / stations resting on a floor) get a base layer
+ * of corridor-floor pattern with an object silhouette stamped on
+ * top; solid tiles (ore veins, gem clusters, special rocks) fill
+ * the whole sprite with the tile's colour plus a few sparkly
+ * highlight specks so the deposit reads as embedded mineral. */
+function procedurallyColoredSprite(
+  color: number,
+  walkable: boolean,
+): HTMLCanvasElement | OffscreenCanvas {
+  const surf = makeSurface();
+  const ctx = (surf as HTMLCanvasElement).getContext("2d") as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D;
+  ctx.clearRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
+  const base = `#${color.toString(16).padStart(6, "0")}`;
+  const dark = shadeColor(color, -0.4);
+  const light = shadeColor(color, 0.3);
+  if (!walkable) {
+    // Solid: 2×2 textured fill so the tile reads as embedded
+    // material, not a flat poster colour. A few specks add depth.
+    for (let y = 0; y < SPRITE_SIZE; y++) {
+      for (let x = 0; x < SPRITE_SIZE; x++) {
+        const k = (x * 13 + y * 7 + x * y) & 15;
+        ctx.fillStyle = k < 3 ? dark : base;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    // Sparkly specks at fixed positions — a few brighter dots so
+    // veins read as embedded minerals at a glance.
+    ctx.fillStyle = light;
+    for (const [x, y] of [[3, 4], [11, 6], [7, 9], [13, 12]]) {
+      ctx.fillRect(x, y, 1, 1);
+    }
+    return surf;
+  }
+  // Walkable: paint a dark corridor-floor base + an object body
+  // (rounded rectangle) in the tile's colour, with a dark outline
+  // and a 1-pixel highlight along the top edge.
+  for (let y = 0; y < SPRITE_SIZE; y++) {
+    for (let x = 0; x < SPRITE_SIZE; x++) {
+      const k = (x * 13 + y * 7 + x * y) & 15;
+      // PALETTE[2] = dark earth, PALETTE[3] = earth shadow. Same
+      // texture as CorridorFloor's noisyFill(3, 2).
+      ctx.fillStyle = k < 3 ? PALETTE[2] : PALETTE[3];
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  // Object body: rectangle inset 3 pixels with a rounded silhouette.
+  ctx.fillStyle = base;
+  ctx.fillRect(3, 4, 10, 9);
+  // Soft top edge highlight.
+  ctx.fillStyle = light;
+  ctx.fillRect(3, 4, 10, 1);
+  ctx.fillRect(3, 5, 1, 7);
+  // Bottom shadow.
+  ctx.fillStyle = dark;
+  ctx.fillRect(3, 12, 10, 1);
+  ctx.fillRect(12, 5, 1, 7);
+  // Dark outline corners so the silhouette pops on the dark floor.
+  ctx.fillStyle = PALETTE[1];
+  ctx.fillRect(2, 3, 12, 1);
+  ctx.fillRect(2, 13, 12, 1);
+  ctx.fillRect(2, 3, 1, 11);
+  ctx.fillRect(13, 3, 1, 11);
+  return surf;
+}
+
+/** Multiply each RGB channel by (1 + amount). Negative darkens. */
+function shadeColor(color: number, amount: number): string {
+  const r = (color >> 16) & 0xff;
+  const g = (color >> 8) & 0xff;
+  const b = color & 0xff;
+  const factor = 1 + amount;
+  const rr = Math.max(0, Math.min(255, Math.round(r * factor)));
+  const gg = Math.max(0, Math.min(255, Math.round(g * factor)));
+  const bb = Math.max(0, Math.min(255, Math.round(b * factor)));
+  return `rgb(${rr},${gg},${bb})`;
 }
 
 // ---- Layer-aware tinting -----------------------------------------------

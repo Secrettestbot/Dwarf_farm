@@ -434,6 +434,7 @@ export function restore(save: SaveV1): SimWorld {
   sim.planner.completed = save.plannerCompleted ?? blueprints.filter((b) => b.status === "complete").length;
   (sim.planner as unknown as { accum: number }).accum = save.plannerAccum ?? 0;
   sim.planner.rehydrate(sim.grid);
+  sim.planner.furnitureDemandDirty = true;
 
   // Event log + stockpile.
   if (save.events) {

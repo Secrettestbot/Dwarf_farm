@@ -17,7 +17,18 @@ import { SkillId } from "../dwarves/skills";
  * trade between the same fields the dwarves already eat / drink from
  * (food / drink / meals) plus accumulators (bars, tools) that future
  * production chains will consume. */
-export type ResourceKind = "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools" | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots" | "hide" | "leather" | "rope" | "cloth" | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk" | "throne" | "hospital_bed" | "tavern_counter" | "armoury_rack" | "pump_part";
+export type ResourceKind =
+  | "food" | "drink" | "ore" | "stone" | "dirt" | "bars" | "tools"
+  | "meals" | "gems" | "blocks" | "cut_gems" | "wood" | "planks" | "pots"
+  | "hide" | "leather" | "rope" | "cloth"
+  // Slice 1–7 furniture deliverables.
+  | "bed" | "barrel" | "table" | "bin" | "stove" | "library_desk"
+  | "throne" | "hospital_bed" | "tavern_counter" | "armoury_rack" | "pump_part"
+  // Slice 8 workshop deliverables + trade depot + water wheel + farm.
+  | "carpenter_bench" | "mason_bench"
+  | "smelter_furnace" | "forge_anvil" | "magma_anvil"
+  | "jeweller_bench" | "kiln_firebox" | "tannery_vat" | "loom_frame"
+  | "trade_scales" | "water_wheel_axle" | "seed_bag";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -309,6 +320,133 @@ export const CARPENTER_PUMP_PART_RECIPE: Recipe = {
   outputKind: "pump_part",
   outputQty: 1,
   ticks: 130,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+// ---- Slice 8: workshop benches / anvils / mechanisms --------------------
+// Each workshop needs a deliverable that gates its workstation tile.
+// Mason recipes produce stone-heavy fixtures (anvils, furnaces, fireboxes,
+// the carpenter's solid bench top); carpenter recipes produce the
+// wood-frame benches and the items that don't need a stone forge.
+
+export const MASON_CARPENTER_BENCH_RECIPE: Recipe = {
+  verb: "carves a carpenter's bench",
+  inputKind: "blocks",
+  inputQty: 2,
+  outputKind: "carpenter_bench",
+  outputQty: 1,
+  ticks: 110,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+export const CARPENTER_MASON_BENCH_RECIPE: Recipe = {
+  verb: "builds a mason's bench",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "mason_bench",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+export const MASON_SMELTER_FURNACE_RECIPE: Recipe = {
+  verb: "builds a smelter furnace",
+  inputKind: "blocks",
+  inputQty: 4,
+  outputKind: "smelter_furnace",
+  outputQty: 1,
+  ticks: 180,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+export const MASON_FORGE_ANVIL_RECIPE: Recipe = {
+  verb: "carves a forge anvil",
+  inputKind: "blocks",
+  inputQty: 4,
+  outputKind: "forge_anvil",
+  outputQty: 1,
+  ticks: 180,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+export const MASON_MAGMA_ANVIL_RECIPE: Recipe = {
+  verb: "carves a magma anvil",
+  inputKind: "blocks",
+  inputQty: 4,
+  outputKind: "magma_anvil",
+  outputQty: 1,
+  ticks: 200,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+export const CARPENTER_JEWELLER_BENCH_RECIPE: Recipe = {
+  verb: "builds a jeweller's bench",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "jeweller_bench",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+export const MASON_KILN_FIREBOX_RECIPE: Recipe = {
+  verb: "builds a kiln firebox",
+  inputKind: "blocks",
+  inputQty: 3,
+  outputKind: "kiln_firebox",
+  outputQty: 1,
+  ticks: 150,
+  skill: "masonry",
+  station: TileType.MasonStation,
+};
+
+export const CARPENTER_TANNERY_VAT_RECIPE: Recipe = {
+  verb: "builds a tanning vat",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "tannery_vat",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+export const CARPENTER_LOOM_FRAME_RECIPE: Recipe = {
+  verb: "builds a loom frame",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "loom_frame",
+  outputQty: 1,
+  ticks: 100,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+export const CARPENTER_TRADE_SCALES_RECIPE: Recipe = {
+  verb: "builds trade scales",
+  inputKind: "planks",
+  inputQty: 3,
+  outputKind: "trade_scales",
+  outputQty: 1,
+  ticks: 120,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+export const CARPENTER_WATER_WHEEL_AXLE_RECIPE: Recipe = {
+  verb: "builds a water-wheel axle",
+  inputKind: "planks",
+  inputQty: 4,
+  outputKind: "water_wheel_axle",
+  outputQty: 1,
+  ticks: 160,
   skill: "carpentry",
   station: TileType.CarpenterStation,
 };
