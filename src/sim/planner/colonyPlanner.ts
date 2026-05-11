@@ -220,17 +220,6 @@ export class ColonyPlanner {
   completedByKind: Record<string, number> = {};
   private claimedBy: Int32Array | null = null;
   private claimedW = 0;
-  /** Set of furniture ItemKind strings that at least one
-   * needs_furnishing blueprint is currently waiting on. Cached so
-   * findHaulTarget can do an O(1) check per item rather than
-   * scanning every blueprint per dwarf per tick. Marked dirty by
-   * the sim whenever blueprint state changes (planner emission,
-   * furniture delivery); refreshFurnitureDemand rebuilds it on
-   * demand. Saves us from rescanning the blueprint array every
-   * single tick — 24-day-long tests with hundreds of blueprints
-   * were spending substantial wall-clock on the rescan. */
-  furnitureDemand: Set<string> = new Set();
-  furnitureDemandDirty: boolean = true;
 
   // Reachable-from-spawn mask. The planner only emits blueprints whose
   // cavity is adjacent to a walkable tile reachable from spawn — otherwise
@@ -1209,24 +1198,6 @@ export class ColonyPlanner {
     });
   }
 
-  /** Rebuild the cached furnitureDemand set from the current
-   * blueprint states. Called from the sim tick whenever the dirty
-   * flag is set (after a planner emission or a delivery). Saves
-   * the per-tick rescan on most ticks where nothing changed. */
-  refreshFurnitureDemand(): void {
-    if (!this.furnitureDemandDirty) return;
-    this.furnitureDemandDirty = false;
-    this.furnitureDemand.clear();
-    for (const b of this.blueprints) {
-      if (b.status !== "needs_furnishing") continue;
-      const reqs = FURNITURE_REQUIREMENTS[b.kind];
-      if (!reqs) continue;
-      for (const r of reqs) {
-        const placed = b.furniturePlaced?.[r.item] ?? 0;
-        if (placed < r.count) this.furnitureDemand.add(r.item);
-      }
-    }
-  }
 
   /** True if (x, y) is walkable AND connected to spawn via walkable tiles. */
   private isReachable(ctx: PlannerContext, x: number, y: number): boolean {
@@ -1344,7 +1315,6 @@ export class ColonyPlanner {
         if (reqs && reqs.length > 0) {
           b.status = "needs_furnishing";
           b.furniturePlaced = {};
-          this.furnitureDemandDirty = true;
           // Place the door so the room is enclosed even before its
           // furniture lands — a bedroom-shaped cavity with no door is
           // just a hallway nook.

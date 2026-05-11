@@ -739,16 +739,8 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
  * the same tick don't both target it. Returns the item's tile (the dwarf
  * walks onto it). */
 function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number): { x: number; y: number } | null {
-  // Two-tier pickup: furniture kinds that a needs_furnishing room is
-  // actively waiting on beat everything else, so the early-game
-  // brewery / carpenter / mason doesn't sit half-built while haulers
-  // chase stone piles around. We scan items once and track the best
-  // candidate in each tier — priority wins if found, else fall back.
-  const demand = sim.planner.furnitureDemand;
-  let priorityEnt = -1;
-  let priority: { x: number; y: number; d: number } | null = null;
-  let fallbackEnt = -1;
-  let fallback: { x: number; y: number; d: number } | null = null;
+  let bestEnt = -1;
+  let best: { x: number; y: number; d: number } | null = null;
   const ents = sim.item.entities;
   for (let i = 0; i < ents.length; i++) {
     const it = sim.item.get(ents[i]);
@@ -767,35 +759,19 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     const dx = p.x - sx;
     const dy = p.y - sy;
     const d = dx * dx + dy * dy;
-    if (demand.has(it.kind)) {
-      if (
-        !priority ||
-        d < priority.d ||
-        (d === priority.d && (p.y < priority.y || (p.y === priority.y && p.x < priority.x)))
-      ) {
-        priority = { x: p.x, y: p.y, d };
-        priorityEnt = ents[i];
-      }
-    } else if (!priority) {
-      if (
-        !fallback ||
-        d < fallback.d ||
-        (d === fallback.d && (p.y < fallback.y || (p.y === fallback.y && p.x < fallback.x)))
-      ) {
-        fallback = { x: p.x, y: p.y, d };
-        fallbackEnt = ents[i];
-      }
+    if (
+      !best ||
+      d < best.d ||
+      (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
+    ) {
+      best = { x: p.x, y: p.y, d };
+      bestEnt = ents[i];
     }
   }
-  if (priorityEnt !== -1) {
-    sim.item.get(priorityEnt)!.claimedBy = hauler;
-    return { x: priority!.x, y: priority!.y };
+  if (bestEnt !== -1) {
+    sim.item.get(bestEnt)!.claimedBy = hauler;
   }
-  if (fallbackEnt !== -1) {
-    sim.item.get(fallbackEnt)!.claimedBy = hauler;
-    return { x: fallback!.x, y: fallback!.y };
-  }
-  return null;
+  return best ? { x: best.x, y: best.y } : null;
 }
 
 /** Find the nearest Armoury rack tile that doesn't already have a tool

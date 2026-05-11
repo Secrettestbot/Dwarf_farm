@@ -88,12 +88,6 @@ export function tick(sim: SimWorld): void {
     research: { completed: sim.research.completed },
     aquiferBreached: sim.aquiferBreachTick >= 0,
   });
-  // Refresh the hauler's furniture-demand cache once per tick.
-  // Blueprint transitions during sim.planner.tick (digging →
-  // needs_furnishing → complete) and during the per-tick haul / craft
-  // systems can both shift demand; rebuilding here means every dwarf
-  // that calls chooseTask this tick gets the latest set.
-  sim.planner.refreshFurnitureDemand();
   yearRolloverSystem(sim);
   seasonRolloverSystem(sim);
   emergencySystem(sim);
@@ -2730,7 +2724,6 @@ function tryPlaceFurniture(sim: SimWorld, kind: string, px: number, py: number):
     }
     if (!b.furniturePlaced) b.furniturePlaced = {};
     b.furniturePlaced[kind] = placed + 1;
-    sim.planner.furnitureDemandDirty = true;
     // All requirements satisfied? Flip to complete.
     let satisfied = true;
     for (const r of reqs) {
