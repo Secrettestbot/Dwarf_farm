@@ -4786,6 +4786,13 @@ function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   // the dwarf flees) records the work that did happen.
   if (job.progress === 0) {
     // Find the farm blueprint that owns this tile, mark the cell tended.
+    // Also stamp the room-level `lastMaintainedTick` so the architect
+    // doesn't treat an actively-tended farm as neglected — without
+    // this, isRoomNeglected fires after one in-game day and the
+    // planner keeps emitting fresh farm cavities to replace the
+    // "lost" ones. The result is N× the expected farm count, an
+    // overload of tend jobs that crowds out food hauling, and food
+    // piling up uneaten on the cells.
     for (const b of sim.planner.blueprints) {
       if (b.kind !== "farm" || b.status !== "complete" || !b.cellTendedAt) continue;
       // Only check if the tile is inside the bounding rect (cheap reject).
@@ -4797,6 +4804,7 @@ function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         const y = (c >>> 16) & 0xffff;
         if (x === pos.x && y === pos.y) {
           b.cellTendedAt[i] = sim.tick;
+          b.lastMaintainedTick = sim.tick;
           break;
         }
       }
@@ -4806,6 +4814,28 @@ function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (job.progress >= TEND_TICKS) {
     awardSkillXp(sim, e, "farming", 1);
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    // Harvest on tend: if food has accumulated on this cell, pick
+    // one up so the next chooseTask routes it to a kitchen /
+    // stockpile. Without this, food entities pile on farm cells
+    // (cap 4 per cell) while every idle dwarf keeps picking tend
+    // — tend is a higher chooseTask tier than haul, and a farm
+    // with overdue cells always wins. Combining tend + harvest
+    // means one trip to the cell handles both jobs.
+    if (!sim.carrying.has(e)) {
+      const itemEnts = sim.item.entities;
+      for (let i = 0; i < itemEnts.length; i++) {
+        const ie = itemEnts[i];
+        const ip = sim.position.get(ie);
+        const it = sim.item.get(ie);
+        if (!ip || !it) continue;
+        if (ip.x !== pos.x || ip.y !== pos.y) continue;
+        if (it.kind !== "food") continue;
+        if (it.claimedBy !== -1 && sim.ecs.isAlive(it.claimedBy)) continue;
+        sim.carrying.set(e, { kind: it.kind, quality: it.quality });
+        sim.destroyItem(ie);
+        break;
+      }
+    }
     sim.job.remove(e);
     sim.pathing.remove(e);
   }
