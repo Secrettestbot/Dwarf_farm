@@ -12,7 +12,7 @@ import { EventLogPanel } from "./ui/eventLogPanel";
 import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
 import { showFoundersScreen } from "./ui/foundersScreen";
-import { showReturnScreen } from "./ui/returnScreen";
+import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
 import { saveGame, loadGame } from "./save/db";
 import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
@@ -98,6 +98,16 @@ async function boot() {
     const tickRate = TICKS_PER_SECOND_AT_1X;
     let ticksToRun = Math.max(0, Math.floor((elapsedMs / 1000) * tickRate));
     if (ticksToRun > MAX_CATCHUP_TICKS) ticksToRun = MAX_CATCHUP_TICKS;
+
+    // Ask the player how much elapsed time they actually want
+    // simulated. Defaults: full, one in-game day, six in-game hours,
+    // or skip. Shorter options drop out when they'd be identical to
+    // the full elapsed length. A zero-tick return (saved seconds
+    // ago) skips the prompt entirely.
+    if (ticksToRun > 0) {
+      const picked = await showCatchupChoice(uiHost, elapsedMs, ticksToRun);
+      ticksToRun = picked.ticks;
+    }
 
     const sim = ticksToRun > 0 ? await catchUp(save, elapsedMs, ticksToRun) : restore(save);
     camera.x = save.cameraX;
