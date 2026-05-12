@@ -7,6 +7,75 @@ export interface DigestEntry {
   text: string;
 }
 
+/** Result of the pre-catch-up choice prompt: how many ticks the player
+ * wants the simulation to advance before they take control. 0 means
+ * skip — resume immediately at the saved state. */
+export interface CatchupChoice {
+  ticks: number;
+  label: string;
+}
+
+/** Show a one-shot choice screen offering the player a few catch-up
+ * lengths: simulate the full elapsed time, one in-game day, six
+ * in-game hours, or skip simulation entirely. The shorter options
+ * are only offered when the full elapsed time would exceed them
+ * (otherwise they'd be identical to the full option). Resolves once
+ * the player clicks a choice. */
+export function showCatchupChoice(host: HTMLElement, elapsedMs: number, fullTicks: number): Promise<CatchupChoice> {
+  return new Promise((resolve) => {
+    const root = document.createElement("div");
+    root.style.cssText =
+      "position:fixed;inset:0;background:#0a0a0e;color:#ddd;display:flex;align-items:center;justify-content:center;font-family:inherit;z-index:100;";
+    const card = document.createElement("div");
+    card.style.cssText = "max-width:560px;width:90%;text-align:center;";
+
+    const sec = Math.floor(elapsedMs / 1000);
+    const realLabel = formatRealElapsed(sec);
+    const fullIgLabel = formatInGameLength(fullTicks);
+
+    type Option = { ticks: number; label: string; sub: string };
+    const options: Option[] = [];
+    options.push({ ticks: fullTicks, label: "Simulate the full time", sub: fullIgLabel });
+    if (fullTicks > TICKS_PER_DAY) {
+      options.push({ ticks: TICKS_PER_DAY, label: "Simulate one day", sub: "1 in-game day" });
+    }
+    if (fullTicks > 6 * TICKS_PER_HOUR) {
+      options.push({ ticks: 6 * TICKS_PER_HOUR, label: "Simulate six hours", sub: "6 in-game hours" });
+    }
+    options.push({ ticks: 0, label: "Skip — resume where you left off", sub: "No simulation" });
+
+    const buttons = options
+      .map(
+        (o, i) => `
+          <button id="cc-opt-${i}" class="btn" style="display:block;width:100%;text-align:left;margin-top:8px;padding:10px 14px;">
+            <div style="font-size:13px;color:#e0c080;">${escapeHtml(o.label)}</div>
+            <div style="font-size:11px;color:#888;margin-top:2px;">${escapeHtml(o.sub)}</div>
+          </button>`,
+      )
+      .join("");
+
+    card.innerHTML = `
+      <div style="font-size:14px;letter-spacing:6px;color:#888;margin-bottom:8px;">⛏  RETURNING</div>
+      <h1 style="font-size:24px;margin:0 0 8px;color:#e0c080;">You were away for ${realLabel}.</h1>
+      <div style="color:#aaa;margin-bottom:18px;font-size:12px;">
+        Up to <strong style="color:#e0c080;">${fullIgLabel}</strong> would have passed in the mountain.
+        How much should the dwarves live through before you take over?
+      </div>
+      <div style="text-align:left;">${buttons}</div>
+    `;
+    root.appendChild(card);
+    host.appendChild(root);
+
+    for (let i = 0; i < options.length; i++) {
+      const btn = card.querySelector(`#cc-opt-${i}`) as HTMLButtonElement;
+      btn.addEventListener("click", () => {
+        root.remove();
+        resolve({ ticks: options[i].ticks, label: options[i].label });
+      });
+    }
+  });
+}
+
 export interface ReturnScreenHandle {
   setProgress(done: number, total: number): void;
   setStatus(line: string): void;
@@ -174,4 +243,11 @@ function formatRealElapsed(sec: number): string {
   if (hr < 24) return `${hr}h ${min % 60}m`;
   const d = Math.floor(hr / 24);
   return `${d}d ${hr % 24}h`;
+}
+
+function formatInGameLength(ticks: number): string {
+  const days = Math.floor(ticks / TICKS_PER_DAY);
+  const hours = Math.floor((ticks % TICKS_PER_DAY) / TICKS_PER_HOUR);
+  if (days > 0) return `${days} day${days === 1 ? "" : "s"}, ${hours}h`;
+  return `${hours}h`;
 }
