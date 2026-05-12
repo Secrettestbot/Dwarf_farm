@@ -2311,13 +2311,20 @@ function farmSystem(sim: SimWorld): void {
       const tendedAt = b.cellTendedAt[i];
       if (tendedAt < 0 || sim.tick - tendedAt > FARM_TEND_VALIDITY_TICKS) continue;
       if (sim.aiRng.nextFloat() < yieldChance) {
-        // Drop a raw food item on the cell. A hauler routes it to a
-        // kitchen (cooked meals), brewery (ale), or stockpile in
-        // priority order. Cap stacking on a single cell so an
-        // un-hauled farm doesn't grow a tower of food entities.
-        if (countItemsAt(sim, x, y, "food") < 4) {
-          sim.spawnItem({ kind: "food", x, y });
-        }
+        // Credit raw food directly to the global stockpile. Earlier
+        // versions spawned a food item entity on the farm cell that
+        // a hauler had to pick up and route to the kitchen / brewery
+        // / stockpile, but the chain was fragile at scale: with 9
+        // farms × 12 cells and a 4-item-per-cell cap, food piled up
+        // on cells faster than haulers could clear them — when the
+        // cap was hit, farm yield silently stalled. progressCraft
+        // already falls back to the stockpile counter when no input
+        // item is at the workshop station, so kitchens and breweries
+        // still consume the food from the counter just as if a
+        // hauler had delivered it. Side effect: the player sees
+        // stockpile.food rise tick by tick instead of seeing food
+        // entities scattered on the farm floor.
+        sim.stockpile.food++;
       }
       // Occasional fibre yield: cave plants ribbon the deeper farm
       // cavities with stringy fungal threads the colony spins into
