@@ -1,7 +1,7 @@
 import { generateWorld } from "./sim/world/worldgen";
 import { SimWorld } from "./sim/world/simWorld";
 import { tick } from "./sim/sim";
-import { Clock, SpeedLevel, TICKS_PER_SECOND_AT_1X, TICKS_PER_DAY } from "./sim/time";
+import { Clock, SpeedLevel, TICKS_PER_SECOND_AT_1X } from "./sim/time";
 import { Camera } from "./render/camera";
 import { renderWorld } from "./render/renderer";
 import { Minimap } from "./render/minimap";
@@ -30,8 +30,13 @@ import { NotificationCenter } from "./ui/notificationCenter";
 // 200×500 world for speed; live play uses the full size.
 const WORLD_WIDTH = 400;
 const WORLD_HEIGHT = 2000;
-// 1 in-game month at the GDD's 1× rate is the catch-up cap.
-const MAX_CATCHUP_TICKS = TICKS_PER_DAY * 30;
+// Catch-up cap: three real days. The pre-catch-up choice screen
+// (showCatchupChoice) lets the player pick a shorter window if
+// they don't want to wait, but Full needs to actually mean "all
+// the time you were away" up to a sane ceiling. Three real days
+// at 6 ticks/real-second ≈ 1.5M ticks — well bounded and still
+// covers weekend gaps without forcing a hard truncation.
+const MAX_CATCHUP_TICKS = 3 * 24 * 3600 * TICKS_PER_SECOND_AT_1X;
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d", { alpha: false })!;

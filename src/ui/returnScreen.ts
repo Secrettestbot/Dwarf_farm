@@ -1,4 +1,13 @@
-import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../sim/time";
+import { TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SECOND_AT_1X } from "../sim/time";
+
+/** Real-world durations expressed as tick counts. The catch-up
+ * choice screen offers shorter slices than the full elapsed time,
+ * measured against the wall clock — "one day" means one real day,
+ * "six hours" means six real hours. At 6 ticks per real second
+ * one real day is 518,400 ticks (≈ 15 in-game years), six real
+ * hours is 129,600 ticks (≈ 90 in-game days). */
+const ONE_REAL_DAY_TICKS = 24 * 3600 * TICKS_PER_SECOND_AT_1X;
+const SIX_REAL_HOURS_TICKS = 6 * 3600 * TICKS_PER_SECOND_AT_1X;
 
 /** A single chronicle entry surfaced in the post-catch-up digest. */
 export interface DigestEntry {
@@ -35,12 +44,20 @@ export function showCatchupChoice(host: HTMLElement, elapsedMs: number, fullTick
 
     type Option = { ticks: number; label: string; sub: string };
     const options: Option[] = [];
-    options.push({ ticks: fullTicks, label: "Simulate the full time", sub: fullIgLabel });
-    if (fullTicks > TICKS_PER_DAY) {
-      options.push({ ticks: TICKS_PER_DAY, label: "Simulate one day", sub: "1 in-game day" });
+    options.push({ ticks: fullTicks, label: "Simulate the full time", sub: `${realLabel} · ${fullIgLabel} in-mountain` });
+    if (fullTicks > ONE_REAL_DAY_TICKS) {
+      options.push({
+        ticks: ONE_REAL_DAY_TICKS,
+        label: "Simulate one day",
+        sub: `1 real day · ${formatInGameLength(ONE_REAL_DAY_TICKS)} in-mountain`,
+      });
     }
-    if (fullTicks > 6 * TICKS_PER_HOUR) {
-      options.push({ ticks: 6 * TICKS_PER_HOUR, label: "Simulate six hours", sub: "6 in-game hours" });
+    if (fullTicks > SIX_REAL_HOURS_TICKS) {
+      options.push({
+        ticks: SIX_REAL_HOURS_TICKS,
+        label: "Simulate six hours",
+        sub: `6 real hours · ${formatInGameLength(SIX_REAL_HOURS_TICKS)} in-mountain`,
+      });
     }
     options.push({ ticks: 0, label: "Skip — resume where you left off", sub: "No simulation" });
 
@@ -58,8 +75,8 @@ export function showCatchupChoice(host: HTMLElement, elapsedMs: number, fullTick
       <div style="font-size:14px;letter-spacing:6px;color:#888;margin-bottom:8px;">⛏  RETURNING</div>
       <h1 style="font-size:24px;margin:0 0 8px;color:#e0c080;">You were away for ${realLabel}.</h1>
       <div style="color:#aaa;margin-bottom:18px;font-size:12px;">
-        Up to <strong style="color:#e0c080;">${fullIgLabel}</strong> would have passed in the mountain.
-        How much should the dwarves live through before you take over?
+        That's about <strong style="color:#e0c080;">${fullIgLabel}</strong> in the mountain.
+        How much of it should the dwarves live through before you take over?
       </div>
       <div style="text-align:left;">${buttons}</div>
     `;
