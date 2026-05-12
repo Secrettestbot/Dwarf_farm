@@ -230,24 +230,25 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
-  // 5. Tend a farm cell that's getting close to fallow. Higher priority
-  //    than mining because a colony with no food loses fast — but lower
-  //    than survival needs above. Children skip it. Gated by the Farming
-  //    & Brewing slider — set to zero, dwarves stop tending.
-  if (age >= MIN_WORK_AGE && sim.sliders.farming > 0.05) {
+  // 5. Tend a farm cell that's getting close to fallow. Capped at
+  //    one concurrent tender per farm via findTendTarget — without
+  //    that cap every farm with overdue cells (most of them, most
+  //    of the time) sucks another idle dwarf into the tend loop
+  //    and the haul queue silently collapses. The !carrying gate
+  //    prevents the tend → harvest → re-tend loop when a dwarf
+  //    finishes a tend holding the harvested food: they fall
+  //    through to step 6.5's delivery branch instead.
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && sim.sliders.farming > 0.05) {
     const tendTarget = findTendTarget(sim, pos.x, pos.y);
     if (tendTarget) {
       return { kind: "tend" as JobKind, targetX: tendTarget.x, targetY: tendTarget.y, progress: 0 };
     }
   }
 
-  // 6. Maintain a neglected room. Sits between food work and digging:
-  //    if a bedroom or dining hall has been left to rot, fix it before
-  //    starting new excavation. The architect won't emit a fresh room
-  //    until the existing ones are kept up, so a colony of 7 can't
-  //    sprawl into a kingdom-sized footprint. Gated loosely by the
-  //    Construction slider since it's upkeep work.
-  if (age >= MIN_WORK_AGE && sim.sliders.construction > 0.05) {
+  // 6. Maintain a neglected room. !carrying gate for the same
+  //    reason as tend — a dwarf holding something needs to drop it
+  //    in step 6.5 before starting upkeep work.
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && sim.sliders.construction > 0.05) {
     const maintainTarget = findMaintainTarget(sim, pos.x, pos.y);
     if (maintainTarget) {
       return { kind: "maintain" as JobKind, targetX: maintainTarget.x, targetY: maintainTarget.y, progress: 0 };
@@ -257,28 +258,24 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // 6.5 Haul a loose item to a stockpile or a workshop that wants it.
   //     Sits ahead of new mining so finished cavities don't fill with
   //     debris while dwarves keep opening new tunnels. The dwarf
-  //     already carrying something jumps straight to the delivery half
-  //     via the early-return below.
+  //     already carrying something jumps straight to the delivery
+  //     half — the !carrying gates on tend / maintain above route
+  //     them here automatically. Carrying-with-no-destination drops
+  //     in place and falls THROUGH past the else-pickup branch so
+  //     the dwarf doesn't immediately re-grab what they just dropped.
   if (age >= MIN_WORK_AGE && sim.sliders.hauling > 0.05) {
     const carrying = sim.carrying.get(e);
     if (carrying) {
-      // Workshops that consume this resource get priority — feeding a
-      // smelter directly is the colony's reason for hauling ore.
       const workshop = findWorkshopWantingInput(sim, carrying.kind, pos.x, pos.y);
       if (workshop) {
         return { kind: "haul" as JobKind, targetX: workshop.x, targetY: workshop.y, progress: 1 };
       }
-      // Tools route to an Armoury rack ahead of the generic stockpile
-      // — that's how a colony stores its weapons in the GDD.
       if (carrying.kind === "tools") {
         const rack = findEmptyArmouryRack(sim, pos.x, pos.y);
         if (rack) {
           return { kind: "haul" as JobKind, targetX: rack.x, targetY: rack.y, progress: 1 };
         }
       }
-      // Furniture items (Bed, etc.) route to a needs_furnishing
-      // blueprint waiting on that exact item kind. Falls through to
-      // the regular stockpile drop if no such blueprint exists.
       const furn = findFurnitureRoute(sim, carrying.kind, pos.x, pos.y);
       if (furn) {
         return { kind: "haul" as JobKind, targetX: furn.x, targetY: furn.y, progress: 1 };
@@ -287,12 +284,8 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       if (drop) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
       }
-      // Nothing wants this item right now. Drop it on the floor at
-      // the current tile so the dwarf is free to pick up other
-      // things — without this every hauler ends up stuck carrying
-      // a stone or a barrel when the destination room hasn't been
-      // built yet, and the bin / barrel / table that WOULD
-      // complete that room can't be picked up.
+      // Nothing wants this item — drop in place. Falls through past
+      // the else-pickup branch below.
       sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
       sim.carrying.remove(e);
     } else {
@@ -703,11 +696,34 @@ function findFoodTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
  * colony spreads its tending instead of swarming one plot.
  */
 function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
-  const claimed = collectJobTargets(sim, "tend");
+  // Per-tile claim set (prevents two dwarves targeting the same
+  // cell) + per-farm claim set (caps tend at one concurrent tender
+  // per farm). A single competent farmer handles ~48 tend cycles a
+  // day per the recipe math, so one per farm keeps every farm's
+  // cells fresh while leaving the other 90% of the workforce free
+  // for hauling, crafting, mining, and research. Without the
+  // per-farm cap, a 4-farm colony with ~24 overdue cells pulls 24
+  // concurrent tenders out of a 25-dwarf population and the haul
+  // queue silently collapses.
+  const claimedTiles = collectJobTargets(sim, "tend");
+  const claimedFarms = new Set<number>();
+  const jEnts = sim.job.entities;
+  for (let i = 0; i < jEnts.length; i++) {
+    const j = sim.job.get(jEnts[i]);
+    if (!j || j.kind !== "tend") continue;
+    for (const b of sim.planner.blueprints) {
+      if (b.kind !== "farm" || b.status !== "complete") continue;
+      if (j.targetX < b.originX || j.targetX >= b.originX + b.width) continue;
+      if (j.targetY < b.originY || j.targetY >= b.originY + b.height) continue;
+      claimedFarms.add(b.id);
+      break;
+    }
+  }
   let best: { x: number; y: number; d: number } | null = null;
   for (const b of sim.planner.blueprints) {
     if (b.kind !== "farm" || b.status !== "complete") continue;
     if (!b.cellTendedAt) continue;
+    if (claimedFarms.has(b.id)) continue;
     for (let i = 0; i < b.cavity.length; i++) {
       const c = b.cavity[i];
       const x = c & 0xffff;
@@ -718,7 +734,7 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
       const tendedAt = b.cellTendedAt[i];
       const overdue = tendedAt < 0 || sim.tick - tendedAt > TEND_VALIDITY_TICKS;
       if (!overdue) continue;
-      if (claimed.has((y << 16) | x)) continue;
+      if (claimedTiles.has((y << 16) | x)) continue;
       const dx = x - sx;
       const dy = y - sy;
       const d = dx * dx + dy * dy;
