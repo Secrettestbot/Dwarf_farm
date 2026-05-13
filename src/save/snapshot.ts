@@ -100,7 +100,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
         : undefined,
       job: savedJob,
       pathing: savedPathing,
-      carrying: carrying ? { kind: carrying.kind, quality: carrying.quality } : undefined,
+      carrying: carrying
+        ? { kind: carrying.kind, quality: carrying.quality, count: carrying.count, withWheelbarrow: carrying.withWheelbarrow }
+        : undefined,
       squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
       equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
       obsession: obsession ? { skillId: obsession.skillId, endsAtTick: obsession.endsAtTick } : undefined,
@@ -180,6 +182,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       leather: sim.stockpile.leather,
       rope: sim.stockpile.rope,
       cloth: sim.stockpile.cloth,
+      wheelbarrows: sim.stockpile.wheelbarrows,
     },
     oreEverStruck: sim.oreEverStruck,
     lastYearAnnounced: sim.lastYearAnnounced,
@@ -381,7 +384,12 @@ export function restore(save: SaveV1): SimWorld {
       });
     }
     if (d.carrying) {
-      sim.carrying.set(e, { kind: d.carrying.kind, quality: d.carrying.quality });
+      sim.carrying.set(e, {
+        kind: d.carrying.kind,
+        quality: d.carrying.quality,
+        count: d.carrying.count,
+        withWheelbarrow: d.carrying.withWheelbarrow,
+      });
     }
     if (d.squad) {
       sim.squad.set(e, { draftedAtTick: d.squad.draftedAtTick });
@@ -467,6 +475,7 @@ export function restore(save: SaveV1): SimWorld {
     if (save.stockpile.leather !== undefined) sim.stockpile.leather = save.stockpile.leather;
     if (save.stockpile.rope !== undefined) sim.stockpile.rope = save.stockpile.rope;
     if (save.stockpile.cloth !== undefined) sim.stockpile.cloth = save.stockpile.cloth;
+    if (save.stockpile.wheelbarrows !== undefined) sim.stockpile.wheelbarrows = save.stockpile.wheelbarrows;
   }
   if (save.oreEverStruck) sim.oreEverStruck = true;
   if (save.lastYearAnnounced !== undefined) sim.lastYearAnnounced = save.lastYearAnnounced;

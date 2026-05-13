@@ -54,7 +54,7 @@ function plantStockpile(sim: SimWorld, ox: number, oy: number): Blueprint {
 }
 
 describe("food item routing", () => {
-  it("a tended farm cell credits food directly to the stockpile counter", () => {
+  it("a tended farm cell drops a food item entity instead of bumping the counter", () => {
     const w = generateWorld({ seed: 501, width: 200, height: 500 });
     const sim = new SimWorld(501, w.grid, w.surfaceY, w.spawn);
     sim.stockpile.food = 0;
@@ -63,12 +63,11 @@ describe("food item routing", () => {
       farm.cellTendedAt!.fill(sim.tick);
       tick(sim);
     }
-    // Farm yield bumps the counter directly now — earlier versions
-    // spawned a food item entity per yield, but the haul chain
-    // didn't scale past a 4-item cap per cell. progressCraft already
-    // falls back to the stockpile counter when no input item sits
-    // at the workshop station, so kitchens / breweries still work.
-    expect(sim.stockpile.food).toBeGreaterThan(0);
+    let foodItems = 0;
+    for (const ie of sim.item.entities) {
+      if (sim.item.get(ie)?.kind === "food") foodItems++;
+    }
+    expect(foodItems).toBeGreaterThan(0);
   });
 
   it("a hauler delivers a food item to the stockpile, crediting the counter", () => {

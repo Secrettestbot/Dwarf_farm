@@ -117,7 +117,43 @@ export type ItemKind =
   | "carpenter_bench" | "mason_bench"
   | "smelter_furnace" | "forge_anvil" | "magma_anvil"
   | "jeweller_bench" | "kiln_firebox" | "tannery_vat" | "loom_frame"
-  | "trade_scales" | "water_wheel_axle" | "seed_bag";
+  | "trade_scales" | "water_wheel_axle" | "seed_bag"
+  // Slice 9: hauling tools — wheelbarrows let a hauler carry up to
+  // 8 "size units" of items in one trip (food = 1 unit, ore = 2,
+  // bed = 4, etc.), draining piles of farm-cell food and stone
+  // backlog faster than the 1-item-per-trip default.
+  | "wheelbarrow";
+
+/** Cargo size for the wheelbarrow shared-pool haul system. A
+ * wheelbarrow has total capacity WHEELBARROW_CAPACITY; each item
+ * picked up consumes its WHEELBARROW_ITEM_SIZE from the load.
+ * Items with size ≥ capacity can only ever be carried one at a
+ * time (workshop-bench-sized deliverables). */
+export const WHEELBARROW_CAPACITY = 8;
+export const WHEELBARROW_ITEM_SIZE: Partial<Record<ItemKind, number>> = {
+  // Pebble-grade: a wheelbarrow holds a full load.
+  stone: 1, dirt: 1, ore: 1, gem: 1,
+  food: 1, drink: 1, meal: 1, seed_bag: 1,
+  bars: 1, tools: 1,
+  // Medium: half a load each.
+  wood: 2, hide: 2, pump_part: 2,
+  table: 2, bin: 2, stove: 2, library_desk: 2, hospital_bed: 2,
+  tavern_counter: 2, armoury_rack: 2,
+  // Large: a quarter-load. Two of these fill a wheelbarrow.
+  bed: 4, barrel: 4, throne: 4,
+  // Workshop benches / kilns / anvils — bulky enough that the
+  // wheelbarrow gives no advantage. One trip per item.
+  carpenter_bench: 8, mason_bench: 8,
+  smelter_furnace: 8, forge_anvil: 8, magma_anvil: 8,
+  jeweller_bench: 8, kiln_firebox: 8, tannery_vat: 8, loom_frame: 8,
+  trade_scales: 8, water_wheel_axle: 8,
+  // A wheelbarrow being hauled itself takes a whole barrow's worth
+  // — no carting wheelbarrows by wheelbarrow.
+  wheelbarrow: 8,
+};
+
+/** Default item size when no explicit entry exists. */
+export const WHEELBARROW_DEFAULT_SIZE = 4;
 
 export interface Item {
   kind: ItemKind;
@@ -135,9 +171,18 @@ export interface Item {
  * is in the "deliver to stockpile" half of a haul job. */
 export interface Carrying {
   kind: ItemKind;
+  /** How many of this kind the dwarf is hauling. 1 by default;
+   * higher when a wheelbarrow is checked out from the shared pool
+   * (capacity ÷ item-size, capped at WHEELBARROW_CAPACITY / size).
+   * Round-trips through save. */
+  count?: number;
+  /** True iff this haul drew a wheelbarrow from sim.stockpile.wheelbarrows.
+   * The wheelbarrow is returned to the pool when the carry empties
+   * (delivery or drop-in-place). */
+  withWheelbarrow?: boolean;
   /** Quality tier of the carried item — preserved end-to-end so a
    * Masterwork bar reaches the forge as a Masterwork bar, not a
-   * baseline one. */
+   * baseline one. (Applies to every unit in a stacked carry.) */
   quality?: number;
 }
 

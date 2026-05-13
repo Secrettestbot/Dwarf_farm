@@ -232,6 +232,7 @@ export function renderWorld(
       it.kind === "meal" ? "#e0c080" :
       it.kind === "wood" ? "#a87838" :
       it.kind === "hide" ? "#8a5a3a" :
+      it.kind === "wheelbarrow" ? "#a86838" :
       "#8a6a4a";
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);

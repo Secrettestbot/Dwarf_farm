@@ -28,7 +28,9 @@ export type ResourceKind =
   | "carpenter_bench" | "mason_bench"
   | "smelter_furnace" | "forge_anvil" | "magma_anvil"
   | "jeweller_bench" | "kiln_firebox" | "tannery_vat" | "loom_frame"
-  | "trade_scales" | "water_wheel_axle" | "seed_bag";
+  | "trade_scales" | "water_wheel_axle" | "seed_bag"
+  // Slice 9: hauling tools.
+  | "wheelbarrow";
 
 export interface Recipe {
   /** Human-readable verb for the event log. */
@@ -197,6 +199,22 @@ export const CARPENTER_BARREL_RECIPE: Recipe = {
   outputKind: "barrel",
   outputQty: 1,
   ticks: 90,
+  skill: "carpentry",
+  station: TileType.CarpenterStation,
+};
+
+/** Wheelbarrow — shared-pool hauling tool. Swapped in when the
+ * colony's wheelbarrow stockpile is low and a hauler chain would
+ * benefit from one. 2 planks → 1 wheelbarrow; planking is the
+ * gating cost so a young colony can't out-build itself before
+ * the carpenter chain spins up. */
+export const CARPENTER_WHEELBARROW_RECIPE: Recipe = {
+  verb: "builds a wheelbarrow",
+  inputKind: "planks",
+  inputQty: 2,
+  outputKind: "wheelbarrow",
+  outputQty: 1,
+  ticks: 110,
   skill: "carpentry",
   station: TileType.CarpenterStation,
 };

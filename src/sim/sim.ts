@@ -2,7 +2,7 @@ import { SimWorld } from "./world/simWorld";
 import { chooseTask } from "./jobs/chooseTask";
 import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
-import { JobAssignment, Pathing } from "./ecs/components";
+import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
 import { EntityId } from "./ecs/world";
 import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival } from "./events/narrator";
 import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, seasonOf, Season } from "./time";
@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -2311,20 +2311,16 @@ function farmSystem(sim: SimWorld): void {
       const tendedAt = b.cellTendedAt[i];
       if (tendedAt < 0 || sim.tick - tendedAt > FARM_TEND_VALIDITY_TICKS) continue;
       if (sim.aiRng.nextFloat() < yieldChance) {
-        // Credit raw food directly to the global stockpile. Earlier
-        // versions spawned a food item entity on the farm cell that
-        // a hauler had to pick up and route to the kitchen / brewery
-        // / stockpile, but the chain was fragile at scale: with 9
-        // farms × 12 cells and a 4-item-per-cell cap, food piled up
-        // on cells faster than haulers could clear them — when the
-        // cap was hit, farm yield silently stalled. progressCraft
-        // already falls back to the stockpile counter when no input
-        // item is at the workshop station, so kitchens and breweries
-        // still consume the food from the counter just as if a
-        // hauler had delivered it. Side effect: the player sees
-        // stockpile.food rise tick by tick instead of seeing food
-        // entities scattered on the farm floor.
-        sim.stockpile.food++;
+        // Drop a raw food item on the cell. A hauler routes it to a
+        // kitchen (cooked meals), brewery (ale), or stockpile in
+        // priority order. Cap stacking on a single cell so an
+        // un-hauled farm doesn't grow a tower of food entities —
+        // the wheelbarrow path lets a single hauler pick up the
+        // whole stack in one trip, so the cap isn't the throughput
+        // bottleneck it used to be.
+        if (countItemsAt(sim, x, y, "food") < 4) {
+          sim.spawnItem({ kind: "food", x, y });
+        }
       }
       // Occasional fibre yield: cave plants ribbon the deeper farm
       // cavities with stringy fungal threads the colony spins into
@@ -2529,6 +2525,30 @@ function needsPumpStationFurniture(sim: SimWorld): boolean {
     if (placed < 1) return true;
   }
   return false;
+}
+
+/** Wheelbarrow target — roughly one per five dwarves. Below the
+ * target the carpenter retools to crank out more; above it, the
+ * carpenter swaps to whatever furniture the colony actually needs.
+ * Includes wheelbarrows currently checked out by haulers (counted
+ * by scanning the carrying component) so the colony doesn't keep
+ * crafting just because every wheelbarrow is in active use. */
+function needsWheelbarrow(sim: SimWorld): boolean {
+  const target = Math.max(1, Math.ceil(sim.dwarf.size() / 5));
+  let inUse = 0;
+  const carriers = sim.carrying.entities;
+  for (let i = 0; i < carriers.length; i++) {
+    if (sim.carrying.get(carriers[i])?.withWheelbarrow) inUse++;
+  }
+  // Loose wheelbarrow entities (crafted but not yet hauled to the
+  // stockpile) also count toward supply — the carpenter just made
+  // it, it'll land in the counter soon.
+  let onFloor = 0;
+  const items = sim.item.entities;
+  for (let i = 0; i < items.length; i++) {
+    if (sim.item.get(items[i])?.kind === "wheelbarrow") onFloor++;
+  }
+  return sim.stockpile.wheelbarrows + inUse + onFloor < target;
 }
 
 /** Slice 8 demand helpers — one per workshop / utility room that
@@ -2841,12 +2861,17 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
       partner.partnerId = null;
     }
   }
-  // If the dwarf was carrying something, drop it on the death tile so a
-  // teammate can finish the haul. Releases any item claim implicitly via
-  // the alive-check in findHaulTarget.
+  // If the dwarf was carrying something, drop the whole stack on
+  // the death tile so a teammate can finish the haul. Releases any
+  // item claim implicitly via the alive-check in findHaulTarget.
+  // A checked-out wheelbarrow goes back into the shared pool.
   const carrying = sim.carrying.get(e);
   if (carrying) {
-    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+    const dropCount = carrying.count ?? 1;
+    for (let i = 0; i < dropCount; i++) {
+      sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    if (carrying.withWheelbarrow) sim.stockpile.wheelbarrows++;
   }
   // Prune grudge entries involving this dwarf — the feud dies with
   // them. The other party feels relieved, not vindicated; we don't
@@ -3879,6 +3904,8 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = CARPENTER_PUMP_PART_RECIPE;
     } else if (needsBreweryFurniture(sim)) {
       recipe = CARPENTER_BARREL_RECIPE;
+    } else if (needsWheelbarrow(sim)) {
+      recipe = CARPENTER_WHEELBARROW_RECIPE;
     } else if (needsHospitalFurniture(sim)) {
       recipe = CARPENTER_HOSPITAL_BED_RECIPE;
     } else if (needsStockpileFurniture(sim)) {
@@ -4174,6 +4201,7 @@ function outputAsItemKind(resource: string): import("./ecs/components").ItemKind
   if (resource === "trade_scales") return "trade_scales";
   if (resource === "water_wheel_axle") return "water_wheel_axle";
   if (resource === "seed_bag") return "seed_bag";
+  if (resource === "wheelbarrow") return "wheelbarrow";
   return null;
 }
 
@@ -4316,13 +4344,30 @@ export const QUALITY_LABELS = ["basic", "Fine", "Superior", "Exceptional", "Mast
  * leg fresh — keeps the state machine boring and easy to save. */
 function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   if (job.progress === 0) {
-    // Pickup leg.
+    // Pickup leg. If the colony has any wheelbarrows on hand and the
+    // first item kind at this tile fits in one, check one out and
+    // load the dwarf up with as many identical items as the
+    // wheelbarrow can hold. The capacity check uses
+    // WHEELBARROW_ITEM_SIZE so a stack of 4 food at a farm cell
+    // (size 1 × 4 = 4 of 8 units) goes in one trip; a single bed
+    // (size 4) is one trip whether a wheelbarrow's around or not.
     if (pos.x !== job.targetX || pos.y !== job.targetY) {
       sim.job.remove(e);
       sim.pathing.remove(e);
       return;
     }
-    // Find the item at this tile.
+    // Pick the kind the hauler was sent to fetch. findHaulTarget
+    // claims the specific entity it wants the dwarf to pick up — if
+    // a wheelbarrow item happens to share the tile with a bed, the
+    // dwarf claimed the BED and a naive first-at-tile pickup would
+    // grab the wheelbarrow instead, leaving the bed claimed forever
+    // and unhaulable. Prefer the entity this dwarf actually claimed,
+    // then fall back to any item at the tile (covers the case where
+    // the claim was wiped by destruction between job assignment and
+    // arrival, or where the dwarf was steered here by a different
+    // mechanism).
+    let firstKind: import("./ecs/components").ItemKind | null = null;
+    let firstQuality: number | undefined;
     const ents = sim.item.entities;
     for (let i = 0; i < ents.length; i++) {
       const ie = ents[i];
@@ -4330,9 +4375,67 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       const p = sim.position.get(ie);
       if (!it || !p) continue;
       if (p.x !== pos.x || p.y !== pos.y) continue;
-      sim.carrying.set(e, { kind: it.kind, quality: it.quality });
-      sim.destroyItem(ie);
+      if (it.claimedBy !== e) continue;
+      firstKind = it.kind;
+      firstQuality = it.quality;
       break;
+    }
+    if (firstKind === null) {
+      // Fallback: take any item at the tile, even if claimed by
+      // another dwarf — claims race tracking can get stale, and the
+      // original pre-claim-aware pickup did this unconditionally.
+      for (let i = 0; i < ents.length; i++) {
+        const ie = ents[i];
+        const it = sim.item.get(ie);
+        const p = sim.position.get(ie);
+        if (!it || !p) continue;
+        if (p.x !== pos.x || p.y !== pos.y) continue;
+        firstKind = it.kind;
+        firstQuality = it.quality;
+        break;
+      }
+    }
+    if (firstKind !== null) {
+      const size = WHEELBARROW_ITEM_SIZE[firstKind] ?? WHEELBARROW_DEFAULT_SIZE;
+      // Skip wheelbarrow checkout when the item itself takes the
+      // whole barrow — no parallel pickup gain to be had.
+      // Check out a wheelbarrow from the shared pool when the
+      // colony has one and the item is small enough that several
+      // would fit. capacity is the max number of `kind` units a
+      // single wheelbarrow trip can carry; for size-8 items
+      // (workshop benches, water-wheel axles) it stays at 1 — they
+      // fill a whole barrow regardless. Skip the checkout entirely
+      // when there's no stack to clear (a single-item pickup wastes
+      // a wheelbarrow cycle for nothing).
+      let capacity = 1;
+      let withWheelbarrow = false;
+      if (size < WHEELBARROW_CAPACITY && sim.stockpile.wheelbarrows > 0) {
+        const stack = countItemsAt(sim, pos.x, pos.y, firstKind);
+        if (stack > 1) {
+          withWheelbarrow = true;
+          capacity = Math.max(1, Math.floor(WHEELBARROW_CAPACITY / size));
+          sim.stockpile.wheelbarrows--;
+        }
+      }
+      let count = 0;
+      // Snapshot the entity list because destroyItem mutates it.
+      const snapshot = ents.slice();
+      for (let i = 0; i < snapshot.length && count < capacity; i++) {
+        const ie = snapshot[i];
+        const it = sim.item.get(ie);
+        const p = sim.position.get(ie);
+        if (!it || !p) continue;
+        if (p.x !== pos.x || p.y !== pos.y) continue;
+        if (it.kind !== firstKind) continue;
+        sim.destroyItem(ie);
+        count++;
+      }
+      if (count > 0) {
+        sim.carrying.set(e, { kind: firstKind, count, withWheelbarrow, quality: firstQuality });
+      } else if (withWheelbarrow) {
+        // Pickup raced with another hauler — return the wheelbarrow.
+        sim.stockpile.wheelbarrows++;
+      }
     }
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -4345,107 +4448,45 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.pathing.remove(e);
     return;
   }
-  // Three delivery destinations:
-  //  - a workshop station that wants this resource (drop the item on
-  //    the floor for the workshop's craft job to consume);
-  //  - an Armoury rack (drop a tool item there for the draft to equip
-  //    soldiers from);
-  //  - a stockpile cell (credit the global counter).
+  const kind = carrying.kind;
+  const quality = carrying.quality;
+  let remaining = carrying.count ?? 1;
   const tile = sim.grid.getTile(pos.x, pos.y);
-  let droppedAsItem = false;
+  // First: try to deliver one unit to a workshop station that wants
+  // this kind. Only one item ever sits at a station (it's the
+  // "input" tile for the next craft), so the bulk pickup deposits
+  // one here and the rest fall through to the stockpile counter.
   for (const b of sim.planner.blueprints) {
+    if (remaining <= 0) break;
     if (b.status !== "complete") continue;
     const recipe = recipeFor(b.kind);
     if (!recipe) continue;
     if (recipe.station !== tile) continue;
-    if (recipe.inputKind !== carrying.kind) continue;
+    if (recipe.inputKind !== kind) continue;
     if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
     if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
-    sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
-    droppedAsItem = true;
+    sim.spawnItem({ kind, x: pos.x, y: pos.y, quality });
+    remaining--;
     break;
   }
-  if (!droppedAsItem && carrying.kind === "tools" && tile === TileType.ArmouryRack) {
-    sim.spawnItem({ kind: "tools", x: pos.x, y: pos.y, quality: carrying.quality });
-    droppedAsItem = true;
+  if (remaining > 0 && kind === "tools" && tile === TileType.ArmouryRack) {
+    sim.spawnItem({ kind: "tools", x: pos.x, y: pos.y, quality });
+    remaining--;
   }
-  // Furniture delivery: if we're standing on a cavity tile of a
-  // needs_furnishing blueprint that wants this item kind, stamp
-  // the corresponding furniture tile and consume the item. The
-  // blueprint's status flips to complete once every requirement
-  // is satisfied.
-  if (!droppedAsItem) {
-    const placed = tryPlaceFurniture(sim, carrying.kind, pos.x, pos.y);
-    if (placed) droppedAsItem = true;
+  // Furniture delivery: tryPlaceFurniture consumes one unit; the
+  // rest fall through to stockpile credits / floor drops below.
+  while (remaining > 0 && tryPlaceFurniture(sim, kind, pos.x, pos.y)) {
+    remaining--;
   }
-  if (!droppedAsItem) {
-    if (carrying.kind === "ore") { sim.stockpile.ore++; bumpCumulative(sim, "ore"); }
-    else if (carrying.kind === "stone") { sim.stockpile.stone++; bumpCumulative(sim, "stone"); }
-    else if (carrying.kind === "dirt") { sim.stockpile.dirt++; bumpCumulative(sim, "dirt"); }
-    else if (carrying.kind === "gem") { sim.stockpile.gems++; bumpCumulative(sim, "gems"); }
-    else if (carrying.kind === "bars") { sim.stockpile.bars++; bumpCumulative(sim, "bars"); }
-    else if (carrying.kind === "tools") sim.stockpile.tools++;
-    else if (carrying.kind === "food") sim.stockpile.food++;
-    else if (carrying.kind === "drink") sim.stockpile.drink++;
-    else if (carrying.kind === "meal") sim.stockpile.meals++;
-    else if (carrying.kind === "wood") { sim.stockpile.wood++; bumpCumulative(sim, "wood"); }
-    else if (carrying.kind === "hide") { sim.stockpile.hide++; bumpCumulative(sim, "hide"); }
-    else if (carrying.kind === "bed") {
-      // No needs_furnishing bedroom wanted this bed — drop it as an
-      // item so a later bedroom can be filled.
-      sim.spawnItem({ kind: "bed", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "barrel") {
-      // Same — no brewery currently wants this barrel; sit it on
-      // the floor for the next one.
-      sim.spawnItem({ kind: "barrel", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "table") {
-      sim.spawnItem({ kind: "table", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "bin") {
-      sim.spawnItem({ kind: "bin", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "stove") {
-      sim.spawnItem({ kind: "stove", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "library_desk") {
-      sim.spawnItem({ kind: "library_desk", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "throne") {
-      sim.spawnItem({ kind: "throne", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "hospital_bed") {
-      sim.spawnItem({ kind: "hospital_bed", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "tavern_counter") {
-      sim.spawnItem({ kind: "tavern_counter", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "armoury_rack") {
-      sim.spawnItem({ kind: "armoury_rack", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    else if (carrying.kind === "pump_part") {
-      sim.spawnItem({ kind: "pump_part", x: pos.x, y: pos.y, quality: carrying.quality });
-    }
-    // Slice 8 fallbacks. The needs_furnishing route in tryPlaceFurniture
-    // takes the happy path; if every workshop / depot / wheel / farm of
-    // the relevant kind is already furnished, sit the deliverable on the
-    // floor so the next planner emission can pick it up. Keeps the
-    // hauler from dead-locking with a non-routable item.
-    else if (carrying.kind === "carpenter_bench"
-      || carrying.kind === "mason_bench"
-      || carrying.kind === "smelter_furnace"
-      || carrying.kind === "forge_anvil"
-      || carrying.kind === "magma_anvil"
-      || carrying.kind === "jeweller_bench"
-      || carrying.kind === "kiln_firebox"
-      || carrying.kind === "tannery_vat"
-      || carrying.kind === "loom_frame"
-      || carrying.kind === "trade_scales"
-      || carrying.kind === "water_wheel_axle"
-      || carrying.kind === "seed_bag") {
-      sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
-    }
+  // Whatever's left gets credited to the stockpile counter for
+  // kinds that have one, or dropped back on the floor as separate
+  // item entities for non-counter kinds (furniture, slice-8
+  // deliverables). The credit / drop helper below handles both.
+  for (let i = 0; i < remaining; i++) {
+    creditOrDrop(sim, kind, pos.x, pos.y, quality);
+  }
+  if (carrying.withWheelbarrow) {
+    sim.stockpile.wheelbarrows++;
   }
   sim.carrying.remove(e);
   // Hauling earns hauling XP — every successful delivery counts as
@@ -4455,6 +4496,38 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
   sim.pathing.remove(e);
+}
+
+/** Single-unit deposit for the haul-delivery's leftover items. Counter
+ * kinds (stone, ore, food, etc.) bump the global stockpile and tick
+ * the cumulative tracker for material-gated research; furniture
+ * deliverables that didn't find a needs_furnishing room get dropped
+ * back as item entities so a later one can pick them up. */
+export function creditOrDrop(
+  sim: SimWorld,
+  kind: import("./ecs/components").ItemKind,
+  x: number,
+  y: number,
+  quality?: number,
+): void {
+  if (kind === "ore") { sim.stockpile.ore++; bumpCumulative(sim, "ore"); }
+  else if (kind === "stone") { sim.stockpile.stone++; bumpCumulative(sim, "stone"); }
+  else if (kind === "dirt") { sim.stockpile.dirt++; bumpCumulative(sim, "dirt"); }
+  else if (kind === "gem") { sim.stockpile.gems++; bumpCumulative(sim, "gems"); }
+  else if (kind === "bars") { sim.stockpile.bars++; bumpCumulative(sim, "bars"); }
+  else if (kind === "tools") sim.stockpile.tools++;
+  else if (kind === "food") sim.stockpile.food++;
+  else if (kind === "drink") sim.stockpile.drink++;
+  else if (kind === "meal") sim.stockpile.meals++;
+  else if (kind === "wood") { sim.stockpile.wood++; bumpCumulative(sim, "wood"); }
+  else if (kind === "hide") { sim.stockpile.hide++; bumpCumulative(sim, "hide"); }
+  else if (kind === "wheelbarrow") sim.stockpile.wheelbarrows++;
+  else {
+    // Furniture deliverables and slice-8 workshop benches sit on
+    // the floor when no needs_furnishing room is ready for them —
+    // a later emission picks them up via findFurnitureRoute.
+    sim.spawnItem({ kind, x, y, quality });
+  }
 }
 
 /** Sit at the Safe Zone tile until the emergency lifts. The job is dropped
