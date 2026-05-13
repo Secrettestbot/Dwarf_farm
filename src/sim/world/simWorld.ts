@@ -111,6 +111,13 @@ export interface Stockpile {
   /** Woven cloth — Loom output. Future input for trade goods, soft
    * furnishings, and tier-2 medicine bandages. */
   cloth: number;
+  /** Shared pool of wheelbarrows the colony has crafted. Haulers
+   * check one out at pickup time (counter-- + Carrying.withWheelbarrow
+   * = true) and return it on delivery or drop-in-place. With a
+   * wheelbarrow checked out, a hauler can load multiple items of
+   * one kind in a single pickup up to WHEELBARROW_CAPACITY units
+   * of cargo space. Crafted at the carpenter from 2 planks. */
+  wheelbarrows: number;
 }
 
 // Starter caches sized to give the colony comfortable runway for
@@ -193,6 +200,7 @@ export class SimWorld {
     leather: 0,
     rope: 0,
     cloth: 0,
+    wheelbarrows: 0,
   };
 
   // True once the colony has hit its first ore tile. Used to fire a one-
@@ -495,6 +503,7 @@ export class SimWorld {
     else if (kind === "meal") this.stockpile.meals++;
     else if (kind === "wood") this.stockpile.wood++;
     else if (kind === "hide") this.stockpile.hide++;
+    else if (kind === "wheelbarrow") this.stockpile.wheelbarrows++;
   }
 
   /** Destroy an item entity (after it's hauled into a stockpile). */

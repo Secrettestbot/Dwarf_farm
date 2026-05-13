@@ -284,9 +284,23 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       if (drop) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
       }
-      // Nothing wants this item — drop in place. Falls through past
-      // the else-pickup branch below.
-      sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+      // Nothing wants this item right now. Wheelbarrows credit the
+      // colony pool directly — keeping them as floor items causes a
+      // pick-up / drop loop on the workshop output tile that starves
+      // beds and barrels of haulers (they share the carpenter
+      // station tile with a wheelbarrow that has a lower entity ID,
+      // so findHaulTarget keeps grabbing the wheelbarrow first).
+      // Other kinds sit on the floor so a later needs_furnishing
+      // room can claim them.
+      const dropCount = carrying.count ?? 1;
+      if (carrying.kind === "wheelbarrow") {
+        sim.stockpile.wheelbarrows += dropCount;
+      } else {
+        for (let i = 0; i < dropCount; i++) {
+          sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+        }
+      }
+      if (carrying.withWheelbarrow) sim.stockpile.wheelbarrows++;
       sim.carrying.remove(e);
     } else {
       const haul = findHaulTarget(sim, e, pos.x, pos.y);
