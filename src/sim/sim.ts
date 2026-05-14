@@ -87,6 +87,7 @@ export function tick(sim: SimWorld): void {
     events: sim.events,
     research: { completed: sim.research.completed },
     aquiferBreached: sim.aquiferBreachTick >= 0,
+    recentFarHauls: sim.recentFarHauls,
   });
   yearRolloverSystem(sim);
   seasonRolloverSystem(sim);
@@ -4431,7 +4432,17 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         count++;
       }
       if (count > 0) {
-        sim.carrying.set(e, { kind: firstKind, count, withWheelbarrow, quality: firstQuality });
+        sim.carrying.set(e, {
+          kind: firstKind,
+          count,
+          withWheelbarrow,
+          quality: firstQuality,
+          // Record where + when the load was picked up so the
+          // delivery leg can tell whether this haul was unusually
+          // slow and the colony might benefit from another
+          // stockpile closer to here.
+          pickedUpAt: { x: pos.x, y: pos.y, tick: sim.tick },
+        });
       } else if (withWheelbarrow) {
         // Pickup raced with another hauler — return the wheelbarrow.
         sim.stockpile.wheelbarrows++;
@@ -4482,6 +4493,12 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   // kinds that have one, or dropped back on the floor as separate
   // item entities for non-counter kinds (furniture, slice-8
   // deliverables). The credit / drop helper below handles both.
+  // If this delivery landed at a stockpile cavity AND took long
+  // enough to qualify as a "far haul," log the pickup point as a
+  // demand signal for the architect — see needsStockpile.
+  if (remaining > 0 && carrying.pickedUpAt) {
+    maybeRecordFarHaul(sim, pos.x, pos.y, carrying.pickedUpAt, sim.tick);
+  }
   for (let i = 0; i < remaining; i++) {
     creditOrDrop(sim, kind, pos.x, pos.y, quality);
   }
@@ -4503,6 +4520,47 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
  * the cumulative tracker for material-gated research; furniture
  * deliverables that didn't find a needs_furnishing room get dropped
  * back as item entities so a later one can pick them up. */
+/** Delivery time threshold (ticks) above which a stockpile-bound haul
+ * counts as a "far haul" — the colony's signal that another
+ * stockpile might be needed nearer to the pickup point. One in-game
+ * hour (60 ticks) is roughly the time a hauler can spend walking a
+ * straight 30-tile path; longer than that and the throughput cost
+ * of adding a stockpile is worth the placement budget. */
+export const FAR_HAUL_TICKS = 60;
+
+/** Cap on rolling far-haul entries kept on sim.recentFarHauls.
+ * Capacity-only eviction; the planner does the age filter itself
+ * when reading the buffer so it can use a smaller fresh-window
+ * for the demand signal without losing the older entries that
+ * still get culled here as new ones arrive. */
+const FAR_HAUL_LOG_CAP = 16;
+
+function maybeRecordFarHaul(
+  sim: SimWorld,
+  dropX: number,
+  dropY: number,
+  pickup: { x: number; y: number; tick: number },
+  now: number,
+): void {
+  // Only count drops that landed inside a complete stockpile
+  // cavity — workshop deliveries can take a while too, but they
+  // ask for "more workshops," not "more stockpiles."
+  let atStockpile = false;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "stockpile" || b.status !== "complete") continue;
+    if (dropX < b.originX || dropX >= b.originX + b.width) continue;
+    if (dropY < b.originY || dropY >= b.originY + b.height) continue;
+    atStockpile = true;
+    break;
+  }
+  if (!atStockpile) return;
+  if (now - pickup.tick < FAR_HAUL_TICKS) return;
+  sim.recentFarHauls.push({ x: pickup.x, y: pickup.y, tick: now });
+  // Bounded ring. Drop oldest by trim — array.shift is O(n) but
+  // n ≤ 16 so the cost is negligible compared to the haul tick.
+  while (sim.recentFarHauls.length > FAR_HAUL_LOG_CAP) sim.recentFarHauls.shift();
+}
+
 export function creditOrDrop(
   sim: SimWorld,
   kind: import("./ecs/components").ItemKind,

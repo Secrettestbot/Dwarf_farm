@@ -432,4 +432,57 @@ describe("ColonyPlanner", () => {
       expect(pa.blueprints[i].kind).toBe(pb.blueprints[i].kind);
     }
   });
+
+  it("emits a second stockpile when recent far hauls signal one is needed", () => {
+    // 20-dwarf colony with one stockpile already in place. Seed enough
+    // recentFarHauls (the haul-travel-time signal) to push
+    // needsStockpile past its quorum, then verify the planner picks
+    // up a second stockpile blueprint within a few evaluations.
+    const w = generateWorld({ seed: 87, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    // Hand-carve a corridor outward from spawn so reachable space
+    // includes the hot point we want the new stockpile to land near.
+    for (let dx = -30; dx <= 30; dx++) {
+      w.grid.setTile(w.spawn.x + dx, w.spawn.y, 7); // CorridorFloor
+    }
+    // Plant the first stockpile by hand so existingByKind > 0 and
+    // we exercise the secondary signal (not the cold-start "no
+    // stockpile yet" branch).
+    const firstStockpile = {
+      id: 9999,
+      kind: "stockpile" as const,
+      originX: w.spawn.x - 2,
+      originY: w.spawn.y,
+      width: 5,
+      height: 4,
+      cavity: new Int32Array([
+        (w.spawn.y << 16) | (w.spawn.x - 2 & 0xffff),
+      ]),
+      status: "complete" as const,
+      priority: 1,
+      createdTick: 0,
+    };
+    planner.blueprints.push(firstStockpile);
+    planner.completedByKind["stockpile"] = 1;
+    // Eight far-haul pickups clustered 25 tiles east of spawn. The
+    // demand signal needs ≥ 8 fresh entries to fire.
+    const recent = [];
+    for (let i = 0; i < 8; i++) {
+      recent.push({ x: w.spawn.x + 25, y: w.spawn.y, tick: 100 + i });
+    }
+    let emitted = false;
+    for (let t = 100; t <= 2000 && !emitted; t++) {
+      planner.tick({
+        grid: w.grid,
+        spawn: w.spawn,
+        tick: t,
+        population: 20,
+        rng: testRng,
+        recentFarHauls: recent,
+      });
+      const stockpiles = planner.blueprints.filter((b) => b.kind === "stockpile");
+      if (stockpiles.length >= 2) emitted = true;
+    }
+    expect(emitted).toBe(true);
+  });
 });

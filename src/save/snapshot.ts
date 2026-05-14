@@ -101,7 +101,13 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       job: savedJob,
       pathing: savedPathing,
       carrying: carrying
-        ? { kind: carrying.kind, quality: carrying.quality, count: carrying.count, withWheelbarrow: carrying.withWheelbarrow }
+        ? {
+            kind: carrying.kind,
+            quality: carrying.quality,
+            count: carrying.count,
+            withWheelbarrow: carrying.withWheelbarrow,
+            pickedUpAt: carrying.pickedUpAt,
+          }
         : undefined,
       squad: squad ? { draftedAtTick: squad.draftedAtTick } : undefined,
       equipment: equipment ? { weapon: equipment.weapon, weaponQuality: equipment.weaponQuality } : undefined,
@@ -204,6 +210,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     hollowKingSpawned: sim.hollowKingSpawned,
     voidShadesSlain: sim.voidShadesSlain,
     aquiferBreachTick: sim.aquiferBreachTick,
+    recentFarHauls: sim.recentFarHauls.length > 0 ? sim.recentFarHauls.slice() : undefined,
     caravan: sim.caravanLeavesTick > 0
       ? {
           x: sim.caravanX,
@@ -389,6 +396,7 @@ export function restore(save: SaveV1): SimWorld {
         quality: d.carrying.quality,
         count: d.carrying.count,
         withWheelbarrow: d.carrying.withWheelbarrow,
+        pickedUpAt: d.carrying.pickedUpAt,
       });
     }
     if (d.squad) {
@@ -507,6 +515,7 @@ export function restore(save: SaveV1): SimWorld {
   if (save.hollowKingSpawned) sim.hollowKingSpawned = true;
   if (save.voidShadesSlain !== undefined) sim.voidShadesSlain = save.voidShadesSlain;
   if (save.aquiferBreachTick !== undefined) sim.aquiferBreachTick = save.aquiferBreachTick;
+  if (save.recentFarHauls) sim.recentFarHauls = save.recentFarHauls.slice();
   if (save.caravan) {
     sim.caravanX = save.caravan.x;
     sim.caravanY = save.caravan.y;
