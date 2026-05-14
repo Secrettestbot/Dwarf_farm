@@ -485,4 +485,34 @@ describe("ColonyPlanner", () => {
     }
     expect(emitted).toBe(true);
   });
+
+  it("pauses corridor emission when the colony is buried in loose items", () => {
+    // 20-dwarf colony with a heavy item backlog. With the
+    // haul-saturated gate the architect should NOT keep emitting
+    // exploration corridors — dwarves digging more rock when the
+    // colony's already drowning in unhauled stones is the exact
+    // behavior the gate is meant to prevent. We test for "fewer
+    // corridors than a wide-open run would emit" rather than zero
+    // because the backlog gate doesn't block the very first slot.
+    function run(looseItemCount: number): number {
+      const w = generateWorld({ seed: 51, width: 200, height: 500 });
+      const planner = new ColonyPlanner();
+      const rng = Rng.fromSeed(2024);
+      for (let t = 1; t <= 2400; t++) {
+        planner.tick({ grid: w.grid, spawn: w.spawn, tick: t, population: 20, rng, looseItemCount });
+        for (const bp of planner.blueprints) {
+          if (bp.status !== "digging") continue;
+          for (let i = 0; i < bp.cavity.length; i++) {
+            const c = bp.cavity[i];
+            w.grid.setTile(c & 0xffff, (c >>> 16) & 0xffff, 7);
+          }
+        }
+      }
+      return planner.blueprints.filter((b) => b.kind === "corridor").length;
+    }
+    const baselineCorridors = run(0);
+    const throttledCorridors = run(500);
+    expect(baselineCorridors).toBeGreaterThan(0);
+    expect(throttledCorridors).toBeLessThan(baselineCorridors);
+  });
 });
