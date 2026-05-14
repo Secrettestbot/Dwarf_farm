@@ -50,9 +50,27 @@ export interface PlannerContext {
    * the Pump Station emission — building one before there's water to
    * pump would be a waste of dwarf-hours. */
   aquiferBreached?: boolean;
+  /** Recent stockpile-bound hauls that took longer than FAR_HAUL_TICKS.
+   * Drives the secondary needsStockpile signal: a queue of slow
+   * deliveries means another stockpile near the pickup region would
+   * pay for itself. Optional so isolated planner tests don't need
+   * to stub it out. */
+  recentFarHauls?: Array<{ x: number; y: number; tick: number }>;
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
+
+/** Far-haul log entries older than this lose their vote in
+ * needsStockpile — haul patterns shift fast as workshops come
+ * online and the architect shouldn't act on a stale signal. */
+const FAR_HAUL_AGE_TICKS_FOR_DEMAND = 24 * 60; // one in-game day
+
+/** Needs-furnishing rooms older than this stop counting toward
+ * the architect's backlog throttle. A stuck room (haulers unable
+ * to reach the cavity, no surviving crafter for its requirement,
+ * etc.) isn't a "haulers are busy" signal — pausing the architect
+ * indefinitely doesn't unstick it. */
+const FURNISHING_BACKLOG_AGE_TICKS = 24 * 60; // one in-game day
 
 const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number }> = {
   bedroom: { w: 4, h: 3, priority: 1 },
@@ -241,6 +259,18 @@ export class ColonyPlanner {
     // minimum 1. As the colony grows, more parallel blueprints can be
     // active, so growth speeds up.
     const architects = Math.max(1, Math.ceil(ctx.population / ARCHITECT_PER_DWARVES));
+    // Furnishing backlog gate. When the queue of cavities waiting on
+    // a hauler genuinely outstrips what the colony can clear, the
+    // architect stops opening new sites — opening room twenty while
+    // rooms one through nineteen still wait for furniture just
+    // wastes mining XP and clutters the map. The limit is set high
+    // (≈ 1.5 outstanding rooms per dwarf, floor 12) so the early-
+    // game bootstrap (founder colony with workshop benches sitting
+    // at spawn waiting for delivery while haulers chase the first
+    // farm yield) still completes — the throttle is meant to catch
+    // late-game runaway expansion, not slow the initial buildout.
+    const backlogLimit = Math.max(12, Math.ceil(ctx.population * 1.5));
+    if (this.furnishingBacklog(ctx.tick) > backlogLimit) return;
     while (this.activeCount() < architects) {
       if (!this.tryPlaceNext(ctx)) break;
     }
@@ -337,7 +367,26 @@ export class ColonyPlanner {
 
   private needsStockpile(ctx: PlannerContext): boolean {
     if (ctx.population < 5) return false;
-    return this.existingByKind("stockpile") === 0;
+    const existing = this.existingByKind("stockpile");
+    // First stockpile lands as soon as the colony's big enough to
+    // have somewhere to put items. After that, the signal is haul
+    // travel time: when the planner sees enough recently-delivered
+    // hauls that took longer than FAR_HAUL_TICKS, the colony's
+    // running out of nearby drop capacity and another stockpile
+    // pays for itself by halving the next hauler's round-trip.
+    if (existing === 0) return true;
+    // Soft cap so a sprawling endgame fortress doesn't carpet
+    // itself in stockpiles: roughly one per eight dwarves.
+    const cap = Math.max(1, Math.ceil(ctx.population / 8));
+    if (existing >= cap) return false;
+    // Age out old far-haul entries before counting — a haul pattern
+    // from yesterday isn't relevant if the colony has reshuffled
+    // since. The threshold (8) is a quorum: needs sustained signal
+    // across several deliveries, not just one slow trip.
+    const cutoff = ctx.tick - FAR_HAUL_AGE_TICKS_FOR_DEMAND;
+    let fresh = 0;
+    for (const e of ctx.recentFarHauls ?? []) if (e.tick >= cutoff) fresh++;
+    return fresh >= 8;
   }
 
   private needsFarm(ctx: PlannerContext): boolean {
@@ -720,6 +769,31 @@ export class ColonyPlanner {
             continue;
           }
           score += waterTiles * 5;
+        }
+        // Stockpile follow-on placement: when the colony already has
+        // a stockpile, the demand signal (recentFarHauls) is what
+        // brought us here. Bias the second/third stockpile toward
+        // the centroid of those slow pickups so the new drop point
+        // actually shortens the haul that triggered it.
+        if (kind === "stockpile" && this.existingByKind("stockpile") > 0) {
+          const cutoff = ctx.tick - FAR_HAUL_AGE_TICKS_FOR_DEMAND;
+          let cx = 0, cy = 0, n = 0;
+          for (const e of ctx.recentFarHauls ?? []) {
+            if (e.tick < cutoff) continue;
+            cx += e.x; cy += e.y; n++;
+          }
+          if (n > 0) {
+            const hx = cx / n;
+            const hy = cy / n;
+            const rx = ox + halfW;
+            const ry = oy + halfH;
+            const d = Math.sqrt((rx - hx) ** 2 + (ry - hy) ** 2);
+            // Pull strength is competitive with depth + spread (each
+            // ~30-80 points). Inverse distance with a ceiling so a
+            // candidate sitting on the hot point dominates over a
+            // far-away depth bonus.
+            score += Math.max(0, 80 - d);
+          }
         }
         if (
           best === null ||
@@ -1268,6 +1342,31 @@ export class ColonyPlanner {
   activeCount(): number {
     let n = 0;
     for (const b of this.blueprints) if (b.status === "digging") n++;
+    return n;
+  }
+
+  /** Recent dug-out rooms still waiting on a furniture haul. The
+   * planner uses this as a separate backlog gate: when the queue of
+   * needs_furnishing rooms outgrows what the hauling crew can clear,
+   * the architect pauses new emissions so haulers can catch up
+   * instead of fanning the backlog wider. Distinct from activeCount
+   * (which still throttles parallel digging) — a colony with the
+   * carpenter and mason already crafting can fill several
+   * needs_furnishing rooms simultaneously, so we let the architect
+   * keep working until the backlog truly outstrips throughput.
+   * Rooms older than FURNISHING_BACKLOG_AGE_TICKS drop out of the
+   * count — if a room's been sitting in needs_furnishing for a full
+   * day, the issue isn't hauler bandwidth (which is the backlog
+   * gate's concern), it's something more structural that opening
+   * fewer cavities won't fix. */
+  furnishingBacklog(now: number): number {
+    const cutoff = now - FURNISHING_BACKLOG_AGE_TICKS;
+    let n = 0;
+    for (const b of this.blueprints) {
+      if (b.status !== "needs_furnishing") continue;
+      if (b.createdTick < cutoff) continue;
+      n++;
+    }
     return n;
   }
 

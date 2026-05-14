@@ -184,6 +184,14 @@ export interface Carrying {
    * Masterwork bar reaches the forge as a Masterwork bar, not a
    * baseline one. (Applies to every unit in a stacked carry.) */
   quality?: number;
+  /** Where and when the dwarf picked the item up. Used by the
+   * stockpile-demand signal: when the elapsed delivery time at a
+   * stockpile exceeds FAR_HAUL_TICKS, the colony records the pickup
+   * point as a "hot" location and the architect may emit a new
+   * stockpile biased toward that side of the map. Optional so older
+   * saves and ad-hoc Carrying writes (drop-in-place restorations,
+   * test fixtures) still load cleanly. */
+  pickedUpAt?: { x: number; y: number; tick: number };
 }
 
 /** Membership in the colony's standing military. Auto-assigned at year

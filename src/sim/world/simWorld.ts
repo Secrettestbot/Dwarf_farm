@@ -207,6 +207,16 @@ export class SimWorld {
   // time discovery event the next time a dwarf strikes ore.
   oreEverStruck = false;
 
+  /** Rolling log of haul drops that took longer than FAR_HAUL_TICKS.
+   * Each entry is the *pickup* tile (where the item came from) and
+   * the in-game tick it was recorded. needsStockpile reads this to
+   * decide whether to emit a second / third stockpile, and placeRoom
+   * uses the centroid of recent entries to bias the new stockpile
+   * toward the side of the map that actually needs it. Capped at 16
+   * entries; old ones are aged out when needsStockpile is consulted
+   * so a quiet period clears the signal automatically. */
+  recentFarHauls: Array<{ x: number; y: number; tick: number }> = [];
+
   /** Last in-game year for which a year-rollover event was emitted. */
   lastYearAnnounced = 0;
 
