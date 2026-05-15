@@ -335,14 +335,16 @@ export class ColonyPlanner {
     if (this.needsWaterWheel(ctx) && this.placeRoom(ctx, "water_wheel")) return true;
     if (this.needsCemetery(ctx) && this.placeRoom(ctx, "cemetery")) return true;
 
-    // Exploration emissions (lumberyard, stairwell, corridors) pause
-    // when the colony is buried in unhauled loose items. Opening a
-    // new corridor while 200 stones sit at mining faces just moves
-    // more dwarves onto pickaxes when the bottleneck is everyone
-    // else's wheelbarrow. The threshold scales with population —
-    // a 20-dwarf colony tolerates more clutter than a 7-dwarf
-    // founder kit before pausing.
-    const haulSaturated = (ctx.looseItemCount ?? 0) > Math.max(40, ctx.population * 3);
+    // Exploration corridors pause when the colony is buried in
+    // unhauled loose items. Threshold scales with population —
+    // a 20-dwarf colony tolerates ~200 stones / food / etc. on
+    // the floor before the gate fires (normal steady-state with 3
+    // farms producing food on cells routinely sits around 100).
+    // Only corridors are gated — stairwells (vertical descent) and
+    // lumberyards (single-tile, harvest wood) are cheap, infrequent
+    // emissions and disabling them would block colony progress more
+    // than the gate is worth.
+    const haulSaturated = (ctx.looseItemCount ?? 0) > Math.max(200, ctx.population * 10);
 
     // 2.8 Lumberyard — chop a surface tree any time one is sense-able
     //     and there's no active lumberyard yet. Cheap, single-tile
@@ -350,13 +352,13 @@ export class ColonyPlanner {
     //     spots it. Gated only on having a Carpenter's Workshop or
     //     basic carpentry research — without somewhere to use the wood,
     //     felling trees is just clearing.
-    if (!haulSaturated && (active["lumberyard"] ?? 0) === 0 && this.wantsLumberyard(ctx) && this.placeLumberyard(ctx)) return true;
+    if ((active["lumberyard"] ?? 0) === 0 && this.wantsLumberyard(ctx) && this.placeLumberyard(ctx)) return true;
 
     // 2.9 Stairwell — every few completed rooms the architect drops a
     //     vertical 2×6 shaft so the colony actually descends instead of
     //     spreading sideways. Without this, dwarves dig wide but
     //     shallow and the Gem Seam stays out of reach.
-    if (!haulSaturated && this.wantsStairwell() && this.placeRoom(ctx, "stairwell")) return true;
+    if (this.wantsStairwell() && this.placeRoom(ctx, "stairwell")) return true;
 
     // 3. Periodic corridor — every two completed rooms the colony wants
     //    another corridor segment so its reach keeps growing. This is what
