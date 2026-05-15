@@ -221,19 +221,7 @@ export function renderWorld(
     if (!grid.isSeen(p.x, p.y)) continue;
     const sx = (p.x - camera.x) * pt + viewW / 2;
     const sy = (p.y - camera.y) * pt + viewH / 2;
-    ctx.fillStyle =
-      it.kind === "ore" ? "#e0c070" :
-      it.kind === "stone" ? "#9a9aa3" :
-      it.kind === "gem" ? "#a8d8e0" :
-      it.kind === "bars" ? "#d0a060" :
-      it.kind === "tools" ? "#c0c8d0" :
-      it.kind === "food" ? "#9ad3a3" :
-      it.kind === "drink" ? "#8aa9ff" :
-      it.kind === "meal" ? "#e0c080" :
-      it.kind === "wood" ? "#a87838" :
-      it.kind === "hide" ? "#8a5a3a" :
-      it.kind === "wheelbarrow" ? "#a86838" :
-      "#8a6a4a";
+    ctx.fillStyle = itemKindColor(it.kind);
     const m = pt * 0.25;
     ctx.fillRect(sx + m, sy + pt - m * 1.5, pt - m * 2, m);
     ctx.strokeStyle = "rgba(0,0,0,0.6)";
@@ -359,6 +347,18 @@ export function renderWorld(
     const sx = (pos.x - camera.x) * pt + viewW / 2;
     const sy = (pos.y - camera.y) * pt + viewH / 2;
     ctx.drawImage(dwarfSprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
+    // Wheelbarrow overlay — draws a small tub-on-wheel just behind
+    // the dwarf when this haul checked one out of the colony pool.
+    // The tub is tinted with the cargo's colour so a barrow loaded
+    // with food reads differently from one full of stone at a
+    // glance. Only renders at zooms where the detail's visible
+    // (pt ≥ 6 keeps tiny zoom levels uncluttered).
+    if (pt >= 6) {
+      const carrying = sim.carrying.get(id);
+      if (carrying?.withWheelbarrow) {
+        drawWheelbarrow(ctx, sx, sy, pt, itemKindColor(carrying.kind));
+      }
+    }
     // Disease pip — small coloured dot at the dwarf's feet so an
     // outbreak is visible without opening the inspector. Drawn below
     // the activity glyph so both can coexist on a sick worker.
@@ -420,4 +420,71 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "water_wheel": return "wheel";
     case "cemetery": return "cemetery";
   }
+}
+
+/** Map an item kind to the colour used to render it on the floor
+ * (and as the cargo tint of a wheelbarrow being pushed by a hauler).
+ * Kept simple — one colour per kind, no quality variation. */
+function itemKindColor(kind: string): string {
+  switch (kind) {
+    case "ore": return "#e0c070";
+    case "stone": return "#9a9aa3";
+    case "gem": return "#a8d8e0";
+    case "bars": return "#d0a060";
+    case "tools": return "#c0c8d0";
+    case "food": return "#9ad3a3";
+    case "drink": return "#8aa9ff";
+    case "meal": return "#e0c080";
+    case "wood": return "#a87838";
+    case "hide": return "#8a5a3a";
+    case "wheelbarrow": return "#a86838";
+    default: return "#8a6a4a";
+  }
+}
+
+/** Draw a small wheelbarrow behind / beside the dwarf at (sx, sy)
+ * in screen pixels. `pt` is the per-tile pixel size; the
+ * wheelbarrow's pieces all scale off it so the visual stays
+ * legible at any zoom. `cargoColour` tints the tub interior — the
+ * outline and wheel are fixed dark tones so the silhouette stays
+ * readable. */
+function drawWheelbarrow(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  pt: number,
+  cargoColour: string,
+): void {
+  // Position the tub in the lower-right quadrant of the dwarf's
+  // tile so it reads as "being pushed from in front." Slight
+  // overhang past the tile's right edge keeps the silhouette from
+  // crowding the dwarf body.
+  const tubX = sx + pt * 0.45;
+  const tubY = sy + pt * 0.55;
+  const tubW = pt * 0.5;
+  const tubH = pt * 0.25;
+  // Tub body (cargo colour).
+  ctx.fillStyle = cargoColour;
+  ctx.fillRect(tubX, tubY, tubW, tubH);
+  // Tub rim/outline — dark for silhouette readability.
+  ctx.fillStyle = "#1a1410";
+  ctx.fillRect(tubX, tubY, tubW, 1);
+  ctx.fillRect(tubX, tubY + tubH - 1, tubW, 1);
+  ctx.fillRect(tubX, tubY, 1, tubH);
+  ctx.fillRect(tubX + tubW - 1, tubY, 1, tubH);
+  // Wheel — small dark disc below the front of the tub.
+  const wheelR = Math.max(1, pt * 0.1);
+  const wheelX = tubX + tubW - wheelR;
+  const wheelY = tubY + tubH + wheelR - 1;
+  ctx.fillStyle = "#2a2620";
+  ctx.beginPath();
+  ctx.arc(wheelX, wheelY, wheelR, 0, Math.PI * 2);
+  ctx.fill();
+  // Handle — short line angling back toward the dwarf's hands.
+  ctx.strokeStyle = "#3a3228";
+  ctx.lineWidth = Math.max(1, pt / 16);
+  ctx.beginPath();
+  ctx.moveTo(tubX, tubY + tubH * 0.5);
+  ctx.lineTo(tubX - pt * 0.18, tubY + tubH * 0.1);
+  ctx.stroke();
 }
