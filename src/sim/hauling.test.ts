@@ -105,4 +105,55 @@ describe("hauling", () => {
     expect(sim.item.entities.length).toBe(0);
     expect(sim.carrying.has(e)).toBe(false);
   });
+
+  it("a dwarf doesn't grind hauling XP on a non-counter item stored in the stockpile", () => {
+    // Bug: when a non-counter item (e.g. a bed, with no
+    // needs_furnishing bedroom waiting) sat inside a complete
+    // stockpile cavity, an idle dwarf at that tile would pick it
+    // up, find no destination, drop it back in place, and award
+    // themselves hauling XP for the zero-tile round trip — over
+    // and over while standing still. Two interlocking guards:
+    // findHaulTarget skips items in a stockpile with no open
+    // demand, and progressHaul.delivery refuses to award XP when
+    // the pickup and drop tiles are the same.
+    const w = generateWorld({ seed: 91, width: 200, height: 500 });
+    const sim = new SimWorld(91, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    // Plant a 1-tile complete stockpile at (sx+1, sy) and a bed
+    // entity sitting on it. No bedroom is in needs_furnishing, so
+    // the bed has nowhere to go.
+    sim.grid.setTile(sx + 1, sy, TileType.CorridorFloor);
+    sim.planner.blueprints.push({
+      id: 1,
+      kind: "stockpile",
+      originX: sx + 1,
+      originY: sy,
+      width: 1,
+      height: 1,
+      cavity: new Int32Array([(sy << 16) | (sx + 1)]),
+      status: "complete",
+      priority: 1,
+      createdTick: 0,
+    });
+    sim.spawnItem({ kind: "bed", x: sx + 1, y: sy });
+    sim.sliders.excavation = 0;
+    sim.spawnDwarf({ name: "Idle", x: sx + 1, y: sy, age: 30 });
+    const e = sim.dwarf.entities[0];
+    const dw = sim.dwarf.get(e)!;
+    const n = sim.needs.get(e)!;
+    const haulingBefore = dw.skills.hauling ?? 0;
+    for (let i = 0; i < 200; i++) {
+      n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
+      tick(sim);
+    }
+    // Hauling skill must not have advanced — the bed had no demand
+    // and the dwarf never moved.
+    expect(dw.skills.hauling ?? 0).toBe(haulingBefore);
+    // The bed should still be on the floor (not respawned dozens of
+    // times nor consumed).
+    let beds = 0;
+    for (const ie of sim.item.entities) if (sim.item.get(ie)?.kind === "bed") beds++;
+    expect(beds).toBe(1);
+  });
 });

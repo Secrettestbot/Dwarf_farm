@@ -4509,11 +4509,20 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   if (carrying.withWheelbarrow) {
     sim.stockpile.wheelbarrows++;
   }
-  sim.carrying.remove(e);
   // Hauling earns hauling XP — every successful delivery counts as
-  // practice. The Strong-Backed and Patient traits already factor into
-  // movement and persistence; here we let the skill itself climb.
-  awardSkillXp(sim, e, "hauling", 1);
+  // practice. Skip the award when the dwarf didn't actually move
+  // between pickup and delivery (a "haul" job whose target tile is
+  // the dwarf's current tile fires progressHaul immediately without
+  // any walking, and on non-counter kinds creditOrDrop respawns the
+  // item back at the same tile, ready for another zero-distance
+  // round trip — ticking up hauling skill while the dwarf stands in
+  // the stockpile). The Strong-Backed and Patient traits already
+  // factor into movement and persistence; here we let the skill
+  // itself climb on real practice.
+  const pickup = carrying.pickedUpAt;
+  const moved = !pickup || pickup.x !== pos.x || pickup.y !== pos.y;
+  sim.carrying.remove(e);
+  if (moved) awardSkillXp(sim, e, "hauling", 1);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
   sim.pathing.remove(e);

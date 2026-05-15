@@ -281,9 +281,15 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
         return { kind: "haul" as JobKind, targetX: furn.x, targetY: furn.y, progress: 1 };
       }
       const drop = findStockpileDrop(sim, pos.x, pos.y);
-      if (drop) {
+      if (drop && (drop.x !== pos.x || drop.y !== pos.y)) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
       }
+      // If we'd drop on the tile we're already standing on, fall
+      // through to the in-place branch below — issuing a zero-tile
+      // haul job re-runs progressHaul, which awards hauling XP and
+      // (for non-counter kinds) spawns the item back at our feet
+      // for us to immediately re-pick up. That loop ticks the
+      // dwarf's hauling skill while they stand idle in the stockpile.
       // Nothing wants this item right now. Wheelbarrows credit the
       // colony pool directly — keeping them as floor items causes a
       // pick-up / drop loop on the workshop output tile that starves
@@ -786,6 +792,14 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     // for the next draft to equip a soldier. Same loop-prevention
     // logic as the workshop destination skip.
     if (it.kind === "tools" && sim.grid.getTile(p.x, p.y) === TileType.ArmouryRack) continue;
+    // Items already sitting inside a complete stockpile cavity, with
+    // no demand from a needs_furnishing room or a workshop input
+    // tile, are effectively in storage — picking them up just to
+    // drop them back at the same tile burns simulation cycles
+    // (and historically gave the carrier hauling XP). Skip them
+    // here; the moment a room emerges that wants the kind, the
+    // demand check passes and haulers can route them out.
+    if (isItemStoredAtStockpile(sim, p.x, p.y) && !itemHasOpenDemand(sim, it.kind)) continue;
     const dx = p.x - sx;
     const dy = p.y - sy;
     const d = dx * dx + dy * dy;
@@ -859,6 +873,51 @@ function isItemAtWorkshopDestination(sim: SimWorld, x: number, y: number, kind: 
     if (x < b.originX || x >= b.originX + b.width) continue;
     if (y < b.originY || y >= b.originY + b.height) continue;
     return true;
+  }
+  return false;
+}
+
+/** True iff (x, y) is inside the cavity of any complete stockpile
+ * blueprint. Used by findHaulTarget to recognise items already
+ * stored — picking up a bed from a stockpile when no bedroom needs
+ * it just respawns the bed at the dwarf's feet next tick. */
+function isItemStoredAtStockpile(sim: SimWorld, x: number, y: number): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "stockpile" || b.status !== "complete") continue;
+    if (x < b.originX || x >= b.originX + b.width) continue;
+    if (y < b.originY || y >= b.originY + b.height) continue;
+    return true;
+  }
+  return false;
+}
+
+/** True iff some room or workshop on the map could use a delivery
+ * of `kind` right now — a needs_furnishing room that lists it as a
+ * requirement, or a complete workshop whose recipe takes it as
+ * input. Counter-backed kinds (food, stone, etc.) always return
+ * true because the colony's hunger/build chain pulls from the
+ * counter, so haulers should keep moving them off the floor. */
+function itemHasOpenDemand(sim: SimWorld, kind: string): boolean {
+  // Counter-backed kinds always have "open demand" — the colony's
+  // stockpile counter accumulates without an explicit room request.
+  switch (kind) {
+    case "stone": case "ore": case "dirt": case "gem":
+    case "bars": case "tools": case "food": case "drink":
+    case "meal": case "wood": case "hide": case "wheelbarrow":
+      return true;
+  }
+  for (const b of sim.planner.blueprints) {
+    if (b.status === "needs_furnishing") {
+      const reqs = FURNITURE_REQUIREMENTS[b.kind];
+      if (!reqs) continue;
+      const placed = b.furniturePlaced?.[kind] ?? 0;
+      let need = 0;
+      for (const r of reqs) if (r.item === kind) need = r.count;
+      if (placed < need) return true;
+    } else if (b.status === "complete") {
+      const recipe = recipeFor(b.kind);
+      if (recipe && recipe.inputKind === kind) return true;
+    }
   }
   return false;
 }
