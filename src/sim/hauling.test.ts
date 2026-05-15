@@ -156,4 +156,118 @@ describe("hauling", () => {
     for (const ie of sim.item.entities) if (sim.item.get(ie)?.kind === "bed") beds++;
     expect(beds).toBe(1);
   });
+
+  it("a needs_furnishing bed gets hauled before a closer counter-backed stone", () => {
+    // With both a bed (furniture, room waiting) and a stone (bulk
+    // counter-backed) within reach, the hauler should grab the bed
+    // first — a bedroom blocked on its bed is more valuable than
+    // one more stone in the pile. The stone is intentionally
+    // placed closer to the dwarf so the test exercises the tier
+    // bump rather than the nearest-wins tiebreak.
+    const w = generateWorld({ seed: 67, width: 200, height: 500 });
+    const sim = new SimWorld(67, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    // Carve a corridor so the dwarf can reach both items.
+    for (let xx = sx; xx <= sx + 12; xx++) sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+    // Stone right next to the dwarf, bed three tiles away.
+    sim.spawnItem({ kind: "stone", x: sx + 1, y: sy });
+    sim.spawnItem({ kind: "bed", x: sx + 5, y: sy });
+    // Plant a needs_furnishing bedroom so the bed has open demand.
+    const bedroomOx = sx + 7;
+    const cavity: number[] = [];
+    for (let yy = sy; yy < sy + 3; yy++) {
+      for (let xx = bedroomOx; xx < bedroomOx + 4; xx++) {
+        cavity.push((yy << 16) | xx);
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    sim.planner.blueprints.push({
+      id: 1,
+      kind: "bedroom",
+      originX: bedroomOx,
+      originY: sy,
+      width: 4,
+      height: 3,
+      cavity: new Int32Array(cavity),
+      status: "needs_furnishing",
+      priority: 1,
+      createdTick: 0,
+      furniturePlaced: {},
+    });
+    sim.sliders.excavation = 0;
+    sim.spawnDwarf({ name: "H", x: sx, y: sy, age: 30 });
+    const e = sim.dwarf.entities[0];
+    const n = sim.needs.get(e)!;
+    // Run until either item is picked up.
+    for (let i = 0; i < 80; i++) {
+      n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
+      tick(sim);
+      const carry = sim.carrying.get(e);
+      if (carry) {
+        expect(carry.kind).toBe("bed");
+        return;
+      }
+    }
+    throw new Error("dwarf never picked anything up");
+  });
+
+  it("active haulers are capped at roughly one per three dwarves", () => {
+    // Plant a stockpile + many haul-bait stone items. With the cap
+    // in place, only a fraction of the population can be hauling
+    // simultaneously — the rest fall through to other tasks (or
+    // wander). Without the cap the entire colony piles onto the
+    // haul branch.
+    const w = generateWorld({ seed: 71, width: 200, height: 500 });
+    const sim = new SimWorld(71, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    // Carve a wide reachable area and seed many stone items.
+    for (let yy = sy - 3; yy <= sy + 3; yy++) {
+      for (let xx = sx - 15; xx <= sx + 15; xx++) {
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    for (let i = 0; i < 30; i++) {
+      sim.spawnItem({ kind: "stone", x: sx + (i % 10) - 5, y: sy + ((i / 10) | 0) - 1 });
+    }
+    // Plant a stockpile so haul delivery has a target.
+    const cavity: number[] = [];
+    for (let xx = sx + 8; xx < sx + 13; xx++) cavity.push((sy << 16) | xx);
+    sim.planner.blueprints.push({
+      id: 1,
+      kind: "stockpile",
+      originX: sx + 8,
+      originY: sy,
+      width: 5,
+      height: 1,
+      cavity: new Int32Array(cavity),
+      status: "complete",
+      priority: 1,
+      createdTick: 0,
+    });
+    sim.sliders.excavation = 0;
+    // 12 generalist dwarves — none have hauling specialty, so all
+    // are subject to the cap.
+    for (let i = 0; i < 12; i++) {
+      sim.spawnDwarf({ name: `H${i}`, x: sx + (i - 6), y: sy, age: 30 });
+    }
+    // Run a few ticks for chooseTask to assign jobs.
+    for (let i = 0; i < 20; i++) {
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      }
+      tick(sim);
+    }
+    let haulers = 0;
+    for (const id of sim.dwarf.entities) {
+      if (sim.carrying.has(id)) { haulers++; continue; }
+      const job = sim.job.get(id);
+      if (job && job.kind === "haul") haulers++;
+    }
+    // Cap for pop=12 is floor(12/3) = 4. Allow a one-dwarf slack
+    // in case the cap is checked at a slightly different state.
+    expect(haulers).toBeLessThanOrEqual(5);
+  });
 });

@@ -303,9 +303,19 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       if (carrying.withWheelbarrow) sim.stockpile.wheelbarrows++;
       sim.carrying.remove(e);
     } else {
-      const haul = findHaulTarget(sim, e, pos.x, pos.y);
-      if (haul) {
-        return { kind: "haul" as JobKind, targetX: haul.x, targetY: haul.y, progress: 0 };
+      // Only general-priority dwarves are subject to the hauler
+      // cap — a hauling specialist (skill ≥ SPECIALTY_THRESHOLD)
+      // gets routed through trySpecialtyBranch above and bypasses
+      // this gate. Without the cap, every idle dwarf piles onto
+      // haul jobs, leaving nobody at workshops, mining faces, or
+      // research desks and making the colony read as a single big
+      // haul column.
+      const haulerCap = haulerCapForColony(sim);
+      if (countActiveHaulers(sim) < haulerCap) {
+        const haul = findHaulTarget(sim, e, pos.x, pos.y);
+        if (haul) {
+          return { kind: "haul" as JobKind, targetX: haul.x, targetY: haul.y, progress: 0 };
+        }
       }
     }
   }
@@ -769,7 +779,13 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
  * the same tick don't both target it. Returns the item's tile (the dwarf
  * walks onto it). */
 function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number): { x: number; y: number } | null {
+  // Two-pass scan: prefer items wanted by a needs_furnishing room
+  // (furniture / workshop bench deliverables) over counter-backed
+  // bulk goods (stones, food, ore). A bedroom waiting on its bed
+  // shouldn't lose a hauler to the nearest stone three tiles over.
+  // Within a tier we still pick the nearest unclaimed candidate.
   let bestEnt = -1;
+  let bestTier = -1;
   let best: { x: number; y: number; d: number } | null = null;
   const ents = sim.item.entities;
   for (let i = 0; i < ents.length; i++) {
@@ -794,22 +810,90 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     // here; the moment a room emerges that wants the kind, the
     // demand check passes and haulers can route them out.
     if (isItemStoredAtStockpile(sim, p.x, p.y) && !itemHasOpenDemand(sim, it.kind)) continue;
+    // Tier 2: furniture (or any non-counter kind) that a
+    // needs_furnishing room is actively waiting on. Tier 1: bulk /
+    // counter-backed goods. We keep the best candidate from the
+    // higher tier we've seen so far; a Tier-2 candidate beats any
+    // Tier-1 candidate regardless of distance.
+    const tier = isFurnitureKind(it.kind) && hasNeedsFurnishingFor(sim, it.kind) ? 2 : 1;
+    if (tier < bestTier) continue;
     const dx = p.x - sx;
     const dy = p.y - sy;
     const d = dx * dx + dy * dy;
     if (
+      tier > bestTier ||
       !best ||
       d < best.d ||
       (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
     ) {
       best = { x: p.x, y: p.y, d };
       bestEnt = ents[i];
+      bestTier = tier;
     }
   }
   if (bestEnt !== -1) {
     sim.item.get(bestEnt)!.claimedBy = hauler;
   }
   return best ? { x: best.x, y: best.y } : null;
+}
+
+/** True iff `kind` is a furniture / workshop-bench / room-deliverable
+ * item — anything that's NOT stored in a stockpile counter. These
+ * kinds get tiered above counter-backed hauls (stones, food) in
+ * findHaulTarget so a bed waiting at the carpenter doesn't lose its
+ * hauler to a nearer stone. */
+function isFurnitureKind(kind: string): boolean {
+  switch (kind) {
+    case "stone": case "ore": case "dirt": case "gem":
+    case "bars": case "tools": case "food": case "drink":
+    case "meal": case "wood": case "hide": case "wheelbarrow":
+      return false;
+  }
+  return true;
+}
+
+/** True iff some needs_furnishing room is currently listing `kind`
+ * as an outstanding requirement. Distinct from the broader
+ * itemHasOpenDemand which also returns true for any counter-backed
+ * kind. Used to tier furniture hauls above bulk hauls — only the
+ * "room-is-waiting" case earns the higher tier. */
+function hasNeedsFurnishingFor(sim: SimWorld, kind: string): boolean {
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "needs_furnishing") continue;
+    const reqs = FURNITURE_REQUIREMENTS[b.kind];
+    if (!reqs) continue;
+    const placed = b.furniturePlaced?.[kind] ?? 0;
+    let need = 0;
+    for (const r of reqs) if (r.item === kind) need = r.count;
+    if (placed < need) return true;
+  }
+  return false;
+}
+
+/** Cap on the number of dwarves committed to a haul job at once.
+ * Keeps a fixed fraction of the population in non-haul roles so the
+ * colony reads as a mix of activities rather than a single hauling
+ * column. Hauling specialists bypass this — they go through the
+ * specialty branch before the general work order kicks in. */
+function haulerCapForColony(sim: SimWorld): number {
+  // Roughly one in three dwarves, floor 2. With pop=20 → 6 haulers,
+  // with pop=7 founders → 2. Lower than that and the colony can't
+  // clear farm yield + workshop outputs; higher and idle dwarves
+  // all converge on the haul branch.
+  return Math.max(2, Math.floor(sim.dwarf.size() / 3));
+}
+
+/** Count dwarves currently committed to a haul job — either walking
+ * to a pickup (haul progress=0), walking to a delivery (haul
+ * progress=1), or already carrying. */
+function countActiveHaulers(sim: SimWorld): number {
+  let n = 0;
+  for (const e of sim.dwarf.entities) {
+    if (sim.carrying.has(e)) { n++; continue; }
+    const job = sim.job.get(e);
+    if (job && job.kind === "haul") n++;
+  }
+  return n;
 }
 
 /** Find the nearest Armoury rack tile that doesn't already have a tool
