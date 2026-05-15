@@ -88,6 +88,10 @@ export function tick(sim: SimWorld): void {
     research: { completed: sim.research.completed },
     aquiferBreached: sim.aquiferBreachTick >= 0,
     recentFarHauls: sim.recentFarHauls,
+    // The architect gates exploration emissions (corridors, etc.) on
+    // this so a haul-saturated colony stops digging more rock until
+    // the dwarves have caught up on hauling.
+    looseItemCount: sim.item.size(),
   });
   yearRolloverSystem(sim);
   seasonRolloverSystem(sim);
