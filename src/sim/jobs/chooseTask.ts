@@ -1350,7 +1350,14 @@ function findSocialPartner(sim: SimWorld, self: EntityId, sx: number, sy: number
  */
 function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
   const grid = sim.grid;
-  const R = 6;
+  // Wide radius so idle dwarves disperse instead of clustering at
+  // whatever spot they last finished a task (typically the
+  // stockpile, where eat / drink / haul-delivery all end). With
+  // R=6 a dwarf would land within a few tiles of their previous
+  // position every tick, so the colony's idle population pooled
+  // around the food counters between meals. A wider random scatter
+  // makes idle behavior actually wander.
+  const R = 20;
   // Collect candidates in a fixed scan order, then sample one via aiRng.
   const candidates: number[] = [];
   for (let dy = -R; dy <= R; dy++) {
