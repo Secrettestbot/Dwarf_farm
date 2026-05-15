@@ -281,15 +281,9 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
         return { kind: "haul" as JobKind, targetX: furn.x, targetY: furn.y, progress: 1 };
       }
       const drop = findStockpileDrop(sim, pos.x, pos.y);
-      if (drop && (drop.x !== pos.x || drop.y !== pos.y)) {
+      if (drop) {
         return { kind: "haul" as JobKind, targetX: drop.x, targetY: drop.y, progress: 1 };
       }
-      // If we'd drop on the tile we're already standing on, fall
-      // through to the in-place branch below — issuing a zero-tile
-      // haul job re-runs progressHaul, which awards hauling XP and
-      // (for non-counter kinds) spawns the item back at our feet
-      // for us to immediately re-pick up. That loop ticks the
-      // dwarf's hauling skill while they stand idle in the stockpile.
       // Nothing wants this item right now. Wheelbarrows credit the
       // colony pool directly — keeping them as floor items causes a
       // pick-up / drop loop on the workshop output tile that starves
