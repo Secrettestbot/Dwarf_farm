@@ -63,9 +63,51 @@ export interface PlannerContext {
    * hauling they need to be doing. Optional for the same reason
    * recentFarHauls is. */
   looseItemCount?: number;
+  /** Set of item kinds with at least one loose entity in the world.
+   * The architect consults this to decide whether a room with a
+   * furniture requirement can actually be furnished from existing
+   * supply — without it, a room would block on "carpenter must be
+   * complete" even when a founder-kit bed is sitting at spawn ready
+   * to deliver. Optional; older callers pass undefined and the
+   * gate falls back to producer-complete only. */
+  availableFurniture?: Set<string>;
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
+
+/** Producer workshop required to furnish each room kind — the
+ * carpenter ships beds / barrels / bins / library_desks / etc.; the
+ * mason ships tables / stoves / thrones / smelter / forge / kiln
+ * / magma anvils. The architect uses this map to refuse emitting a
+ * room whose furniture chain isn't operational yet, so a bedroom
+ * doesn't sit in needs_furnishing for hundreds of ticks waiting on
+ * a carpenter that doesn't exist. Rooms with no entry don't have a
+ * producer gate: the carpenter / mason themselves bootstrap from the
+ * founder kit (and each other), and farms get their seed bag from
+ * the founder kit / other farms / caravan trade rather than any
+ * workshop recipe. */
+const ROOM_PRODUCER: Partial<Record<BlueprintKind, BlueprintKind>> = {
+  bedroom: "carpenter",
+  brewery: "carpenter",
+  stockpile: "carpenter",
+  library: "carpenter",
+  hospital: "carpenter",
+  tavern: "carpenter",
+  armoury: "carpenter",
+  pump_station: "carpenter",
+  jeweller: "carpenter",
+  tannery: "carpenter",
+  loom: "carpenter",
+  trade_depot: "carpenter",
+  water_wheel: "carpenter",
+  dining_hall: "mason",
+  kitchen: "mason",
+  throne_room: "mason",
+  smelter: "mason",
+  forge: "mason",
+  magma_forge: "mason",
+  kiln: "mason",
+};
 
 /** Far-haul log entries older than this lose their vote in
  * needsStockpile — haul patterns shift fast as workshops come
@@ -297,42 +339,34 @@ export class ColonyPlanner {
     if ((active["mine"] ?? 0) === 0 && this.placeMine(ctx)) return true;
 
     // 2. Dining hall and stockpile — emit once at population thresholds.
-    if (this.needsDiningHall(ctx) && this.placeRoom(ctx, "dining_hall")) return true;
-    if (this.needsStockpile(ctx) && this.placeRoom(ctx, "stockpile")) return true;
-    // 2.5 Farm — once population is large enough to need ongoing food
-    //     production (founders bring a starter cache that lasts a couple
-    //     of in-game months). We aim for at least one farm per ~7 dwarves
-    //     so a growing colony stays self-sufficient.
+    //    Each room emission is gated on producerReady: the workshop
+    //    that ships the room's furniture must be operational, or an
+    //    item of the right kind must already exist in the world.
+    //    Without this gate the architect would open a dining hall
+    //    before the mason can carve a table, leaving the room
+    //    parked in needs_furnishing indefinitely.
+    if (this.needsDiningHall(ctx) && this.producerReady("dining_hall", ctx) && this.placeRoom(ctx, "dining_hall")) return true;
+    if (this.needsStockpile(ctx) && this.producerReady("stockpile", ctx) && this.placeRoom(ctx, "stockpile")) return true;
     if (this.needsFarm(ctx) && this.placeRoom(ctx, "farm")) return true;
-
-    // 2.6 Pump station — promoted ahead of the workshops because an
-    //     active aquifer breach is a live emergency. Without this the
-    //     planner would queue ten other workshops first while flood
-    //     water spread through the corridors.
-    if (this.needsPumpStation(ctx) && this.placeRoom(ctx, "pump_station")) return true;
-
-    // 2.7 Workshops — kitchen, brewery, smelter, forge. Each lands once
-    //     the colony is large enough to use it. Kitchen + brewery come
-    //     first (food / drink loops directly impact survival); smelter
-    //     and forge follow as the colony's mining output grows.
-    if (this.needsKitchen(ctx) && this.placeRoom(ctx, "kitchen")) return true;
-    if (this.needsBrewery(ctx) && this.placeRoom(ctx, "brewery")) return true;
-    if (this.needsSmelter(ctx) && this.placeRoom(ctx, "smelter")) return true;
-    if (this.needsForge(ctx) && this.placeRoom(ctx, "forge")) return true;
-    if (this.needsTradeDepot(ctx) && this.placeRoom(ctx, "trade_depot")) return true;
-    if (this.needsLibrary(ctx) && this.placeRoom(ctx, "library")) return true;
-    if (this.needsArmoury(ctx) && this.placeRoom(ctx, "armoury")) return true;
-    if (this.needsThroneRoom(ctx) && this.placeRoom(ctx, "throne_room")) return true;
+    if (this.needsPumpStation(ctx) && this.producerReady("pump_station", ctx) && this.placeRoom(ctx, "pump_station")) return true;
+    if (this.needsKitchen(ctx) && this.producerReady("kitchen", ctx) && this.placeRoom(ctx, "kitchen")) return true;
+    if (this.needsBrewery(ctx) && this.producerReady("brewery", ctx) && this.placeRoom(ctx, "brewery")) return true;
+    if (this.needsSmelter(ctx) && this.producerReady("smelter", ctx) && this.placeRoom(ctx, "smelter")) return true;
+    if (this.needsForge(ctx) && this.producerReady("forge", ctx) && this.placeRoom(ctx, "forge")) return true;
+    if (this.needsTradeDepot(ctx) && this.producerReady("trade_depot", ctx) && this.placeRoom(ctx, "trade_depot")) return true;
+    if (this.needsLibrary(ctx) && this.producerReady("library", ctx) && this.placeRoom(ctx, "library")) return true;
+    if (this.needsArmoury(ctx) && this.producerReady("armoury", ctx) && this.placeRoom(ctx, "armoury")) return true;
+    if (this.needsThroneRoom(ctx) && this.producerReady("throne_room", ctx) && this.placeRoom(ctx, "throne_room")) return true;
     if (this.needsMason(ctx) && this.placeRoom(ctx, "mason")) return true;
-    if (this.needsJeweller(ctx) && this.placeRoom(ctx, "jeweller")) return true;
+    if (this.needsJeweller(ctx) && this.producerReady("jeweller", ctx) && this.placeRoom(ctx, "jeweller")) return true;
     if (this.needsCarpenter(ctx) && this.placeRoom(ctx, "carpenter")) return true;
-    if (this.needsKiln(ctx) && this.placeRoom(ctx, "kiln")) return true;
-    if (this.needsTannery(ctx) && this.placeRoom(ctx, "tannery")) return true;
-    if (this.needsLoom(ctx) && this.placeRoom(ctx, "loom")) return true;
-    if (this.needsHospital(ctx) && this.placeRoom(ctx, "hospital")) return true;
-    if (this.needsTavern(ctx) && this.placeRoom(ctx, "tavern")) return true;
-    if (this.needsMagmaForge(ctx) && this.placeRoom(ctx, "magma_forge")) return true;
-    if (this.needsWaterWheel(ctx) && this.placeRoom(ctx, "water_wheel")) return true;
+    if (this.needsKiln(ctx) && this.producerReady("kiln", ctx) && this.placeRoom(ctx, "kiln")) return true;
+    if (this.needsTannery(ctx) && this.producerReady("tannery", ctx) && this.placeRoom(ctx, "tannery")) return true;
+    if (this.needsLoom(ctx) && this.producerReady("loom", ctx) && this.placeRoom(ctx, "loom")) return true;
+    if (this.needsHospital(ctx) && this.producerReady("hospital", ctx) && this.placeRoom(ctx, "hospital")) return true;
+    if (this.needsTavern(ctx) && this.producerReady("tavern", ctx) && this.placeRoom(ctx, "tavern")) return true;
+    if (this.needsMagmaForge(ctx) && this.producerReady("magma_forge", ctx) && this.placeRoom(ctx, "magma_forge")) return true;
+    if (this.needsWaterWheel(ctx) && this.producerReady("water_wheel", ctx) && this.placeRoom(ctx, "water_wheel")) return true;
     if (this.needsCemetery(ctx) && this.placeRoom(ctx, "cemetery")) return true;
 
     // Exploration corridors pause when the colony is buried in
@@ -366,7 +400,7 @@ export class ColonyPlanner {
     if (!haulSaturated && this.wantsExplorationCorridor() && this.placeCorridor(ctx)) return true;
 
     // 4. Bedrooms — fill up to population target.
-    if (this.needsBedroom(ctx) && this.placeRoom(ctx, "bedroom")) return true;
+    if (this.needsBedroom(ctx) && this.producerReady("bedroom", ctx) && this.placeRoom(ctx, "bedroom")) return true;
 
     // 5. Fallback corridor — when nothing else fit, dig outward. Critical:
     //    without this the planner stops cold once the immediate neighborhood
@@ -1356,6 +1390,35 @@ export class ColonyPlanner {
 
   hasActive(): boolean {
     for (const b of this.blueprints) if (b.status === "digging") return true;
+    return false;
+  }
+
+  /** Returns true if the architect should be willing to emit a room
+   * of `kind`. The gate has two satisfying conditions: the producer
+   * workshop is operational (some blueprint of the producer kind is
+   * complete), OR an item of any required furniture kind is already
+   * sitting somewhere in the world (founder-kit drop, a prior
+   * workshop output left over from before the workshop was lost,
+   * a caravan import). Returns true for kinds with no producer gate
+   * — carpenter / mason / farm / corridor / stairwell / etc. */
+  private producerReady(kind: BlueprintKind, ctx: PlannerContext): boolean {
+    const producer = ROOM_PRODUCER[kind];
+    if (!producer) return true;
+    for (const b of this.blueprints) {
+      if (b.kind === producer && b.status === "complete") return true;
+    }
+    // No operational producer yet. Fall back to "is a furniture
+    // item of the right kind already on the floor somewhere?" — if
+    // yes, the room can be furnished from existing supply.
+    // Callers without an availableFurniture set (planner-only
+    // tests, callers that haven't opted in) get the legacy
+    // "no gate" behavior so existing test fixtures keep emitting.
+    const avail = ctx.availableFurniture;
+    if (!avail) return true;
+    const reqs = FURNITURE_REQUIREMENTS[kind];
+    if (reqs) {
+      for (const r of reqs) if (avail.has(r.item)) return true;
+    }
     return false;
   }
 

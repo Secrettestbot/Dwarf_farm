@@ -78,6 +78,16 @@ export function tick(sim: SimWorld): void {
   sim.tick++;
   // Order matters for determinism. Each system iterates entities via sparse-set
   // dense arrays so iteration order is deterministic.
+  // Built once per tick and passed to the planner — it consults the
+  // set to decide whether a room can be furnished from existing
+  // supply when its producer workshop isn't operational yet.
+  // Founder-kit drops at spawn land here on day one, so the first
+  // dining hall / bedroom / etc. emit immediately.
+  const availableFurniture = new Set<string>();
+  for (const ie of sim.item.entities) {
+    const it = sim.item.get(ie);
+    if (it) availableFurniture.add(it.kind);
+  }
   sim.planner.tick({
     grid: sim.grid,
     spawn: sim.spawn,
@@ -92,6 +102,7 @@ export function tick(sim: SimWorld): void {
     // this so a haul-saturated colony stops digging more rock until
     // the dwarves have caught up on hauling.
     looseItemCount: sim.item.size(),
+    availableFurniture,
   });
   yearRolloverSystem(sim);
   seasonRolloverSystem(sim);

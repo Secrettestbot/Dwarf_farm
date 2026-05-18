@@ -53,13 +53,18 @@ describe("tick determinism", () => {
 
   it("Colony Planner emits at least one bedroom blueprint without input", () => {
     const sim = buildSim(7);
+    // Mirror the founder kit's "bed at spawn" drop so the bedroom
+    // gate (producer-ready: carpenter complete OR a bed item exists)
+    // passes. Without this the architect falls through to a
+    // corridor blueprint and the test misses its intended signal.
+    sim.spawnItem({ kind: "bed", x: sim.spawn.x, y: sim.spawn.y });
     expect(sim.planner.blueprints.length).toBe(0);
     // 60 ticks = 1 in-game hour = the planner's evaluation cadence.
     for (let i = 0; i < 120; i++) tick(sim);
     expect(sim.planner.blueprints.length).toBeGreaterThanOrEqual(1);
-    const bp = sim.planner.blueprints[0];
-    expect(bp.kind).toBe("bedroom");
-    expect(bp.cavity.length).toBe(bp.width * bp.height);
+    const bedroom = sim.planner.blueprints.find((b) => b.kind === "bedroom");
+    expect(bedroom).toBeDefined();
+    expect(bedroom!.cavity.length).toBe(bedroom!.width * bedroom!.height);
   });
 
   it("the dwarf autonomously mines blueprint cavity tiles", () => {

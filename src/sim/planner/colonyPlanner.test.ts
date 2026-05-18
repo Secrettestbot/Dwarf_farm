@@ -515,4 +515,55 @@ describe("ColonyPlanner", () => {
     expect(baselineCorridors).toBeGreaterThan(0);
     expect(throttledCorridors).toBeLessThan(baselineCorridors);
   });
+
+  it("does not emit a downstream room when the producer workshop isn't operational and no furniture item is on hand", () => {
+    // Pop=20, no carpenter built, no bed item available. The
+    // bedroom gate should refuse — emitting a bedroom now would
+    // park it in needs_furnishing forever. The architect should
+    // still emit producer / non-gated rooms in the same window.
+    const w = generateWorld({ seed: 121, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    const availableFurniture = new Set<string>(); // empty — no founder kit
+    for (let t = 1; t <= 600; t++) {
+      planner.tick({
+        grid: w.grid,
+        spawn: w.spawn,
+        tick: t,
+        population: 20,
+        rng: testRng,
+        availableFurniture,
+      });
+    }
+    expect(planner.blueprints.some((b) => b.kind === "bedroom")).toBe(false);
+  });
+
+  it("emits a downstream room as soon as a matching furniture item appears in the world", () => {
+    // Same setup as the previous case but a bed item is dropped at
+    // spawn (like the founder kit). The bedroom gate's second
+    // condition (item exists in availableFurniture) passes and a
+    // bedroom emits. Hand-complete digging blueprints each tick so
+    // the architect's active cap doesn't permanently lock up on
+    // un-dug farms.
+    const w = generateWorld({ seed: 121, width: 200, height: 500 });
+    const planner = new ColonyPlanner();
+    const availableFurniture = new Set<string>(["bed"]);
+    for (let t = 1; t <= 2400; t++) {
+      planner.tick({
+        grid: w.grid,
+        spawn: w.spawn,
+        tick: t,
+        population: 20,
+        rng: testRng,
+        availableFurniture,
+      });
+      for (const bp of planner.blueprints) {
+        if (bp.status !== "digging") continue;
+        for (let i = 0; i < bp.cavity.length; i++) {
+          const c = bp.cavity[i];
+          w.grid.setTile(c & 0xffff, (c >>> 16) & 0xffff, 7);
+        }
+      }
+    }
+    expect(planner.blueprints.some((b) => b.kind === "bedroom")).toBe(true);
+  });
 });
