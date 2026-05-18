@@ -4409,14 +4409,20 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       // would fit. capacity is the max number of `kind` units a
       // single wheelbarrow trip can carry; for size-8 items
       // (workshop benches, water-wheel axles) it stays at 1 — they
-      // fill a whole barrow regardless. Skip the checkout entirely
-      // when there's no stack to clear (a single-item pickup wastes
-      // a wheelbarrow cycle for nothing).
+      // fill a whole barrow regardless and a checkout would just
+      // tie one up for no gain. For bulkier (size ≥ 2) furniture
+      // and goods we check out even on a stack of one — workshop
+      // outputs trickle out as singles, and a hauler walking back
+      // empty after delivering one bed could just as well have a
+      // barrow ready for whatever lands next at the carpenter. We
+      // still require stack > 1 for size-1 bulk goods (stones,
+      // food) so the colony doesn't burn its whole wheelbarrow
+      // pool on individual stones at every mining face.
       let capacity = 1;
       let withWheelbarrow = false;
       if (size < WHEELBARROW_CAPACITY && sim.stockpile.wheelbarrows > 0) {
         const stack = countItemsAt(sim, pos.x, pos.y, firstKind);
-        if (stack > 1) {
+        if (stack > 1 || size >= 2) {
           withWheelbarrow = true;
           capacity = Math.max(1, Math.floor(WHEELBARROW_CAPACITY / size));
           sim.stockpile.wheelbarrows--;
