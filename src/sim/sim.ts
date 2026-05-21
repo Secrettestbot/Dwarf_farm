@@ -4892,7 +4892,19 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       itemKind = "dirt";
     }
     if (itemKind) {
-      sim.spawnItem({ kind: itemKind, x: job.targetX, y: job.targetY });
+      // Trees yield more than one log — a felled tree is a whole
+      // trunk plus limbs, not a single board. Without this the
+      // carpenter chain (1 wood → 2 planks → 1 bed) drains the
+      // surface clearing in a few in-game weeks, faster than the
+      // tree-regrowth system can refill it. 4 logs per tree =
+      // 8 planks = 4 beds (or 1 of every standard furniture item
+      // a single room needs), bringing wood supply in line with
+      // bedroom demand at mid-game pop. Other kinds still drop one
+      // per mined tile.
+      const yieldCount = itemKind === "wood" ? 4 : 1;
+      for (let i = 0; i < yieldCount; i++) {
+        sim.spawnItem({ kind: itemKind, x: job.targetX, y: job.targetY });
+      }
     }
 
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
