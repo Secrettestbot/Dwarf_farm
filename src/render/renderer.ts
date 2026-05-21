@@ -444,12 +444,14 @@ function itemKindColor(kind: string): string {
   }
 }
 
-/** Draw a small wheelbarrow behind / beside the dwarf at (sx, sy)
- * in screen pixels. `pt` is the per-tile pixel size; the
- * wheelbarrow's pieces all scale off it so the visual stays
- * legible at any zoom. `cargoColour` tints the tub interior — the
- * outline and wheel are fixed dark tones so the silhouette stays
- * readable. */
+/** Draw a wheelbarrow behind the dwarf at (sx, sy) in screen pixels.
+ * `pt` is the per-tile pixel size; the wheelbarrow's pieces all
+ * scale off it so the visual stays legible at any zoom.
+ * `cargoColour` tints the tub interior — the outline and wheel are
+ * fixed dark tones so the silhouette stays readable. The barrow
+ * deliberately extends past the dwarf's tile to the right so it
+ * stays visible even at the default 8-px-per-tile zoom (a wholly-
+ * in-tile barrow shrinks to a 4×2 px speck nobody can see). */
 function drawWheelbarrow(
   ctx: CanvasRenderingContext2D,
   sx: number,
@@ -457,36 +459,49 @@ function drawWheelbarrow(
   pt: number,
   cargoColour: string,
 ): void {
-  // Position the tub in the lower-right quadrant of the dwarf's
-  // tile so it reads as "being pushed from in front." Slight
-  // overhang past the tile's right edge keeps the silhouette from
-  // crowding the dwarf body.
-  const tubX = sx + pt * 0.45;
-  const tubY = sy + pt * 0.55;
-  const tubW = pt * 0.5;
-  const tubH = pt * 0.25;
+  // Tub spans from the dwarf's right edge into the next tile so
+  // the silhouette is unambiguous: the dwarf is in front, the
+  // barrow trails behind on the right. ~0.85 tile wide, ~0.45
+  // tile tall.
+  const tubX = sx + pt * 0.65;
+  const tubY = sy + pt * 0.45;
+  const tubW = pt * 0.85;
+  const tubH = pt * 0.45;
   // Tub body (cargo colour).
   ctx.fillStyle = cargoColour;
   ctx.fillRect(tubX, tubY, tubW, tubH);
-  // Tub rim/outline — dark for silhouette readability.
+  // Tub rim/outline — dark for silhouette readability. The outline
+  // thickness scales with zoom so it stays a proportional stroke
+  // rather than disappearing at high zoom or overwhelming at low.
+  const stroke = Math.max(1, Math.floor(pt / 12));
   ctx.fillStyle = "#1a1410";
-  ctx.fillRect(tubX, tubY, tubW, 1);
-  ctx.fillRect(tubX, tubY + tubH - 1, tubW, 1);
-  ctx.fillRect(tubX, tubY, 1, tubH);
-  ctx.fillRect(tubX + tubW - 1, tubY, 1, tubH);
-  // Wheel — small dark disc below the front of the tub.
-  const wheelR = Math.max(1, pt * 0.1);
+  ctx.fillRect(tubX, tubY, tubW, stroke);
+  ctx.fillRect(tubX, tubY + tubH - stroke, tubW, stroke);
+  ctx.fillRect(tubX, tubY, stroke, tubH);
+  ctx.fillRect(tubX + tubW - stroke, tubY, stroke, tubH);
+  // Wheel — dark disc poking out below the front (right end) of
+  // the tub. Sized so even pt=8 produces a recognisable circle.
+  const wheelR = Math.max(2, pt * 0.18);
   const wheelX = tubX + tubW - wheelR;
-  const wheelY = tubY + tubH + wheelR - 1;
+  const wheelY = tubY + tubH + wheelR * 0.6;
   ctx.fillStyle = "#2a2620";
   ctx.beginPath();
   ctx.arc(wheelX, wheelY, wheelR, 0, Math.PI * 2);
   ctx.fill();
-  // Handle — short line angling back toward the dwarf's hands.
+  // Wheel hub — a brighter dot in the middle so the wheel reads as
+  // a wheel and not just a black blob at low zoom.
+  if (pt >= 16) {
+    ctx.fillStyle = "#8a6a3a";
+    ctx.beginPath();
+    ctx.arc(wheelX, wheelY, Math.max(1, wheelR * 0.35), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Handle — line angling back toward the dwarf's hands. Thicker
+  // stroke than before so it doesn't disappear at low zoom.
   ctx.strokeStyle = "#3a3228";
-  ctx.lineWidth = Math.max(1, pt / 16);
+  ctx.lineWidth = Math.max(1, pt / 8);
   ctx.beginPath();
   ctx.moveTo(tubX, tubY + tubH * 0.5);
-  ctx.lineTo(tubX - pt * 0.18, tubY + tubH * 0.1);
+  ctx.lineTo(tubX - pt * 0.25, tubY + tubH * 0.1);
   ctx.stroke();
 }
