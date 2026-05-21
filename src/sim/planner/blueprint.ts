@@ -35,7 +35,8 @@ export type BlueprintKind =
   | "tavern"
   | "magma_forge"
   | "water_wheel"
-  | "cemetery";
+  | "cemetery"
+  | "great_hall";
 
 export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   bedroom: "Bedroom",
@@ -66,6 +67,7 @@ export const BLUEPRINT_KIND_LABELS: Record<BlueprintKind, string> = {
   magma_forge: "Magma Forge",
   water_wheel: "Water Wheel",
   cemetery: "Cemetery",
+  great_hall: "Great Hall",
 };
 
 export type BlueprintStatus = "digging" | "needs_furnishing" | "complete";

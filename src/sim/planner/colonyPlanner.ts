@@ -197,6 +197,11 @@ const ROOM_DIMS: Record<BlueprintKind, { w: number; h: number; priority: number 
   // headstone slotted into one of the empty plots; the chronicle
   // records who lies under each.
   cemetery: { w: 5, h: 5, priority: 2 },
+  // Great Hall: a wide open chamber the architect uses as filler
+  // expansion when bedrooms have hit their target. No furniture
+  // requirement — auto-completes when dug — so it absorbs an
+  // emission slot without backing up the haul pipeline.
+  great_hall: { w: 6, h: 4, priority: 2 },
 };
 
 const CORRIDOR_MIN_LEN = 4;
@@ -400,6 +405,11 @@ export class ColonyPlanner {
     if (!haulSaturated && this.wantsExplorationCorridor() && this.placeCorridor(ctx)) return true;
 
     // 4. Bedrooms — fill up to population target.
+    // Great halls land alongside bedrooms in the architect's slack
+    // budget. No furniture requirement, so they complete the moment
+    // the dig does and don't stack onto the furnishing backlog the
+    // way a 30-bedroom queue does.
+    if (this.needsGreatHall(ctx) && this.placeRoom(ctx, "great_hall")) return true;
     if (this.needsBedroom(ctx) && this.producerReady("bedroom", ctx) && this.placeRoom(ctx, "bedroom")) return true;
 
     // 5. Fallback corridor — when nothing else fit, dig outward. Critical:
@@ -452,12 +462,31 @@ export class ColonyPlanner {
   }
 
   private needsBedroom(ctx: PlannerContext): boolean {
-    const target = Math.max(2, Math.ceil(Math.max(1, ctx.population) * 1.5));
+    // 1 bedroom per dwarf with a tiny slack for migrants. Was 1.5×
+    // which generated a 30-room queue at pop=20 and stalled the
+    // furniture chain — the colony can't craft 30 beds before the
+    // wood / planks supply dries out. great_halls absorb the
+    // expansion impulse that the old 1.5× was trying to cover.
+    const target = Math.max(2, Math.ceil(Math.max(1, ctx.population) * 1.1));
     // Only well-maintained bedrooms count toward the target. A neglected
     // bedroom has to be brought back into shape before the architect
     // emits another one — capping the colony's footprint at what its
     // dwarves can actually keep up with.
     return this.maintainedAndActiveOfKind("bedroom", ctx.tick) < target;
+  }
+
+  private needsGreatHall(ctx: PlannerContext): boolean {
+    // Generic open chamber the architect uses to absorb its expansion
+    // cap without piling more rooms onto the furniture-haul queue.
+    // No furniture requirement, so it completes the moment the dig
+    // does. One per ~6 dwarves, minimum 1.
+    //
+    // Gated at pop ≥ 10 so the founder colony (pop=7) and small early
+    // colonies still drive corridor exploration with their full
+    // emission cap; great halls are an expansion-phase feature.
+    if (ctx.population < 10) return false;
+    const target = Math.max(1, Math.ceil(ctx.population / 6));
+    return this.maintainedAndActiveOfKind("great_hall", ctx.tick) < target;
   }
 
   private needsKitchen(ctx: PlannerContext): boolean {

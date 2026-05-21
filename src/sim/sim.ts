@@ -123,6 +123,7 @@ export function tick(sim: SimWorld): void {
   combatSystem(sim);
   healingSystem(sim);
   farmSystem(sim);
+  treeRegrowthSystem(sim);
   tavernSystem(sim);
   legendarySpecialtiesSystem(sim);
   tradeSystem(sim);
@@ -2164,6 +2165,18 @@ function visibilitySystem(sim: SimWorld): void {
 
 const FARM_TICK_INTERVAL = 60; // once per in-game hour
 const FARM_YIELD_CHANCE = 0.18; // per-cell, per-hour, for a tended cell
+
+/** Tree regrowth — without it, a colony deforests its surface
+ * clearing in a few in-game weeks and the carpenter chain falls
+ * over (no wood → no planks → no beds → bedrooms pile up in
+ * needs_furnishing and the architect's backlog gate locks). Each
+ * in-game day a small fraction of Grass tiles in the surface row
+ * within the original clearing get a chance to grow back into a
+ * Tree, capped at the seeded count so the surface never gets
+ * denser than the player's starting clearing. */
+const TREE_REGROWTH_RADIUS = 12; // mirrors worldgen's clearHalf
+const TREE_REGROWTH_DAILY_CHANCE = 0.05; // ~5% per grass tile per day
+const TREE_REGROWTH_CAP = 12; // ~ initial seeded count
 /** Cell counts as "tended" for this many ticks after a dwarf works it.
  * Synced with the chooseTask threshold so the targeting and the yield
  * agree. */
@@ -2322,6 +2335,35 @@ function bumpAllMorale(sim: SimWorld, amount: number): void {
     const n = sim.needs.get(ents[i]);
     if (!n) continue;
     n.morale = Math.min(100, n.morale + amount);
+  }
+}
+
+function treeRegrowthSystem(sim: SimWorld): void {
+  // Daily. Each Grass tile in the surface clearing has a small
+  // chance of becoming a Tree, up to the seeded population — the
+  // surface stays the same shape the player started with, just
+  // refilled. Uses worldRng so multiple sessions with the same
+  // seed regrow in the same order.
+  if (sim.tick === 0 || sim.tick % TICKS_PER_DAY !== 0) return;
+  const grid = sim.grid;
+  let trees = 0;
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let dx = -TREE_REGROWTH_RADIUS; dx <= TREE_REGROWTH_RADIUS; dx++) {
+    const cx = sim.spawn.x + dx;
+    if (cx < 0 || cx >= grid.width) continue;
+    if (cx === sim.spawn.x || cx === sim.spawn.x + 1) continue;
+    const cy = sim.surfaceY[cx];
+    const tile = grid.getTile(cx, cy);
+    if (tile === TileType.Tree) trees++;
+    else if (tile === TileType.Grass) candidates.push({ x: cx, y: cy });
+  }
+  if (trees >= TREE_REGROWTH_CAP) return;
+  const slots = TREE_REGROWTH_CAP - trees;
+  for (const c of candidates) {
+    if (sim.worldRng.nextFloat() >= TREE_REGROWTH_DAILY_CHANCE) continue;
+    grid.setTile(c.x, c.y, TileType.Tree);
+    if (++trees >= TREE_REGROWTH_CAP) break;
+    if (trees - (TREE_REGROWTH_CAP - slots) >= slots) break;
   }
 }
 
