@@ -270,4 +270,63 @@ describe("hauling", () => {
     // in case the cap is checked at a slightly different state.
     expect(haulers).toBeLessThanOrEqual(5);
   });
+
+  it("a wheelbarrow hauler sweeps stones from adjacent tiles in a single pickup", () => {
+    // Without multi-tile pickup, a wheelbarrow at a mining face
+    // grabs only the one stone at the target tile and walks back
+    // with a near-empty barrow. Confirm the radius sweep grabs
+    // stones from nearby tiles too, so a 3x3 mining cluster
+    // clears in one trip.
+    const w = generateWorld({ seed: 113, width: 200, height: 500 });
+    const sim = new SimWorld(113, w.grid, w.surfaceY, w.spawn);
+    const sx = w.spawn.x;
+    const sy = w.spawn.y;
+    for (let yy = sy - 2; yy <= sy + 2; yy++) {
+      for (let xx = sx - 3; xx <= sx + 3; xx++) {
+        sim.grid.setTile(xx, yy, TileType.CorridorFloor);
+      }
+    }
+    // Plant a complete stockpile to the east so deliveries have a
+    // counter to credit.
+    const cavity: number[] = [];
+    for (let xx = sx + 5; xx <= sx + 7; xx++) {
+      sim.grid.setTile(xx, sy, TileType.CorridorFloor);
+      cavity.push((sy << 16) | xx);
+    }
+    sim.planner.blueprints.push({
+      id: 1,
+      kind: "stockpile",
+      originX: sx + 5,
+      originY: sy,
+      width: 3,
+      height: 1,
+      cavity: new Int32Array(cavity),
+      status: "complete",
+      priority: 1,
+      createdTick: 0,
+    });
+    // Seed the wheelbarrow pool so the haul can check one out.
+    sim.stockpile.wheelbarrows = 1;
+    // 9 stones in a 3x3 cluster centred on (sx+1, sy).
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        sim.spawnItem({ kind: "stone", x: sx + 1 + dx, y: sy + dy });
+      }
+    }
+    sim.sliders.excavation = 0;
+    sim.spawnDwarf({ name: "H", x: sx, y: sy, age: 30 });
+    const e = sim.dwarf.entities[0];
+    const n = sim.needs.get(e)!;
+    // Run until carrying state shows a multi-item pickup.
+    let maxStackCarried = 0;
+    for (let i = 0; i < 80; i++) {
+      n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100;
+      tick(sim);
+      const c = sim.carrying.get(e);
+      if (c && (c.count ?? 1) > maxStackCarried) maxStackCarried = c.count ?? 1;
+    }
+    // 9 stones, capacity = 8 (WHEELBARROW_CAPACITY / size 1).
+    // Expect a near-full barrow on the first trip.
+    expect(maxStackCarried).toBeGreaterThanOrEqual(2);
+  });
 });

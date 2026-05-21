@@ -2183,6 +2183,35 @@ function countItemsAt(sim: SimWorld, x: number, y: number, kind: import("./ecs/c
   return n;
 }
 
+/** Count unclaimed (or claimed-by-self) items of `kind` within
+ * Chebyshev distance `radius` of (x, y). Used by the wheelbarrow
+ * pickup logic to decide whether checking out a wheelbarrow is
+ * worth it for size-1 goods (single stone at the target tile is
+ * usually a wasted barrow trip, but a cluster of stones across
+ * a 3x3 mining face is exactly what wheelbarrows are for) and to
+ * cap multi-tile pickup at items the dwarf can legitimately take. */
+function countItemsWithin(
+  sim: SimWorld,
+  x: number,
+  y: number,
+  radius: number,
+  kind: import("./ecs/components").ItemKind,
+  ignoreClaim: EntityId,
+): number {
+  let n = 0;
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const it = sim.item.get(ents[i]);
+    const p = sim.position.get(ents[i]);
+    if (!it || !p) continue;
+    if (it.kind !== kind) continue;
+    if (Math.abs(p.x - x) > radius || Math.abs(p.y - y) > radius) continue;
+    if (it.claimedBy !== -1 && it.claimedBy !== ignoreClaim && sim.ecs.isAlive(it.claimedBy)) continue;
+    n++;
+  }
+  return n;
+}
+
 /** Tavern visits: once per in-game day, every dwarf below MORALE_HIGH
  * picks up a small morale boost from time spent at the colony's
  * tavern. Skipped while shelter modes are active — nobody drinks
@@ -4358,6 +4387,12 @@ export const QUALITY_LABELS = ["basic", "Fine", "Superior", "Exceptional", "Mast
  * dwarf has walked to a stockpile cell and credits the global counter.
  * Each phase ends by clearing the job so chooseTask reissues the next
  * leg fresh — keeps the state machine boring and easy to save. */
+/** Chebyshev-distance radius around the haul target tile that a
+ * wheelbarrow-equipped dwarf "reaches into" during pickup. 2 covers
+ * a 5x5 area — enough to gather a typical mining cluster or a
+ * scattered handful of stones in one trip without being absurd. */
+const WHEELBARROW_PICKUP_RADIUS = 2;
+
 function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   if (job.progress === 0) {
     // Pickup leg. If the colony has any wheelbarrows on hand and the
@@ -4425,20 +4460,31 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       // and goods we check out even on a stack of one — workshop
       // outputs trickle out as singles, and a hauler walking back
       // empty after delivering one bed could just as well have a
-      // barrow ready for whatever lands next at the carpenter. We
-      // still require stack > 1 for size-1 bulk goods (stones,
-      // food) so the colony doesn't burn its whole wheelbarrow
-      // pool on individual stones at every mining face.
+      // barrow ready for whatever lands next at the carpenter. For
+      // size-1 bulk goods (stones, food) we require two or more
+      // same-kind items within the multi-tile pickup radius so the
+      // colony doesn't burn its wheelbarrow pool on individual
+      // stones when there's nothing nearby to chain.
       let capacity = 1;
       let withWheelbarrow = false;
       if (size < WHEELBARROW_CAPACITY && sim.stockpile.wheelbarrows > 0) {
-        const stack = countItemsAt(sim, pos.x, pos.y, firstKind);
-        if (stack > 1 || size >= 2) {
+        const nearby = size >= 2
+          ? 2 // sentinel above the gate threshold so the check passes
+          : countItemsWithin(sim, pos.x, pos.y, WHEELBARROW_PICKUP_RADIUS, firstKind, e);
+        if (nearby > 1 || size >= 2) {
           withWheelbarrow = true;
           capacity = Math.max(1, Math.floor(WHEELBARROW_CAPACITY / size));
           sim.stockpile.wheelbarrows--;
         }
       }
+      // With a wheelbarrow checked out, the dwarf reaches into a
+      // small radius around their tile and gathers any same-kind
+      // unclaimed items along the way. Without one, pickup is
+      // strictly the target tile. The dwarf doesn't literally walk
+      // to each neighbour cell — this is a "reach over and load
+      // the barrow" abstraction — but the claim check keeps them
+      // from poaching items a different hauler was sent to fetch.
+      const pickupRadius = withWheelbarrow ? WHEELBARROW_PICKUP_RADIUS : 0;
       let count = 0;
       // Snapshot the entity list because destroyItem mutates it.
       const snapshot = ents.slice();
@@ -4447,8 +4493,9 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         const it = sim.item.get(ie);
         const p = sim.position.get(ie);
         if (!it || !p) continue;
-        if (p.x !== pos.x || p.y !== pos.y) continue;
+        if (Math.abs(p.x - pos.x) > pickupRadius || Math.abs(p.y - pos.y) > pickupRadius) continue;
         if (it.kind !== firstKind) continue;
+        if (it.claimedBy !== -1 && it.claimedBy !== e && sim.ecs.isAlive(it.claimedBy)) continue;
         sim.destroyItem(ie);
         count++;
       }

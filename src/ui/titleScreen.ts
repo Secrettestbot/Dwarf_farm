@@ -1,5 +1,7 @@
 import { listSlotSummaries, deleteSave } from "../save/db";
 import { GameMode, SAVE_SLOT_IDS, SaveSlotId, SlotSummary } from "../save/schema";
+import { BUNNY_BUTTON_ROWS, paintSpriteAtScale, SpriteSet } from "../render/sprites";
+import { loadSpriteSet, saveSpriteSet } from "../render/spriteSetPref";
 
 export interface NewGameRequest {
   kind: "new";
@@ -49,6 +51,11 @@ async function chooseSlot(host: HTMLElement, byId: Record<string, SlotSummary>):
     `;
     root.appendChild(card);
     host.appendChild(root);
+
+    // Bottom-right bunny button — opens the sprite-set selector so
+    // the player can swap the colony's appearance between dwarves,
+    // a mixed pool, and bunnies only. Persists to localStorage.
+    root.appendChild(buildSpriteSetButton(root));
 
     const slotsHost = card.querySelector("#slots") as HTMLElement;
     for (const slotId of SAVE_SLOT_IDS) {
@@ -252,4 +259,83 @@ function formatElapsed(ms: number): string {
   if (hr < 24) return `${hr}h ${min % 60}m`;
   const d = Math.floor(hr / 24);
   return `${d}d ${hr % 24}h`;
+}
+
+/** Bottom-right bunny button. Clicking it opens the sprite-set
+ * selector (dwarves / mixed / bunnies only). The choice is saved to
+ * localStorage and applied to the live sprite pool so the next
+ * render uses it immediately. */
+function buildSpriteSetButton(root: HTMLElement): HTMLElement {
+  const btn = document.createElement("button");
+  btn.setAttribute("aria-label", "Sprite set");
+  btn.title = "Sprite set";
+  btn.style.cssText =
+    "position:absolute;right:18px;bottom:18px;width:56px;height:56px;" +
+    "padding:4px;background:#15151b;border:1px solid #2a2a35;border-radius:6px;" +
+    "cursor:pointer;display:flex;align-items:center;justify-content:center;";
+  const canvas = paintSpriteAtScale(BUNNY_BUTTON_ROWS, 3);
+  canvas.style.cssText = "image-rendering:pixelated;width:48px;height:48px;";
+  btn.appendChild(canvas);
+  btn.addEventListener("mouseenter", () => { btn.style.borderColor = "#e0c080"; });
+  btn.addEventListener("mouseleave", () => { btn.style.borderColor = "#2a2a35"; });
+  btn.addEventListener("click", () => openSpriteSetPicker(root));
+  return btn;
+}
+
+function openSpriteSetPicker(host: HTMLElement): void {
+  const existing = host.querySelector("[data-sprite-picker]") as HTMLElement | null;
+  if (existing) { existing.remove(); return; }
+  const overlay = document.createElement("div");
+  overlay.setAttribute("data-sprite-picker", "1");
+  overlay.style.cssText =
+    "position:absolute;inset:0;background:rgba(10,10,14,0.75);display:flex;" +
+    "align-items:center;justify-content:center;z-index:10;";
+
+  const card = document.createElement("div");
+  card.className = "panel";
+  card.style.cssText =
+    "padding:18px 22px;min-width:280px;background:#15151b;border:1px solid #2a2a35;" +
+    "border-radius:8px;color:#ddd;";
+  const current = loadSpriteSet();
+  card.innerHTML = `
+    <div style="font-size:14px;color:#e0c080;margin-bottom:4px;">Sprite set</div>
+    <div style="font-size:11px;color:#888;margin-bottom:14px;">
+      Pick what the colony looks like.
+    </div>
+    <div id="options" style="display:flex;flex-direction:column;gap:6px;"></div>
+    <div style="margin-top:14px;display:flex;justify-content:flex-end;">
+      <button id="close" class="btn" style="font-size:11px;opacity:0.7;">Close</button>
+    </div>
+  `;
+  const options = card.querySelector("#options") as HTMLElement;
+  const choices: Array<{ id: SpriteSet; label: string; hint: string }> = [
+    { id: "dwarves", label: "Dwarves only", hint: "16 bearded variants. The classic colony." },
+    { id: "mixed", label: "Dwarves and bunnies", hint: "Mostly dwarves, a few bunnies." },
+    { id: "bunnies", label: "Bunnies only", hint: "Every colonist is a bunny." },
+  ];
+  for (const c of choices) {
+    const row = document.createElement("label");
+    row.style.cssText =
+      "display:flex;align-items:center;gap:8px;padding:8px 10px;" +
+      "background:#1a1a22;border:1px solid #2a2a35;border-radius:4px;cursor:pointer;";
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "spriteSet";
+    radio.value = c.id;
+    radio.checked = c.id === current;
+    radio.addEventListener("change", () => {
+      if (radio.checked) saveSpriteSet(c.id);
+    });
+    const text = document.createElement("div");
+    text.innerHTML =
+      `<div style="font-size:12px;color:#e0c080;">${c.label}</div>` +
+      `<div style="font-size:10px;color:#888;">${c.hint}</div>`;
+    row.appendChild(radio);
+    row.appendChild(text);
+    options.appendChild(row);
+  }
+  (card.querySelector("#close") as HTMLButtonElement).addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (ev) => { if (ev.target === overlay) overlay.remove(); });
+  overlay.appendChild(card);
+  host.appendChild(overlay);
 }
