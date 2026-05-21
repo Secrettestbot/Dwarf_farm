@@ -205,6 +205,20 @@ export function renderWorld(
           const sy = (y - camera.y) * pt + viewH / 2;
           ctx.fillRect(sx, sy, pt, pt);
         }
+        // Awaiting-furniture rooms keep the dashed-outline's
+        // colored label so the player can see what's planned
+        // without the louder dashed border — once a hauler delivers
+        // the bench / bed / barrel and the room flips to complete,
+        // the label drops too and the room speaks for itself
+        // through the furniture sprite.
+        if (b.status === "needs_furnishing" && pt >= 8) {
+          const ax = (b.originX - camera.x) * pt + viewW / 2;
+          const ay = (b.originY - camera.y) * pt + viewH / 2;
+          const colors = BLUEPRINT_COLORS[b.kind];
+          ctx.fillStyle = colors.stroke;
+          ctx.font = "10px monospace";
+          ctx.fillText(formatKindLabel(b.kind), ax + 3, ay + 11);
+        }
       }
     }
     ctx.restore();
