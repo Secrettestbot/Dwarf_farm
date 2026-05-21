@@ -44,6 +44,7 @@ const BLUEPRINT_COLORS: Record<BlueprintKind, { fill: string; stroke: string }> 
   magma_forge: { fill: "rgba(220, 80, 40, 0.18)", stroke: "rgba(240, 110, 60, 0.8)" },
   water_wheel: { fill: "rgba(80, 110, 160, 0.16)", stroke: "rgba(100, 140, 200, 0.75)" },
   cemetery: { fill: "rgba(120, 110, 100, 0.16)", stroke: "rgba(160, 150, 140, 0.7)" },
+  great_hall: { fill: "rgba(200, 170, 130, 0.10)", stroke: "rgba(220, 190, 150, 0.55)" },
 };
 
 /** Per-kind floor tint painted over a completed room's cavity tiles.
@@ -77,6 +78,7 @@ const ROOM_FLOOR_TINT: Partial<Record<BlueprintKind, string>> = {
   magma_forge: "rgba(220, 80, 40, 0.18)",
   water_wheel: "rgba(80, 110, 160, 0.18)",
   cemetery: "rgba(120, 110, 100, 0.16)",
+  great_hall: "rgba(200, 170, 130, 0.12)",
 };
 
 const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
@@ -435,6 +437,7 @@ function formatKindLabel(kind: BlueprintKind): string {
     case "magma_forge": return "magma forge";
     case "water_wheel": return "wheel";
     case "cemetery": return "cemetery";
+    case "great_hall": return "hall";
   }
 }
 
