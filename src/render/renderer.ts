@@ -338,12 +338,14 @@ export function renderWorld(
     ctx.drawImage(sprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);
   }
 
-  // Dwarves on top.
-  const dwarfSprite = getDwarfSprite();
+  // Dwarves on top. getDwarfSprite picks a sprite from the active
+  // pool by hashing the dwarf id, so each colonist keeps a stable
+  // appearance across reloads while still feeling like a crowd.
   ctx.font = `${Math.max(8, Math.floor(pt * 0.6))}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   sim.forEachDwarf((id, pos) => {
+    const dwarfSprite = getDwarfSprite(id);
     const sx = (pos.x - camera.x) * pt + viewW / 2;
     const sy = (pos.y - camera.y) * pt + viewH / 2;
     ctx.drawImage(dwarfSprite as CanvasImageSource, 0, 0, SPRITE_TILE_SIZE, SPRITE_TILE_SIZE, sx, sy, pt, pt);

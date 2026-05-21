@@ -8,18 +8,33 @@ import { TileType, TILE_INFO } from "../sim/world/tiles";
 const SPRITE_SIZE = 16;
 const cache = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
 
+/** True in environments with no canvas API (node tests run under
+ * `environment: "node"`). makeSurface returns a placeholder object
+ * instead of crashing — sprite-pool tests can still check identity /
+ * dispatch behaviour without trying to paint pixels. */
+const NO_CANVAS_ENV =
+  typeof OffscreenCanvas === "undefined" && typeof document === "undefined";
+
 function makeSurface(): HTMLCanvasElement | OffscreenCanvas {
   if (typeof OffscreenCanvas !== "undefined") {
     return new OffscreenCanvas(SPRITE_SIZE, SPRITE_SIZE);
   }
-  const c = document.createElement("canvas");
-  c.width = SPRITE_SIZE;
-  c.height = SPRITE_SIZE;
-  return c;
+  if (typeof document !== "undefined") {
+    const c = document.createElement("canvas");
+    c.width = SPRITE_SIZE;
+    c.height = SPRITE_SIZE;
+    return c;
+  }
+  // Test-only stub: a plain object the renderer would never see.
+  // Each call returns a fresh instance so identity comparisons in
+  // tests still work (same id → same cached object; different ids
+  // get different objects from the pool slots).
+  return {} as unknown as HTMLCanvasElement;
 }
 
 function paintFromRows(rows: string[]): HTMLCanvasElement | OffscreenCanvas {
   const surf = makeSurface();
+  if (NO_CANVAS_ENV) return surf;
   const ctx = (surf as HTMLCanvasElement).getContext("2d", { willReadFrequently: false }) as
     | CanvasRenderingContext2D
     | OffscreenCanvasRenderingContext2D;
@@ -1029,35 +1044,495 @@ export function getTileSpriteAtLayer(
   return s;
 }
 
-// Dwarf sprite — all dwarves share one base sprite for session 1 (variation
-// added in session 2 once they have personalities). 8×16, centred in 16×16.
-const DWARF_PIXELS: string[] = [
-  "0000000000000000",
-  "0000000000000000",
-  "00000DDDDD000000",
-  "0000DD22322DD000",
-  "000D2444444220D0",
-  "00D24444444422D0",
-  "0DD2D4444442DDD0",
-  "0DDDDDDDDDDDDDDD".slice(0, 16),
-  "00FF14444411FF00",
-  "00FF14444411FF00",
-  "00FF14444411FF00",
-  "00FE11111111EF00",
-  "0001111111111100",
-  "0001111000111100",
-  "0011110000011100",
-  "0001100000001100",
+// ---- Dwarves + bunnies: configurable sprite pool ----------------------
+//
+// The colony's dwarves are drawn from a small pool of 16x16 pixel-art
+// variants. A deterministic per-id hash picks the same sprite for the
+// same dwarf across reloads, so individual colonists stay
+// recognisable. The pool's contents depend on the active sprite set
+// (see SpriteSet below) — dwarves only, dwarves + bunnies, or
+// bunnies only — which the player chooses from the title screen.
+
+/** Parameterised 16x16 dwarf sprite generator. All colour params are
+ * single-hex palette indices from PALETTE in ./palette.ts. The
+ * builder lays down a consistent body silhouette (rows 8-15: arms /
+ * belt / pants / boots) and assembles the head from composable head,
+ * hair, beard, and headwear pieces (rows 0-7). Output is the same
+ * 16-row array-of-hex-strings the rest of this file uses. */
+type DwarfOpts = {
+  hair?: string;
+  beard?: string | null;
+  beardShape?: "full" | "forked" | "short" | "long" | "braided" | "mustache" | "goatee" | "none";
+  skin?: string;
+  faceShadow?: string;
+  torso?: string;
+  arms?: string;
+  cuff?: string;
+  pants?: string;
+  boots?: string;
+  hat?: "none" | "cap" | "helmet" | "hood" | "bandana" | "pointy" | "horned-helmet";
+  hatColor?: string;
+  hatAccent?: "horns" | "plume" | "feather" | null;
+  build?: "normal" | "wide" | "slim";
+};
+
+function buildDwarf(p: DwarfOpts = {}): string[] {
+  const {
+    hair = "D", beard = null, beardShape = "full",
+    skin = "4", faceShadow = "2",
+    torso = "4", arms = "F", cuff = "E",
+    pants = "1", boots = "1",
+    hat = "none", hatColor = "9", hatAccent = null,
+    build = "normal",
+  } = p;
+  const bc = beard || hair;
+
+  const g: string[][] = Array.from({ length: 16 }, () => Array(16).fill("0"));
+  const set = (x: number, y: number, c: string) => {
+    if (x >= 0 && x < 16 && y >= 0 && y < 16 && c && c !== "0") g[y][x] = c;
+  };
+  const rect = (x1: number, y1: number, x2: number, y2: number, c: string) => {
+    for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) set(x, y, c);
+  };
+
+  // Face skin (8-wide) framed by face-shadow at cols 3 + 12.
+  rect(4, 4, 11, 6, skin);
+  set(3, 4, faceShadow); set(12, 4, faceShadow);
+  set(3, 5, faceShadow); set(12, 5, faceShadow);
+  set(3, 6, faceShadow); set(12, 6, faceShadow);
+  rect(6, 3, 9, 3, faceShadow); // eyes/nose strip
+
+  // Hair: top + sides (unless hidden under helmet/hood).
+  const showHairTop = hat === "none" || hat === "bandana";
+  const showHairSides = hat !== "helmet" && hat !== "hood" && hat !== "horned-helmet";
+  if (showHairTop) rect(5, 2, 10, 2, hair);
+  if (showHairSides) {
+    set(4, 3, hair); set(5, 3, hair); set(10, 3, hair); set(11, 3, hair);
+    set(2, 4, hair); set(13, 4, hair);
+    set(2, 5, hair); set(13, 5, hair);
+    set(1, 6, hair); set(2, 6, hair); set(13, 6, hair); set(14, 6, hair);
+  }
+
+  // Beard variants.
+  if (beardShape === "full") {
+    rect(1, 7, 14, 7, bc);
+    set(1, 6, bc); set(2, 6, bc); set(13, 6, bc); set(14, 6, bc);
+    set(2, 5, bc); set(13, 5, bc);
+    set(4, 6, bc); set(11, 6, bc);
+  } else if (beardShape === "forked") {
+    rect(2, 7, 13, 7, bc);
+    set(1, 6, bc); set(2, 6, bc); set(13, 6, bc); set(14, 6, bc);
+    set(2, 5, bc); set(13, 5, bc);
+    set(4, 8, bc); set(5, 8, bc); set(10, 8, bc); set(11, 8, bc);
+    set(5, 9, bc); set(10, 9, bc);
+  } else if (beardShape === "short") {
+    rect(4, 7, 11, 7, bc);
+    set(5, 6, bc); set(10, 6, bc);
+  } else if (beardShape === "long") {
+    rect(1, 7, 14, 7, bc);
+    set(1, 6, bc); set(2, 6, bc); set(13, 6, bc); set(14, 6, bc);
+    set(2, 5, bc); set(13, 5, bc);
+    rect(3, 8, 12, 8, bc);
+    rect(4, 9, 11, 9, bc);
+    rect(5, 10, 10, 10, bc);
+  } else if (beardShape === "braided") {
+    rect(2, 7, 13, 7, bc);
+    set(1, 6, bc); set(14, 6, bc);
+    set(4, 8, bc); set(5, 8, bc); set(10, 8, bc); set(11, 8, bc);
+    set(7, 8, bc); set(8, 8, bc);
+    set(5, 9, bc); set(10, 9, bc);
+    set(7, 9, "D"); set(8, 9, "D"); // gold-bead rings
+  } else if (beardShape === "mustache") {
+    rect(5, 6, 10, 6, bc);
+    set(4, 6, bc); set(11, 6, bc);
+  } else if (beardShape === "goatee") {
+    set(7, 6, bc); set(8, 6, bc);
+    set(7, 7, bc); set(8, 7, bc);
+    set(7, 8, bc); set(8, 8, bc);
+  }
+
+  // Headwear.
+  if (hat === "cap") {
+    rect(4, 2, 11, 2, hatColor);
+    set(3, 2, "1"); set(12, 2, "1");
+    rect(3, 1, 12, 1, hatColor);
+    set(2, 1, "1"); set(13, 1, "1");
+  } else if (hat === "helmet" || hat === "horned-helmet") {
+    rect(4, 1, 11, 1, hatColor);
+    rect(3, 2, 12, 2, hatColor);
+    rect(2, 3, 13, 3, hatColor);
+    set(3, 1, "1"); set(12, 1, "1");
+    set(2, 2, "1"); set(13, 2, "1");
+    set(1, 3, "1"); set(14, 3, "1");
+    if (hat === "horned-helmet" || hatAccent === "horns") {
+      set(2, 0, hatColor); set(13, 0, hatColor);
+      set(1, 1, hatColor); set(14, 1, hatColor);
+      set(1, 0, "1"); set(14, 0, "1");
+    } else if (hatAccent === "plume") {
+      set(7, 0, "E"); set(8, 0, "E");
+      set(7, 1, "E"); set(8, 1, "E");
+    } else if (hatAccent === "feather") {
+      set(2, 0, "C"); set(2, 1, "C"); set(2, 2, "C");
+    }
+  } else if (hat === "hood") {
+    rect(4, 2, 11, 2, hatColor);
+    set(3, 2, "1"); set(12, 2, "1");
+    set(2, 3, hatColor); set(3, 3, hatColor);
+    set(12, 3, hatColor); set(13, 3, hatColor);
+    set(1, 3, "1"); set(14, 3, "1");
+    set(1, 4, hatColor); set(14, 4, hatColor);
+    set(0, 4, "1"); set(15, 4, "1");
+    set(1, 5, hatColor); set(14, 5, hatColor);
+    set(0, 5, "1"); set(15, 5, "1");
+    set(1, 6, hatColor); set(14, 6, hatColor);
+    set(0, 6, "1"); set(15, 6, "1");
+  } else if (hat === "bandana") {
+    rect(3, 3, 12, 3, hatColor);
+    set(2, 3, "1"); set(13, 3, "1");
+    set(13, 4, hatColor); set(14, 4, hatColor);
+  } else if (hat === "pointy") {
+    set(7, 0, hatColor); set(8, 0, hatColor);
+    rect(6, 1, 9, 1, hatColor);
+    rect(5, 2, 10, 2, hatColor);
+    rect(4, 3, 11, 3, hatColor);
+    set(3, 3, "1"); set(12, 3, "1");
+    rect(3, 4, 12, 4, "1");
+  }
+
+  // Body silhouette. 'wide' fills sleeves to col 1/14; 'slim' pulls in.
+  let armLeft1 = 2, armLeft2 = 3, armRight1 = 12, armRight2 = 13;
+  let armOutlineL = 4, armOutlineR = 11;
+  let torsoX1 = 5, torsoX2 = 10;
+  if (build === "wide") {
+    armLeft1 = 1; armLeft2 = 2; armRight1 = 13; armRight2 = 14;
+    armOutlineL = 3; armOutlineR = 12;
+    torsoX1 = 4; torsoX2 = 11;
+  } else if (build === "slim") {
+    armLeft1 = 3; armLeft2 = 3; armRight1 = 12; armRight2 = 12;
+  }
+  for (let y = 8; y <= 10; y++) {
+    set(armLeft1, y, arms); set(armLeft2, y, arms);
+    set(armOutlineL, y, "1");
+    set(armOutlineR, y, "1");
+    set(armRight1, y, arms); set(armRight2, y, arms);
+    for (let x = torsoX1; x <= torsoX2; x++) set(x, y, torso);
+  }
+  set(armLeft1, 11, arms); set(armLeft2, 11, cuff);
+  set(armRight1, 11, cuff); set(armRight2, 11, arms);
+  rect(armOutlineL, 11, armOutlineR, 11, "1");
+  rect(3, 12, 12, 12, pants);
+  rect(3, 13, 6, 13, pants);
+  rect(9, 13, 12, 13, pants);
+  rect(2, 14, 5, 14, pants);
+  rect(10, 14, 13, 14, pants);
+  set(3, 15, boots); set(4, 15, boots);
+  set(11, 15, boots); set(12, 15, boots);
+
+  return g.map((r) => r.join(""));
+}
+
+/** 16 named dwarves — varied beards, hair colours, skin tones,
+ * headwear, and clothes. All in the existing 16-colour palette. */
+const DWARF_VARIANTS: DwarfOpts[] = [
+  /* 00 Classic Blonde     */ {},
+  /* 01 Black Beard        */ { hair: "2", beard: "2", torso: "E", arms: "9", cuff: "D" },
+  /* 02 Red Beard          */ { hair: "E", beard: "E", torso: "6", arms: "5" },
+  /* 03 Brown Beard Smith  */ { hair: "6", beard: "6", torso: "5", arms: "4", cuff: "D", build: "wide" },
+  /* 04 Old Grey Beard     */ { hair: "A", beard: "B", beardShape: "long", hat: "hood", hatColor: "5", torso: "5", arms: "4", cuff: "6" },
+  /* 05 Steel Soldier      */ { hat: "helmet", hatColor: "A", beardShape: "short", beard: "6", torso: "E", arms: "9", cuff: "D" },
+  /* 06 Horned Helmet      */ { hat: "horned-helmet", hatColor: "9", beardShape: "long", beard: "6", hair: "6", torso: "5", arms: "E", cuff: "D" },
+  /* 07 Hooded Ranger      */ { hat: "hood", hatColor: "C", torso: "C", arms: "5", cuff: "6", hair: "5", beard: "5" },
+  /* 08 Young Dwarf        */ { beardShape: "none", skin: "7", torso: "C", arms: "F", cuff: "E" },
+  /* 09 Bald Brawler       */ { hair: "4", beardShape: "mustache", beard: "6", torso: "5", arms: "4", cuff: "E" },
+  /* 10 Forked Beard       */ { beardShape: "forked" },
+  /* 11 Leather Cap        */ { hat: "cap", hatColor: "5", torso: "6", arms: "5", cuff: "D" },
+  /* 12 Braided Beard      */ { beardShape: "braided", hair: "6", beard: "6", torso: "5", arms: "4" },
+  /* 13 Red Bandana Mason  */ { hat: "bandana", hatColor: "E", hair: "2", beard: "2", torso: "A", arms: "8", cuff: "D" },
+  /* 14 Pale Scholar       */ { skin: "7", hair: "B", beard: "A", beardShape: "goatee", torso: "F", arms: "8", cuff: "D" },
+  /* 15 Plumed Noble       */ { hat: "helmet", hatColor: "B", hatAccent: "plume", beardShape: "braided", beard: "D", hair: "D", torso: "F", arms: "E", cuff: "D" },
 ];
 
-export function getDwarfSprite(): HTMLCanvasElement | OffscreenCanvas {
-  const key = "dwarf:default";
-  let s = cache.get(key);
-  if (!s) {
-    s = paintFromRows(DWARF_PIXELS);
-    cache.set(key, s);
+// ---- Bunny pixel arrays ------------------------------------------------
+// Two silhouette families, five colour variants each. The chibi
+// family is the V2 design (round body, tall pink-lined ears, dot
+// eyes); the long family is V1 (realistic-rabbit silhouette,
+// shorter ears, longer body). Both are 16x16 grids in the same
+// palette as everything else.
+
+const BUNNY_CHIBI_WHITE: string[] = [
+  "0001111001111000",
+  "0001BB1001BB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BB1001BB1000",
+  "001BBBBBBBBBB100",
+  "01BBBBBBBBBBBB10",
+  "01BBB1BBBB1BBB10",
+  "01BBBBBEEBBBBB10",
+  "01BBBBB11BBBBB10",
+  "01BBBBBBBBBBBB10",
+  "01BBBBBBBBBBBB10",
+  "001BBBBBBBBBB100",
+  "0011BB1001BB1100",
+];
+
+const BUNNY_CHIBI_BROWN: string[] = [
+  "0001111001111000",
+  "0001661001661000",
+  "0001651001561000",
+  "0001651001561000",
+  "0001651001561000",
+  "0001651001561000",
+  "0001661001661000",
+  "0016666666666100",
+  "0166666666666610",
+  "0166616666616610",
+  "0166666EE6666610",
+  "0166666116666610",
+  "0166666666666610",
+  "0166666666666610",
+  "0016666666666100",
+  "0011661001661100",
+];
+
+const BUNNY_CHIBI_DUSK: string[] = [
+  "0001111001111000",
+  "0001221001221000",
+  "0001231001321000",
+  "0001231001321000",
+  "0001231001321000",
+  "0001231001321000",
+  "0001221001221000",
+  "0012222222222100",
+  "0122222222222210",
+  "01222B222222B210",
+  "0122222EE2222210",
+  "0122222112222210",
+  "0122222222222210",
+  "0122222222222210",
+  "0012222222222100",
+  "0011221001221100",
+];
+
+const BUNNY_CHIBI_HARE: string[] = [
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BB1001BB1000",
+  "001BBBBBBBBBB100",
+  "01BBBBBBBBBBBB10",
+  "01BBB1BBBB1BBB10",
+  "01BBBBBEEBBBBB10",
+  "01BBBBB11BBBBB10",
+  "01BBBBBBBBBBBB10",
+  "001BBBBBBBBBB100",
+  "001BBBBBBBBBB100",
+  "0011BB1001BB1100",
+];
+
+const BUNNY_CHIBI_CARROT: string[] = [
+  "0001111001111000",
+  "0001BB1001BB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BE1001EB1000",
+  "0001BB1001BB1000",
+  "001BBBBBBBBBB100",
+  "01BBBBBBBBBBBB10",
+  "01BBB1BBBB1BBB10",
+  "01BBBBBEEBBBBB10",
+  "01BBBBB11BBBBB10",
+  "01BBBBCCCCBBBB10",
+  "01BBB1DDDD1BBB10",
+  "001BB1DDDD1BB100",
+  "0011BB1001BB1100",
+];
+
+const BUNNY_LONG_WHITE: string[] = [
+  "0000000000000000",
+  "0000110000110000",
+  "0001BB1001BB1000",
+  "0001BE1001BE1000",
+  "0001BB1001BB1000",
+  "001BBBBBBBBBB100",
+  "01BBBBBBBBBBBB10",
+  "01BB1BBBBBB1BB10",
+  "01BBBBBEEBBBBB10",
+  "001BBBBBBBBBB100",
+  "001BBBBBBBBBB100",
+  "0011BBBBBBBB1100",
+  "0001BBB11BBB1000",
+  "0001BB1001BB1000",
+  "0001100001100000",
+  "0000000000000000",
+];
+
+const BUNNY_LONG_BROWN: string[] = [
+  "0000000000000000",
+  "0000110000110000",
+  "0001661001661000",
+  "0001651001651000",
+  "0001661001661000",
+  "0016666666666100",
+  "0166666666666610",
+  "0166166666616610",
+  "0166666EE6666610",
+  "0016667777666100",
+  "0016677777766100",
+  "0011666666661100",
+  "0001666116661000",
+  "0001661001661000",
+  "0001100001100000",
+  "0000000000000000",
+];
+
+const BUNNY_LONG_DUSK: string[] = [
+  "0000000000000000",
+  "0000110000110000",
+  "0001221001221000",
+  "0001231001231000",
+  "0001221001221000",
+  "0012222222222100",
+  "0122222222222210",
+  "0122B22222222B10",
+  "0122222EE2222210",
+  "0012222222222100",
+  "0012222222222100",
+  "0011222222221100",
+  "0001222112221000",
+  "0001221001221000",
+  "0001100001100000",
+  "0000000000000000",
+];
+
+const BUNNY_LONG_HARE: string[] = [
+  "0000110000110000",
+  "0001771001771000",
+  "0001741001741000",
+  "0001741001741000",
+  "0001771001771000",
+  "0017777777777100",
+  "0177777777777710",
+  "0177177777771710",
+  "0177777EE7777710",
+  "0017777777777100",
+  "0017777777777100",
+  "0011777777771100",
+  "0001777117771000",
+  "0001771001771000",
+  "0001100001100000",
+  "0000000000000000",
+];
+
+const BUNNY_LONG_CARROT: string[] = [
+  "0000000000000000",
+  "0000110000110000",
+  "0001BB1001BB1000",
+  "0001BE1001BE1000",
+  "0001BB1001BB1000",
+  "001BBBBBBBBBB100",
+  "01BBBBBBBBBBBB10",
+  "01BB1BBBBBB1BB10",
+  "01BBBBBEEBBBBB10",
+  "001BBBBBBBBBB100",
+  "001BBB1CC1BBB100",
+  "0011BB1EE1BB1100",
+  "0001BB1EE1BB1000",
+  "0001BB11111B1000",
+  "0001100001100000",
+  "0000000000000000",
+];
+
+const BUNNY_PIXEL_VARIANTS: string[][] = [
+  BUNNY_CHIBI_WHITE, BUNNY_CHIBI_BROWN, BUNNY_CHIBI_DUSK,
+  BUNNY_CHIBI_HARE, BUNNY_CHIBI_CARROT,
+  BUNNY_LONG_WHITE, BUNNY_LONG_BROWN, BUNNY_LONG_DUSK,
+  BUNNY_LONG_HARE, BUNNY_LONG_CARROT,
+];
+
+/** Player-selectable sprite set. The pool the renderer hashes into:
+ *  - "dwarves": 16 dwarf variants, no bunnies.
+ *  - "mixed":   16 dwarf variants + 10 bunny variants.
+ *  - "bunnies": 10 bunny variants, no dwarves.
+ * Selected from the title screen's bunny button. Round-tripped
+ * through localStorage so the choice persists across reloads. */
+export type SpriteSet = "dwarves" | "mixed" | "bunnies";
+
+let currentSpriteSet: SpriteSet = "dwarves";
+let spritePool: Array<HTMLCanvasElement | OffscreenCanvas> = [];
+
+function rebuildSpritePool(): void {
+  spritePool = [];
+  if (currentSpriteSet === "dwarves" || currentSpriteSet === "mixed") {
+    for (const opts of DWARF_VARIANTS) {
+      spritePool.push(paintFromRows(buildDwarf(opts)));
+    }
   }
-  return s;
+  if (currentSpriteSet === "bunnies" || currentSpriteSet === "mixed") {
+    for (const rows of BUNNY_PIXEL_VARIANTS) {
+      spritePool.push(paintFromRows(rows));
+    }
+  }
+}
+
+/** Set the active sprite set and invalidate the cached pool. The
+ * next getDwarfSprite call rebuilds it. */
+export function setSpriteSet(set: SpriteSet): void {
+  if (currentSpriteSet === set && spritePool.length > 0) return;
+  currentSpriteSet = set;
+  spritePool = [];
+}
+
+export function getSpriteSet(): SpriteSet {
+  return currentSpriteSet;
+}
+
+/** Render the sprite at the given pool index onto a fresh canvas
+ * at the requested pixel scale. Used by the title-screen bunny
+ * button (and any other UI that wants a recognisable sprite outside
+ * the main world view). Returns null if `index` is out of range. */
+export function paintSpriteAtScale(rows: string[], scale: number): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = 16 * scale;
+  c.height = 16 * scale;
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+  for (let y = 0; y < 16; y++) {
+    const row = rows[y] ?? "";
+    for (let x = 0; x < 16; x++) {
+      const ch = row[x];
+      if (!ch || ch === "0" || ch === ".") continue;
+      const idx = parseInt(ch, 16);
+      const colour = PALETTE[idx];
+      if (!colour || colour === "transparent") continue;
+      ctx.fillStyle = colour;
+      ctx.fillRect(x * scale, y * scale, scale, scale);
+    }
+  }
+  return c;
+}
+
+/** A representative bunny silhouette for UI buttons (title screen
+ * bottom-right toggle). Chibi white lop — the friendly default. */
+export const BUNNY_BUTTON_ROWS: string[] = BUNNY_CHIBI_WHITE;
+
+/** Per-dwarf sprite picker. `id` is optional so callers that don't
+ * have a specific dwarf in mind (e.g. inspector portrait fallback)
+ * keep getting the first entry. Deterministic — same id → same
+ * sprite every render and every reload. */
+export function getDwarfSprite(id?: number): HTMLCanvasElement | OffscreenCanvas {
+  if (spritePool.length === 0) rebuildSpritePool();
+  if (id === undefined) return spritePool[0];
+  // Knuth multiply → upper bits → modulo pool size. Taking the low
+  // bit alone would just be id parity (the multiplier is odd).
+  const idx = (((id * 2654435761) >>> 16)) % spritePool.length;
+  return spritePool[idx];
 }
 
 // Hostile pixel art. Each row uses palette indices (0 = transparent);

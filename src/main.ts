@@ -11,6 +11,7 @@ import { EmergencyPanel } from "./ui/emergency";
 import { EventLogPanel } from "./ui/eventLogPanel";
 import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
+import { applyStoredSpriteSet } from "./render/spriteSetPref";
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
@@ -75,6 +76,10 @@ boot().catch((err) => {
 });
 
 async function boot() {
+  // Apply the player's last sprite-set choice (dwarves / mixed /
+  // bunnies) before any render fires — the title screen's bunny
+  // toggle can change it again before the game starts.
+  applyStoredSpriteSet();
   const choice = await showTitleScreen(uiHost);
 
   let active: ActiveFortress;
