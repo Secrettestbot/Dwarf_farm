@@ -222,7 +222,19 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           dealCost: sim.caravanDealCost,
           dealImport: sim.caravanDealImport,
           dealGain: sim.caravanDealGain,
+          dealImport2: sim.caravanDealImport2 || undefined,
+          dealGain2: sim.caravanDealGain2 || undefined,
           dealComplete: sim.caravanDealComplete,
+        }
+      : undefined,
+    tradeReputation: Object.keys(sim.tradeReputation).length > 0
+      ? { ...sim.tradeReputation }
+      : undefined,
+    caravanSchedule: sim.caravanScheduledTick > 0
+      ? {
+          tick: sim.caravanScheduledTick,
+          origin: sim.caravanScheduledOrigin,
+          preAnnounced: sim.caravanPreAnnounced,
         }
       : undefined,
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
@@ -526,7 +538,15 @@ export function restore(save: SaveV1): SimWorld {
     if (save.caravan.dealCost !== undefined) sim.caravanDealCost = save.caravan.dealCost;
     if (save.caravan.dealImport !== undefined) sim.caravanDealImport = save.caravan.dealImport;
     if (save.caravan.dealGain !== undefined) sim.caravanDealGain = save.caravan.dealGain;
+    if (save.caravan.dealImport2 !== undefined) sim.caravanDealImport2 = save.caravan.dealImport2;
+    if (save.caravan.dealGain2 !== undefined) sim.caravanDealGain2 = save.caravan.dealGain2;
     if (save.caravan.dealComplete) sim.caravanDealComplete = true;
+  }
+  if (save.tradeReputation) sim.tradeReputation = { ...save.tradeReputation };
+  if (save.caravanSchedule) {
+    sim.caravanScheduledTick = save.caravanSchedule.tick;
+    sim.caravanScheduledOrigin = save.caravanSchedule.origin;
+    sim.caravanPreAnnounced = save.caravanSchedule.preAnnounced;
   }
   if (save.graves) {
     for (const g of save.graves) sim.graves.push({ ...g });

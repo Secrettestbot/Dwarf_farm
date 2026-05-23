@@ -282,7 +282,31 @@ export class SimWorld {
   caravanDealCost = 0;
   caravanDealImport: string = "";
   caravanDealGain = 0;
+  /** Secondary import in a multi-good basket — the broker can come
+   * back with up to two staples per trade so a single caravan visit
+   * can replenish both food AND drink (or food and rope, etc.).
+   * Empty / 0 when the deal is a single-import trade. */
+  caravanDealImport2: string = "";
+  caravanDealGain2 = 0;
   caravanDealComplete = false;
+  /** Per-kingdom trade reputation, keyed by kingdom name. Climbs
+   * with successful deals (REPUTATION_GAIN_PER_DEAL) and falls when
+   * the colony fails to meet a caravan (broker dies en route, no
+   * goods to offer, etc.). Higher reputation gets the colony better
+   * prices when that kingdom comes back. Round-trips through save
+   * so a long-running fortress accumulates real trading history. */
+  tradeReputation: Record<string, number> = {};
+  /** Tick at which the next caravan is scheduled to arrive. The
+   * pre-announcement system fires an outrider event ~3 days before
+   * this tick so the player can react via the production sliders.
+   * -1 means no caravan currently scheduled. */
+  caravanScheduledTick: number = -1;
+  /** Origin of the scheduled caravan. Empty when no caravan is
+   * scheduled. */
+  caravanScheduledOrigin: string = "";
+  /** True once the pre-announcement event has fired for the
+   * currently-scheduled caravan, so we don't announce twice. */
+  caravanPreAnnounced: boolean = false;
 
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips

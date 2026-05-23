@@ -280,7 +280,24 @@ export interface SaveV1 {
     dealCost?: number;
     dealImport?: string;
     dealGain?: number;
+    /** Secondary basket import — optional. Empty / 0 if the deal is
+     * single-good. */
+    dealImport2?: string;
+    dealGain2?: number;
     dealComplete?: boolean;
+  };
+  /** Per-kingdom trade reputation table — climbs with successful
+   * deals, drops when the colony misses a caravan. Optional; older
+   * saves load with an empty record and reputation starts at 0 for
+   * every kingdom. */
+  tradeReputation?: Record<string, number>;
+  /** Scheduled-caravan state for the outrider pre-announcement
+   * system. Round-trips so the player's outrider warning doesn't
+   * evaporate over a save/reload. */
+  caravanSchedule?: {
+    tick: number;
+    origin: string;
+    preAnnounced: boolean;
   };
   /** Cemetery registry — every dwarf interred in a Headstone tile.
    * Round-trips so a reload restores the colony's full memorial
