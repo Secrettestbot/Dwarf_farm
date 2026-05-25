@@ -37,6 +37,12 @@ export interface Recipe {
   verb: string;
   inputKind: ResourceKind;
   inputQty: number;
+  /** Optional secondary ingredient. Used for multi-input recipes
+   * like the stew (food + drink → meals) and feast (food + cut_gem
+   * → meals). When set, progressCraft consumes both inputs in the
+   * same craft cycle and refuses to start if either is missing. */
+  inputKind2?: ResourceKind;
+  inputQty2?: number;
   outputKind: ResourceKind;
   outputQty: number;
   /** Base ticks per craft. Skill above Novice scales this down. */
@@ -186,6 +192,41 @@ export const CARPENTER_BED_RECIPE: Recipe = {
   ticks: 90,
   skill: "carpentry",
   station: TileType.CarpenterStation,
+};
+
+/** Kitchen stew — two food + one drink yields five meals. Better
+ * food-to-meals ratio than the basic 1f → 2m recipe (2.5 vs 2
+ * meals per food), at the cost of one unit of drink per cycle.
+ * Kitchen swaps into this when both stockpiles are flush. */
+export const KITCHEN_STEW_RECIPE: Recipe = {
+  verb: "simmers a hearty stew",
+  inputKind: "food",
+  inputQty: 2,
+  inputKind2: "drink",
+  inputQty2: 1,
+  outputKind: "meals",
+  outputQty: 5,
+  ticks: 90,
+  skill: "cooking",
+  station: TileType.KitchenStation,
+};
+
+/** Kitchen noble feast — food + cut gem yields six meals. The
+ * cut-gem garnish is a flavour conceit (the gem isn't literally
+ * eaten — it ornaments the plate), but mechanically it sinks the
+ * jeweller's surplus into a measurable food-output boost. Only
+ * fires when cut_gems are genuinely surplus. */
+export const KITCHEN_FEAST_RECIPE: Recipe = {
+  verb: "lays out a noble feast",
+  inputKind: "food",
+  inputQty: 2,
+  inputKind2: "cut_gems",
+  inputQty2: 1,
+  outputKind: "meals",
+  outputQty: 6,
+  ticks: 100,
+  skill: "cooking",
+  station: TileType.KitchenStation,
 };
 
 /** Alternate carpenter recipe that produces a Barrel item from planks.

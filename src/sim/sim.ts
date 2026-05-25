@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE } from "./planner/recipes";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE, KITCHEN_STEW_RECIPE, KITCHEN_FEAST_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, ENGRAVE_QUALITY_PER_BLOCK, ENGRAVE_QUALITY_PER_GEM, isMaintainable, maxDecorationsFor } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -4168,6 +4168,27 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = MASON_KILN_FIREBOX_RECIPE;
     }
   }
+  // Kitchen recipe swap: prefer the noble feast (food + cut_gem)
+  // when the jeweller's surplus is real (≥ 3 cut_gems on hand);
+  // otherwise prefer the stew (food + drink) when both stockpiles
+  // are healthy enough that the recipe's drink cost isn't a
+  // problem; fall back to the basic 1 food → 2 meals recipe. The
+  // food / drink thresholds are intentionally generous — the
+  // colony doesn't pull from drink for stew unless drink is
+  // genuinely plentiful, so a thirsty fortress isn't penalised.
+  if (blueprintKind === "kitchen" && recipe) {
+    if (
+      sim.stockpile.food >= KITCHEN_FEAST_RECIPE.inputQty &&
+      sim.stockpile.cut_gems >= (KITCHEN_FEAST_RECIPE.inputQty2 ?? 0) + 2
+    ) {
+      recipe = KITCHEN_FEAST_RECIPE;
+    } else if (
+      sim.stockpile.food >= KITCHEN_STEW_RECIPE.inputQty &&
+      sim.stockpile.drink >= (KITCHEN_STEW_RECIPE.inputQty2 ?? 0) + 30
+    ) {
+      recipe = KITCHEN_STEW_RECIPE;
+    }
+  }
   if (!recipe) {
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -4202,6 +4223,23 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
         return;
       }
       (sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] -= recipe.inputQty;
+    }
+    // Multi-ingredient recipes (kitchen stew / feast) consume a
+    // second resource alongside the primary. Both come from the
+    // stockpile counter — recipe.inputKind2 isn't an entity kind,
+    // it's a counter resource like "drink" or "cut_gems". We
+    // already checked availability in the kitchen-swap gate, but
+    // a race could have drained it; bail with no progress (and
+    // no refund — the primary ingredient is already gone) rather
+    // than crashing.
+    if (recipe.inputKind2 && recipe.inputQty2) {
+      const sp = sim.stockpile as unknown as Record<string, number>;
+      if ((sp[recipe.inputKind2] ?? 0) < recipe.inputQty2) {
+        sim.job.remove(e);
+        sim.pathing.remove(e);
+        return;
+      }
+      sp[recipe.inputKind2] -= recipe.inputQty2;
     }
   }
   const dw = sim.dwarf.get(e);
