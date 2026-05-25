@@ -308,6 +308,28 @@ export class SimWorld {
    * currently-scheduled caravan, so we don't announce twice. */
   caravanPreAnnounced: boolean = false;
 
+  /** Scheduled-siege state. A goblin warband shows up roughly once
+   * per in-game year, announced via an outrider event 5 days before
+   * arrival so the player can pull the army together / man the
+   * armoury / stockpile drink for the soldiers. -1 means none
+   * scheduled. */
+  siegeScheduledTick: number = -1;
+  /** True once the pre-siege warning event has fired for the
+   * currently-scheduled siege. */
+  siegeAnnounced: boolean = false;
+  /** Cumulative sieges the colony has survived (all warband
+   * members killed) — surfaces in the chronicle and trade-flavour
+   * later on. */
+  siegesSurvived: number = 0;
+  /** True from the tick the warband spawns until they're all
+   * killed or the player wins. Used to suppress new sieges from
+   * being scheduled mid-siege, and to keep the chronicle line
+   * about the siege ending clean. */
+  siegeActive: boolean = false;
+  /** Snapshot of siegesSurvived at the moment a siege starts, so
+   * the end-of-siege event knows whether to bump the counter. */
+  siegeKilledSinceStart: number = 0;
+
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips
    * through save so a reload restores the colony's full memorial roll

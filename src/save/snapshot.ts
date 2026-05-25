@@ -237,6 +237,14 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           preAnnounced: sim.caravanPreAnnounced,
         }
       : undefined,
+    siege: (sim.siegeScheduledTick > 0 || sim.siegeActive || sim.siegesSurvived > 0)
+      ? {
+          scheduledTick: sim.siegeScheduledTick,
+          announced: sim.siegeAnnounced,
+          active: sim.siegeActive,
+          survived: sim.siegesSurvived,
+        }
+      : undefined,
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
     artifactsNextId: sim.artifactsNextId,
@@ -547,6 +555,12 @@ export function restore(save: SaveV1): SimWorld {
     sim.caravanScheduledTick = save.caravanSchedule.tick;
     sim.caravanScheduledOrigin = save.caravanSchedule.origin;
     sim.caravanPreAnnounced = save.caravanSchedule.preAnnounced;
+  }
+  if (save.siege) {
+    sim.siegeScheduledTick = save.siege.scheduledTick;
+    sim.siegeAnnounced = save.siege.announced;
+    sim.siegeActive = save.siege.active;
+    sim.siegesSurvived = save.siege.survived;
   }
   if (save.graves) {
     for (const g of save.graves) sim.graves.push({ ...g });

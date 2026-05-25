@@ -119,6 +119,7 @@ export function tick(sim: SimWorld): void {
   movementSystem(sim);
   workSystem(sim);
   hostileSpawnSystem(sim);
+  siegeSystem(sim);
   hostileMovementSystem(sim);
   combatSystem(sim);
   healingSystem(sim);
@@ -5418,6 +5419,139 @@ const HOSTILE_SPAWN_CHANCE = 0.4;
 const HOSTILE_MIN_DISTANCE_FROM_DWARF = 8;
 const DWARF_BASE_DAMAGE = 6;
 const DWARF_ATTACK_COOLDOWN = 60;
+
+// ---- Sieges ----------------------------------------------------------
+//
+// Once per in-game year a goblin warband marches on the colony's
+// entrance. Unlike the steady drip of HOSTILE_SPAWN_INTERVAL_TICKS
+// creatures, sieges are a coordinated 8-20 enemy event: they arrive
+// at the surface near the entrance shaft, the player gets a 5-day
+// warning to muster the draft / forge / armoury chain, and the
+// chronicle treats them as a named event (Siege of Year 5).
+//
+// Indirect control: the player doesn't pick when sieges happen, but
+// the pre-announcement gives them time to bump Military / Crafting
+// sliders to ready weapons and pull soldiers from civilian work.
+
+const SIEGE_INTERVAL_TICKS = TICKS_PER_YEAR; // once per in-game year
+const SIEGE_PREANNOUNCE_LEAD = TICKS_PER_DAY * 5;
+const SIEGE_MIN_POPULATION = 10; // sieges start when the colony is worth raiding
+
+function siegeSystem(sim: SimWorld): void {
+  // Mid-siege check: if the warband is wiped, fire a victory event.
+  if (sim.siegeActive) {
+    let liveAttackers = 0;
+    for (const id of sim.hostile.entities) {
+      const h = sim.hostile.get(id);
+      if (h && (h.kind === "goblin_scout" || h.kind === "cave_troll")) liveAttackers++;
+    }
+    if (liveAttackers === 0) {
+      sim.siegeActive = false;
+      sim.siegesSurvived++;
+      sim.events.add(
+        sim.tick,
+        "milestone",
+        `The siege is broken. The fortress holds — count it the ${ordinal(sim.siegesSurvived)} the colony has survived.`,
+      );
+    }
+  }
+
+  // Schedule the next siege at year boundaries (after the first
+  // year, so a brand-new colony isn't sieged on day one).
+  if (
+    sim.tick > 0 &&
+    sim.tick % SIEGE_INTERVAL_TICKS === 0 &&
+    sim.siegeScheduledTick === -1 &&
+    !sim.siegeActive
+  ) {
+    if (sim.dwarf.size() >= SIEGE_MIN_POPULATION) {
+      sim.siegeScheduledTick = sim.tick + SIEGE_PREANNOUNCE_LEAD;
+      sim.siegeAnnounced = false;
+    }
+  }
+
+  // Outrider: fire the warning event a full lead-window before the
+  // warband arrives so the player has time to react.
+  if (sim.siegeScheduledTick > 0 && !sim.siegeAnnounced) {
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      `Scouts spot a goblin warband approaching from the slopes. The colony has five days to prepare — call up the militia and stock the depot with weapons.`,
+    );
+    sim.siegeAnnounced = true;
+  }
+
+  // Arrival: spawn the warband at the surface near the entrance.
+  if (sim.siegeScheduledTick > 0 && sim.tick >= sim.siegeScheduledTick) {
+    spawnSiegeWarband(sim);
+    sim.siegeScheduledTick = -1;
+    sim.siegeAnnounced = false;
+  }
+}
+
+function spawnSiegeWarband(sim: SimWorld): void {
+  // Scale the warband with population. ~4 base + 1 extra per 4
+  // dwarves caps a 60-dwarf colony at ~19 goblins. Add a single
+  // troll once the colony's substantial — gives the militia a
+  // boss to coordinate against.
+  const pop = sim.dwarf.size();
+  const goblinCount = Math.min(20, 4 + Math.floor(pop / 4));
+  const trollCount = pop >= 25 ? 1 : 0;
+
+  // Spawn site: surface row near spawn.x. We sample a small
+  // horizontal range so the warband fans out rather than stacking
+  // on one tile.
+  const grid = sim.grid;
+  const baseX = sim.spawn.x;
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let dx = -8; dx <= 8; dx++) {
+    const x = baseX + dx;
+    if (x < 0 || x >= grid.width) continue;
+    const y = sim.surfaceY[x];
+    const tile = grid.getTile(x, y);
+    if (tile === TileType.Grass || tile === TileType.CorridorFloor) {
+      candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) {
+    // No surface foothold — fall back to the spawn tile itself.
+    candidates.push({ x: baseX, y: sim.spawn.y });
+  }
+
+  let spawned = 0;
+  for (let i = 0; i < goblinCount; i++) {
+    const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y });
+    spawned++;
+  }
+  for (let i = 0; i < trollCount; i++) {
+    const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y });
+    spawned++;
+  }
+
+  sim.siegeActive = true;
+  sim.siegeKilledSinceStart = 0;
+  const trollClause = trollCount > 0 ? ` with a cave troll at their head` : "";
+  sim.events.add(
+    sim.tick,
+    "crisis",
+    `The siege begins. ${goblinCount} goblins${trollClause} pour onto the surface near the gate. The fortress is on its own now.`,
+    { x: candidates[0].x, y: candidates[0].y },
+  );
+  void spawned;
+}
+
+function ordinal(n: number): string {
+  const last2 = n % 100;
+  if (last2 >= 11 && last2 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
 
 /**
  * Periodically a creature finds its way into the colony. We pick a

@@ -299,6 +299,16 @@ export interface SaveV1 {
     origin: string;
     preAnnounced: boolean;
   };
+  /** Scheduled-siege state — same pattern as the caravan schedule.
+   * Round-trips so a mid-warning save reload doesn't lose the
+   * countdown. siegesSurvived is the cumulative count for the
+   * chronicle. */
+  siege?: {
+    scheduledTick: number;
+    announced: boolean;
+    active: boolean;
+    survived: number;
+  };
   /** Cemetery registry — every dwarf interred in a Headstone tile.
    * Round-trips so a reload restores the colony's full memorial
    * roll call. */
