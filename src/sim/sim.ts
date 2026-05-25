@@ -13,7 +13,7 @@ import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skil
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
 import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE } from "./planner/recipes";
-import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
+import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, ENGRAVE_QUALITY_PER_BLOCK, ENGRAVE_QUALITY_PER_GEM, isMaintainable, maxDecorationsFor } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
 
@@ -3704,6 +3704,9 @@ function workSystem(sim: SimWorld): void {
       case "trade":
         progressTrade(sim, e, job, pos);
         break;
+      case "engrave":
+        progressEngrave(sim, e, job, pos);
+        break;
     }
   }
 }
@@ -5272,6 +5275,79 @@ function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: {
     sim.job.remove(e);
     sim.pathing.remove(e);
   }
+}
+
+/** Carve an engraving into the walls / floor of a finished room.
+ * Burns 1 cut_gem (preferred — bigger quality bump) or 1 block,
+ * raises the room's quality and decorationsCount, and drops a
+ * named chronicle entry. Skips if the room's already at its
+ * decoration cap (e.g., another engraver finished first while
+ * this one walked over). */
+const ENGRAVE_TICKS = 80;
+function progressEngrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  job.progress++;
+  if (job.progress < ENGRAVE_TICKS) return;
+  // Find the room this tile belongs to.
+  let room: import("./planner/blueprint").Blueprint | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+    if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+    let inside = false;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      if ((c & 0xffff) === pos.x && ((c >>> 16) & 0xffff) === pos.y) {
+        inside = true;
+        break;
+      }
+    }
+    if (inside) { room = b; break; }
+  }
+  if (!room) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  const placed = room.decorationsCount ?? 0;
+  const cap = maxDecorationsFor(room);
+  if (placed >= cap) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // Prefer cut_gems (more dramatic quality jump). Fall back to a
+  // stone block. If neither's available — race lost — bail.
+  let material: "cut_gems" | "blocks" | null = null;
+  let bump = 0;
+  if (sim.stockpile.cut_gems > 0) { material = "cut_gems"; bump = ENGRAVE_QUALITY_PER_GEM; }
+  else if (sim.stockpile.blocks > 0) { material = "blocks"; bump = ENGRAVE_QUALITY_PER_BLOCK; }
+  if (!material) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  (sim.stockpile as unknown as Record<string, number>)[material] -= 1;
+  room.decorationsCount = placed + 1;
+  room.quality = Math.min(QUALITY_MAX, (room.quality ?? QUALITY_BASE) + bump);
+  // Engraving is jeweller's work when cut gems land, mason's when
+  // stone blocks. Either way it's slow, attentive craft — give the
+  // dwarf the matching skill XP.
+  const skill = material === "cut_gems" ? "jewelling" : "masonry";
+  awardSkillXp(sim, e, skill, 1);
+  const dw = sim.dwarf.get(e);
+  const artist = dw?.name ?? "A dwarf";
+  const subject = material === "cut_gems"
+    ? `inlays a glittering cut-gem mosaic`
+    : `carves an engraving`;
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${artist} ${subject} in the ${room.kind.replace("_", " ")}. The room's beauty deepens.`,
+    { x: pos.x, y: pos.y },
+  );
+  sim.dwarf.get(e)!.lastJobTick = sim.tick;
+  sim.job.remove(e);
+  sim.pathing.remove(e);
 }
 
 function progressDrink(sim: SimWorld, e: EntityId, job: JobAssignment): void {

@@ -108,6 +108,14 @@ export interface Blueprint {
    * more than a bare cavity does. Optional in saved data: missing
    * means base quality (the architect's freshly-finished default). */
   quality?: number;
+  /** Decorations (engravings + gem inlays) applied to this room's
+   * walls and floors over time. Each engraving raises room quality
+   * by ENGRAVE_QUALITY_PER_BLOCK / ENGRAVE_QUALITY_PER_GEM and
+   * leaves a chronicle entry. Capped at roughly one decoration per
+   * 4 cavity tiles so a 12-tile room maxes at 3 — big halls hold
+   * more art. Round-trips through save so a long-running fortress
+   * accumulates engravings rather than refreshing them every reload. */
+  decorationsCount?: number;
   /** Furniture items placed in the cavity since dig completed. The
    * blueprint's status flips from `needs_furnishing` to `complete`
    * once every entry in FURNITURE_REQUIREMENTS for this kind has
@@ -173,6 +181,19 @@ export const QUALITY_MAX = 100;
  * a room from 'rough cavity' to 'legendary', which is exactly the
  * fortress-history pacing the GDD describes. */
 export const QUALITY_PER_MAINTAIN = 2;
+/** Quality bump per decoration. Stone engravings are the basic
+ * decoration (consumes 1 block); cut-gem inlays are the premium
+ * (consumes 1 cut_gem) and shift the room a full tier toward
+ * legendary in a single session. */
+export const ENGRAVE_QUALITY_PER_BLOCK = 5;
+export const ENGRAVE_QUALITY_PER_GEM = 12;
+/** Cap on decorations per room. Roughly one engraving per 4 cavity
+ * tiles, so a 12-tile room maxes at 3 and a great-hall (24 tiles)
+ * maxes at 6. Prevents a single popular workshop from absorbing
+ * every block the mason produces. */
+export function maxDecorationsFor(b: Blueprint): number {
+  return Math.max(1, Math.floor(b.cavity.length / 4));
+}
 
 export function packCell(x: number, y: number): number {
   return (y << 16) | x;

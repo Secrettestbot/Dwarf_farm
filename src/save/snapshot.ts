@@ -139,6 +139,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       cellTendedAt: b.cellTendedAt ? Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
       quality: b.quality,
+      decorationsCount: b.decorationsCount,
       furniturePlaced: b.furniturePlaced,
     };
   });
@@ -462,6 +463,7 @@ export function restore(save: SaveV1): SimWorld {
       cellTendedAt: b.cellTendedAt ? Int32Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
       quality: b.quality,
+      decorationsCount: b.decorationsCount,
       furniturePlaced: b.furniturePlaced ? { ...b.furniturePlaced } : undefined,
     };
   });

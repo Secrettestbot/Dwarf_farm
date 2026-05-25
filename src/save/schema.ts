@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave";
     targetX: number;
     targetY: number;
     progress: number;
@@ -150,6 +150,9 @@ export interface SavedBlueprint {
   /** Room quality (0-100). Optional for back-compat — older saves
    * default to base quality on restore. */
   quality?: number;
+  /** Engravings + gem inlays accumulated in this room. Optional;
+   * older saves default to 0 on restore. */
+  decorationsCount?: number;
 }
 
 export interface SavedLogEvent {

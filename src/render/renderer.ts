@@ -97,6 +97,7 @@ const ACTIVITY_GLYPH: Record<string, { glyph: string; color: string }> = {
   visit_grave: { glyph: "†", color: "#9a8a72" },
   treat: { glyph: "+", color: "#ffd0d0" },
   trade: { glyph: "$", color: "#e0c080" },
+  engrave: { glyph: "✎", color: "#d0b070" },
 };
 
 /** Disease pip colour by kind — the pip is rendered below the dwarf
