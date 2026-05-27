@@ -252,6 +252,16 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
     mayorName: sim.mayorName || undefined,
     kingName: sim.kingName || undefined,
+    mandate: sim.mandateResource
+      ? {
+          resource: sim.mandateResource,
+          target: sim.mandateTarget,
+          baseline: sim.mandateBaseline,
+          endTick: sim.mandateEndTick,
+        }
+      : undefined,
+    mandatesSatisfied: sim.mandatesSatisfied || undefined,
+    mandatesFailed: sim.mandatesFailed || undefined,
     grudges: sim.grudges.size > 0
       ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick }))
       : undefined,
@@ -576,6 +586,14 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.mayorName) sim.mayorName = save.mayorName;
   if (save.kingName) sim.kingName = save.kingName;
+  if (save.mandate) {
+    sim.mandateResource = save.mandate.resource;
+    sim.mandateTarget = save.mandate.target;
+    sim.mandateBaseline = save.mandate.baseline;
+    sim.mandateEndTick = save.mandate.endTick;
+  }
+  if (save.mandatesSatisfied !== undefined) sim.mandatesSatisfied = save.mandatesSatisfied;
+  if (save.mandatesFailed !== undefined) sim.mandatesFailed = save.mandatesFailed;
   if (save.grudges) {
     for (const g of save.grudges) {
       sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick });

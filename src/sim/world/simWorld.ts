@@ -357,6 +357,21 @@ export class SimWorld {
    * map gives a small fortress-wide morale aura. */
   mayorName = "";
 
+  /** Mayor's current quarterly mandate — a production target the
+   * colony has the season to meet. Empty `resource` means there's
+   * no mandate active (no mayor elected, or between cycles). The
+   * baseline is the stockpile counter at the moment the mandate
+   * was issued so target reflects new production, not absolute
+   * stock. */
+  mandateResource = "";
+  mandateTarget = 0;
+  mandateBaseline = 0;
+  mandateEndTick = -1;
+  /** Cumulative satisfied / failed counts for the chronicle and
+   * future king-election heuristics. */
+  mandatesSatisfied = 0;
+  mandatesFailed = 0;
+
   /** Name of the colony's current King — emerges once the colony
    * reaches royal size (pop ≥ KING_POPULATION_THRESHOLD) and a
    * Throne Room exists. Picked from the dwarf with the highest

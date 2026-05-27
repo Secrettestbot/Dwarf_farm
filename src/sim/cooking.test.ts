@@ -96,12 +96,12 @@ describe("kitchen cooking depth", () => {
     const id = sim.dwarf.entities[0];
     const foodBefore = sim.stockpile.food;
     const drinkBefore = sim.stockpile.drink;
-    const mealsItemsBefore = countMealItems(sim);
+    const initialMeals = countMealItems(sim);
     for (let i = 0; i < 800; i++) {
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
       tick(sim);
-      if (countMealItems(sim) >= 5) break;
+      if (countMealItems(sim) >= initialMeals + 5) break;
     }
     expect(foodBefore - sim.stockpile.food).toBe(2);
     expect(drinkBefore - sim.stockpile.drink).toBe(1);
@@ -123,12 +123,12 @@ describe("kitchen cooking depth", () => {
     const id = sim.dwarf.entities[0];
     const foodBefore = sim.stockpile.food;
     const gemsBefore = sim.stockpile.cut_gems;
-    const mealsItemsBefore = countMealItems(sim);
+    const initialMeals = countMealItems(sim);
     for (let i = 0; i < 1000; i++) {
       const n = sim.needs.get(id);
       if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
       tick(sim);
-      if (countMealItems(sim) >= 6) break;
+      if (countMealItems(sim) >= initialMeals + 6) break;
     }
     expect(foodBefore - sim.stockpile.food).toBe(2);
     expect(gemsBefore - sim.stockpile.cut_gems).toBe(1);

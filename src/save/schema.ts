@@ -344,6 +344,18 @@ export interface SaveV1 {
   }>;
   /** Currently-recognised Mayor's name. */
   mayorName?: string;
+  /** Active mayoral mandate. Empty `resource` means no mandate.
+   * Round-trips so a save mid-season doesn't lose the deadline. */
+  mandate?: {
+    resource: string;
+    target: number;
+    baseline: number;
+    endTick: number;
+  };
+  /** Cumulative satisfied / failed mandate counts for the
+   * chronicle and future king-election heuristics. */
+  mandatesSatisfied?: number;
+  mandatesFailed?: number;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
   /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,

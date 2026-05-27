@@ -137,6 +137,7 @@ export function tick(sim: SimWorld): void {
   petSpawnSystem(sim);
   petSystem(sim);
   mayorSystem(sim);
+  mandateSystem(sim);
   kingSystem(sim);
   festivalSystem(sim);
   diseaseSystem(sim);
@@ -777,10 +778,92 @@ function mayorSystem(sim: SimWorld): void {
   );
 }
 
+/** Resources the mayor can mandate the colony produce. All are
+ * counter-backed (no item-entity routing) so progress is a simple
+ * stockpile delta from the baseline at mandate issue time to the
+ * counter at the deadline. */
+const MANDATE_RESOURCES: ReadonlyArray<string> = [
+  "cut_gems", "tools", "blocks", "bars", "planks",
+  "cloth", "leather", "pots",
+];
+
+/** Per-season mandate. Issued at season boundaries when a mayor's
+ * in office and there's no active mandate, evaluated when the
+ * deadline tick passes. Production-based: target = baseline + N,
+ * where N scales with population so a 30-dwarf colony has bigger
+ * mandates than a 12-dwarf one. */
+function mandateSystem(sim: SimWorld): void {
+  // Evaluate first — if a mandate is active and its deadline lands
+  // on this tick, score it and clear. Doing this before issuing a
+  // new one means a deadline-day tick can hand the colony its next
+  // target in the same hour.
+  if (sim.mandateResource && sim.mandateEndTick > 0 && sim.tick >= sim.mandateEndTick) {
+    const sp = sim.stockpile as unknown as Record<string, number>;
+    const produced = (sp[sim.mandateResource] ?? 0) - sim.mandateBaseline;
+    const need = sim.mandateTarget - sim.mandateBaseline;
+    const satisfied = produced >= need;
+    if (satisfied) {
+      sim.mandatesSatisfied++;
+      // Small fortress-wide morale bump for compliance.
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) n.morale = Math.min(100, n.morale + 4);
+      }
+      sim.events.add(
+        sim.tick,
+        "milestone",
+        `${sim.mayorName || "The mayor"}'s mandate is satisfied — ${produced} ${sim.mandateResource} produced this season. The colony's mood lifts.`,
+      );
+    } else {
+      sim.mandatesFailed++;
+      // Small morale hit for missed mandate. Indirect-control
+      // shape: ignoring mandates costs a little colony mood, but
+      // the player can absolutely choose to.
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) n.morale = Math.max(0, n.morale - 3);
+      }
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${sim.mayorName || "The mayor"}'s mandate goes unmet — only ${Math.max(0, produced)} of ${need} ${sim.mandateResource} produced. The colony grumbles.`,
+      );
+    }
+    sim.mandateResource = "";
+    sim.mandateTarget = 0;
+    sim.mandateBaseline = 0;
+    sim.mandateEndTick = -1;
+  }
+
+  // Issue: at season boundary, when a mayor's in office and no
+  // mandate is currently active. Skips if pop is too small to
+  // justify a mandate or the mayor's been wiped out.
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_SEASON !== 0) return;
+  if (!sim.mayorName) return;
+  if (sim.mandateResource) return; // still mid-cycle
+  if (sim.dwarf.size() < 12) return;
+  const resource = MANDATE_RESOURCES[sim.aiRng.nextRange(0, MANDATE_RESOURCES.length)];
+  const sp = sim.stockpile as unknown as Record<string, number>;
+  const baseline = sp[resource] ?? 0;
+  // Production target: ~ pop / 4, floor 3. A 20-dwarf colony's
+  // mandate asks for 5 units; a 40-dwarf colony asks for 10.
+  const ask = Math.max(3, Math.floor(sim.dwarf.size() / 4));
+  sim.mandateResource = resource;
+  sim.mandateBaseline = baseline;
+  sim.mandateTarget = baseline + ask;
+  sim.mandateEndTick = sim.tick + TICKS_PER_SEASON;
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${sim.mayorName} issues a mandate: produce ${ask} more ${resource} before the season turns.`,
+  );
+}
 /** Population at which the colony stops being a Mayor's town and
  * starts wanting a King. Tuned so a small fortress doesn't crown
  * itself the moment a throne room finishes. */
 const KING_POPULATION_THRESHOLD = 50;
+
 /** Skill threshold a dwarf has to clear in BOTH leadership and
  * military to be eligible for kingship. The colony's leader has
  * to be both respected and dangerous. */
