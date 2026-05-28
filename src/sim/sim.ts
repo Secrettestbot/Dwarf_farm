@@ -5640,7 +5640,7 @@ function siegeSystem(sim: SimWorld): void {
     let liveAttackers = 0;
     for (const id of sim.hostile.entities) {
       const h = sim.hostile.get(id);
-      if (h && (h.kind === "goblin_scout" || h.kind === "cave_troll")) liveAttackers++;
+      if (h && (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord")) liveAttackers++;
     }
     if (liveAttackers === 0) {
       sim.siegeActive = false;
@@ -5686,14 +5686,38 @@ function siegeSystem(sim: SimWorld): void {
   }
 }
 
+/** First-name + epithet pool the warlord rolls a name from. Picked
+ * deterministically off aiRng so the same seed produces the same
+ * "Siege of Year 5 was led by Drogmar Black-Tongue" entry every
+ * replay. Names skew Norse / orcish but stay short — chronicle
+ * lines need to read at a glance. */
+const WARLORD_FIRST_NAMES: ReadonlyArray<string> = [
+  "Drogmar", "Skarn", "Ulgrim", "Vurok", "Ghazak", "Murz", "Krogh",
+  "Brakka", "Hashtar", "Yargol", "Nazgrim", "Snaga", "Thrak",
+];
+const WARLORD_EPITHETS: ReadonlyArray<string> = [
+  "Black-Tongue", "the Cleaver", "Iron-Jaw", "Six-Fingers",
+  "the Cunning", "Bone-Drinker", "Red-Banner", "the Patient",
+  "Sharp-Eye", "Two-Axes", "the Pale", "Stone-Breaker",
+];
+
+function rollWarlordName(sim: SimWorld): string {
+  const first = WARLORD_FIRST_NAMES[sim.aiRng.nextRange(0, WARLORD_FIRST_NAMES.length)];
+  const epithet = WARLORD_EPITHETS[sim.aiRng.nextRange(0, WARLORD_EPITHETS.length)];
+  return `${first} ${epithet}`;
+}
+
 function spawnSiegeWarband(sim: SimWorld): void {
   // Scale the warband with population. ~4 base + 1 extra per 4
   // dwarves caps a 60-dwarf colony at ~19 goblins. Add a single
-  // troll once the colony's substantial — gives the militia a
-  // boss to coordinate against.
+  // troll once the colony's substantial. Once the colony's at the
+  // siege-min threshold (pop ≥ 15) a named warlord leads the
+  // warband — gives the chronicle a real foe to remember.
   const pop = sim.dwarf.size();
   const goblinCount = Math.min(20, 4 + Math.floor(pop / 4));
   const trollCount = pop >= 25 ? 1 : 0;
+  const warlordCount = pop >= 15 ? 1 : 0;
+  const warlordName = warlordCount > 0 ? rollWarlordName(sim) : "";
 
   // Spawn site: surface row near spawn.x. We sample a small
   // horizontal range so the warband fans out rather than stacking
@@ -5715,28 +5739,32 @@ function spawnSiegeWarband(sim: SimWorld): void {
     candidates.push({ x: baseX, y: sim.spawn.y });
   }
 
-  let spawned = 0;
   for (let i = 0; i < goblinCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
     sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y });
-    spawned++;
   }
   for (let i = 0; i < trollCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
     sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y });
-    spawned++;
+  }
+  for (let i = 0; i < warlordCount; i++) {
+    const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    const wid = sim.spawnHostile({ kind: "goblin_warlord", x: c.x, y: c.y });
+    if (wid !== -1) sim.hostileNames.set(wid, warlordName);
   }
 
   sim.siegeActive = true;
   sim.siegeKilledSinceStart = 0;
-  const trollClause = trollCount > 0 ? ` with a cave troll at their head` : "";
+  sim.siegeWarlordName = warlordName;
+  const leaderClause = warlordCount > 0
+    ? `, led by ${warlordName}`
+    : (trollCount > 0 ? ` with a cave troll at their head` : "");
   sim.events.add(
     sim.tick,
     "crisis",
-    `The siege begins. ${goblinCount} goblins${trollClause} pour onto the surface near the gate. The fortress is on its own now.`,
+    `The siege begins. ${goblinCount} goblins${leaderClause} pour onto the surface near the gate. The fortress is on its own now.`,
     { x: candidates[0].x, y: candidates[0].y },
   );
-  void spawned;
 }
 
 function ordinal(n: number): string {
@@ -5878,15 +5906,41 @@ function hostileMovementSystem(sim: SimWorld): void {
     // Hostiles in a sealed-off corner of the map don't burn cycles
     // until a dwarf wanders close.
     if (!isInActiveZone(sim, pos.x, pos.y)) continue;
-    // Find nearest dwarf within pursue range.
-    let bestDist = def.pursueRange * def.pursueRange + 1;
+    // Goblins (scouts + warlord) target intelligently — the mayor
+    // first, then unarmed civilians and wounded dwarves, then
+    // soldiers last. Other hostiles (rats, spiders, trolls)
+    // still go for the nearest body. The softness bonus is
+    // converted to a "phantom distance reduction" so a soft
+    // target up to ~5 tiles farther can beat a closer hard target.
+    const isGoblin = h.kind === "goblin_scout" || h.kind === "goblin_warlord";
+    let bestScore = (def.pursueRange + 1) * (def.pursueRange + 1);
     let bestPos: { x: number; y: number } | null = null;
-    sim.forEachDwarf((_id, p) => {
+    sim.forEachDwarf((id, p) => {
       const dx = p.x - pos.x;
       const dy = p.y - pos.y;
       const d2 = dx * dx + dy * dy;
-      if (d2 < bestDist) {
-        bestDist = d2;
+      if (d2 > def.pursueRange * def.pursueRange) return;
+      let score = d2;
+      if (isGoblin) {
+        const dw = sim.dwarf.get(id);
+        const hp = sim.health.get(id);
+        // Mayor's a banner kill — most-preferred target.
+        if (dw && dw.name === sim.mayorName) score -= 50;
+        // Civilians (not in the militia squad) score better than
+        // armoured soldiers — soft underbellies first.
+        if (!sim.squad.has(id)) score -= 25;
+        // Children — under MIN_WORK_AGE 18 — are easy kills.
+        if (sim.ageOf(id) < 18) score -= 35;
+        // Already-wounded dwarves finish faster than fresh ones.
+        if (hp && hp.hp < hp.maxHp * 0.5) score -= 15;
+        // No floor — softness can drive a target's score below
+        // zero. The pursueRange gate above keeps the goblin from
+        // chasing a maximally-soft target across the map, and
+        // letting the score go negative is what lets two equal-
+        // distance targets be ordered by their softness sum.
+      }
+      if (score < bestScore) {
+        bestScore = score;
         bestPos = { x: p.x, y: p.y };
       }
     });
@@ -5997,11 +6051,23 @@ function combatSystem(sim: SimWorld): void {
       awardSkillXp(sim, target, "military", 1);
       if (hHealth.hp <= 0) {
         const dwarfName = dwarf?.name ?? "A dwarf";
-        sim.events.add(
-          sim.tick,
-          "crisis",
-          narrateHostileSlain(sim.aiRng, dwarfName, def.name),
-        );
+        // Named foes get a bespoke chronicle line so the warlord's
+        // fall is memorable instead of "a goblin warlord falls."
+        const foeName = sim.hostileNames.get(h);
+        if (foeName) {
+          sim.events.add(
+            sim.tick,
+            "milestone",
+            `${dwarfName} fells ${foeName}, the goblin warlord. The siege loses its banner.`,
+          );
+          sim.hostileNames.delete(h);
+        } else {
+          sim.events.add(
+            sim.tick,
+            "crisis",
+            narrateHostileSlain(sim.aiRng, dwarfName, def.name),
+          );
+        }
         // Track void-shade kills toward The Siege Endured milestone —
         // surviving the King's emissaries. Defeating the King himself
         // is a separate beat, gated on the actual hollow_king hostile

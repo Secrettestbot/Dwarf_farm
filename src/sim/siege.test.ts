@@ -55,6 +55,41 @@ describe("siege system", () => {
     expect(sieged).toBeUndefined();
   });
 
+  it("a siege at pop ≥ 15 includes a named warlord", () => {
+    const w = generateWorld({ seed: 717, width: 200, height: 500 });
+    const sim = new SimWorld(717, w.grid, w.surfaceY, w.spawn);
+    for (let i = 0; i < 18; i++) {
+      sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + (i % 5) - 2, y: w.spawn.y, age: 30 });
+    }
+    for (let i = 0; i < TICKS_PER_YEAR + TICKS_PER_DAY * 7; i++) {
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      }
+      tick(sim);
+      if (sim.siegeActive) break;
+    }
+    expect(sim.siegeActive).toBe(true);
+    expect(sim.siegeWarlordName).not.toBe("");
+    // At least one goblin_warlord hostile should be on the map.
+    let warlords = 0;
+    for (const id of sim.hostile.entities) {
+      const h = sim.hostile.get(id);
+      if (h?.kind === "goblin_warlord") warlords++;
+    }
+    expect(warlords).toBe(1);
+    // Warlord HP definition: 110 maxHp, bigger than a scout's 50.
+    let warlordHp = -1;
+    for (const id of sim.hostile.entities) {
+      const h = sim.hostile.get(id);
+      if (h?.kind === "goblin_warlord") {
+        warlordHp = sim.health.get(id)?.maxHp ?? -1;
+        break;
+      }
+    }
+    expect(warlordHp).toBeGreaterThanOrEqual(100);
+  });
+
   it("warband size scales with population", () => {
     function countGoblinsAfterArrival(pop: number): number {
       const w = generateWorld({ seed: 715, width: 200, height: 500 });

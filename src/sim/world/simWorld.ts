@@ -329,6 +329,17 @@ export class SimWorld {
   /** Snapshot of siegesSurvived at the moment a siege starts, so
    * the end-of-siege event knows whether to bump the counter. */
   siegeKilledSinceStart: number = 0;
+  /** Name of the warlord leading the active siege, if any. Empty
+   * when no siege is active or the colony's too small for a
+   * warlord to lead. */
+  siegeWarlordName: string = "";
+
+  /** Per-hostile display name. Most hostiles are anonymous (a cave
+   * rat is a cave rat), but named foes — the goblin warlord, future
+   * dragon lord, etc. — pin a name to their entity here so the
+   * chronicle can reference them by name when they kill someone or
+   * when they fall. */
+  hostileNames: Map<EntityId, string> = new Map();
 
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips

@@ -244,7 +244,11 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           announced: sim.siegeAnnounced,
           active: sim.siegeActive,
           survived: sim.siegesSurvived,
+          warlordName: sim.siegeWarlordName || undefined,
         }
+      : undefined,
+    hostileNames: sim.hostileNames.size > 0
+      ? Array.from(sim.hostileNames.entries()).map(([id, name]) => ({ id, name }))
       : undefined,
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
@@ -573,6 +577,10 @@ export function restore(save: SaveV1): SimWorld {
     sim.siegeAnnounced = save.siege.announced;
     sim.siegeActive = save.siege.active;
     sim.siegesSurvived = save.siege.survived;
+    sim.siegeWarlordName = save.siege.warlordName ?? "";
+  }
+  if (save.hostileNames) {
+    for (const e of save.hostileNames) sim.hostileNames.set(e.id, e.name);
   }
   if (save.graves) {
     for (const g of save.graves) sim.graves.push({ ...g });

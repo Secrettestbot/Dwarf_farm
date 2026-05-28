@@ -311,7 +311,14 @@ export interface SaveV1 {
     announced: boolean;
     active: boolean;
     survived: number;
+    /** Name of the warlord currently leading the active siege, if
+     * any. Empty when no warlord is in play. */
+    warlordName?: string;
   };
+  /** Per-hostile display names — pinned for named foes (the
+   * goblin warlord, future named bosses). Keyed by entity id;
+   * absent for anonymous hostiles. Optional. */
+  hostileNames?: Array<{ id: number; name: string }>;
   /** Cemetery registry — every dwarf interred in a Headstone tile.
    * Round-trips so a reload restores the colony's full memorial
    * roll call. */
