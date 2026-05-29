@@ -12,7 +12,13 @@ import { EventLogPanel } from "./ui/eventLogPanel";
 import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
 import { applyStoredSpriteSet } from "./render/spriteSetPref";
-import { installHudHotkey, isPanelVisible } from "./ui/displaySettings";
+import {
+  installHudHotkey,
+  isPanelVisible,
+  getMinimapScale,
+  minimapScaleMultiplier,
+  onMinimapScaleChange,
+} from "./ui/displaySettings";
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
@@ -279,7 +285,14 @@ function runGame(active: ActiveFortress, camera: Camera) {
   clock.tick = sim.tick;
   clock.setSpeed(1);
 
-  const minimap = new Minimap(sim.grid.width, sim.grid.height);
+  const minimap = new Minimap(
+    sim.grid.width,
+    sim.grid.height,
+    minimapScaleMultiplier(getMinimapScale()),
+  );
+  // Live-update the minimap canvas when the player picks a new
+  // size from the Display popover.
+  onMinimapScaleChange((s) => minimap.setScale(minimapScaleMultiplier(s)));
   minimap.refresh(sim, performance.now(), true);
 
   const historyPanel = new HistoryPanel(uiHost);

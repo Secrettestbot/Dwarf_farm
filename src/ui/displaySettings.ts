@@ -8,6 +8,7 @@
 // sees; the sim runs the same regardless.
 
 const STORAGE_KEY = "hudVisibility";
+const MINIMAP_SCALE_KEY = "minimapScale";
 /** Older single-boolean key from the all-or-nothing version. We
  * migrate from this on first read so an existing player doesn't
  * lose their "everything hidden" preference. */
@@ -20,6 +21,24 @@ export type PanelId =
   | "emergency"
   | "notifications"
   | "minimap";
+
+/** Discrete minimap size buckets. Multipliers apply to the
+ * minimap's default 200×80 target dimensions: small halves it,
+ * huge doubles it. Stored alongside the panel visibility flags
+ * because the Display popover surfaces both controls. */
+export type MinimapScale = "small" | "medium" | "large" | "huge";
+
+export const MINIMAP_SCALES: ReadonlyArray<{ id: MinimapScale; label: string; mult: number }> = [
+  { id: "small", label: "Small", mult: 0.5 },
+  { id: "medium", label: "Medium", mult: 1.0 },
+  { id: "large", label: "Large", mult: 1.5 },
+  { id: "huge", label: "Huge", mult: 2.0 },
+];
+
+export function minimapScaleMultiplier(s: MinimapScale): number {
+  for (const entry of MINIMAP_SCALES) if (entry.id === s) return entry.mult;
+  return 1.0;
+}
 
 /** Ordered list of panels for the Display popover UI. The order
  * here is the order checkboxes render in. */
@@ -150,6 +169,43 @@ function applyVisibility(el: HTMLElement, visible: boolean): void {
 export function attachPanelVisibility(id: PanelId, el: HTMLElement): () => void {
   applyVisibility(el, visibility[id]);
   return onPanelVisibilityChange(id, (visible) => applyVisibility(el, visible));
+}
+
+// ---- Minimap scale --------------------------------------------------
+
+let minimapScale: MinimapScale = readInitialMinimapScale();
+const minimapScaleListeners = new Set<(s: MinimapScale) => void>();
+
+function readInitialMinimapScale(): MinimapScale {
+  try {
+    const raw = localStorage.getItem(MINIMAP_SCALE_KEY);
+    for (const entry of MINIMAP_SCALES) {
+      if (entry.id === raw) return entry.id;
+    }
+  } catch {
+    // localStorage unavailable.
+  }
+  return "medium";
+}
+
+export function getMinimapScale(): MinimapScale {
+  return minimapScale;
+}
+
+export function setMinimapScale(s: MinimapScale): void {
+  if (minimapScale === s) return;
+  minimapScale = s;
+  try {
+    localStorage.setItem(MINIMAP_SCALE_KEY, s);
+  } catch {
+    // Best-effort persistence.
+  }
+  for (const fn of minimapScaleListeners) fn(s);
+}
+
+export function onMinimapScaleChange(fn: (s: MinimapScale) => void): () => void {
+  minimapScaleListeners.add(fn);
+  return () => minimapScaleListeners.delete(fn);
 }
 
 /** Bind the global H keyboard shortcut to toggle every panel.

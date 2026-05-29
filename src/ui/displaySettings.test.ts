@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  MINIMAP_SCALES,
   PANELS,
   PanelId,
   anyPanelVisible,
+  getMinimapScale,
   hideAllPanels,
   isPanelVisible,
+  minimapScaleMultiplier,
+  onMinimapScaleChange,
   onPanelVisibilityChange,
+  setMinimapScale,
   setPanelVisible,
   showAllPanels,
   togglePanel,
@@ -86,5 +91,38 @@ describe("HUD per-panel visibility", () => {
       expect(seen.has(p.id)).toBe(false);
       seen.add(p.id);
     }
+  });
+});
+
+describe("minimap scale settings", () => {
+  beforeEach(() => setMinimapScale("medium"));
+
+  it("setMinimapScale fires the listener only when the value actually changes", () => {
+    const seen: string[] = [];
+    const unsub = onMinimapScaleChange((s) => seen.push(s));
+    setMinimapScale("medium"); // no-op
+    setMinimapScale("large");
+    setMinimapScale("large"); // no-op
+    setMinimapScale("small");
+    expect(seen).toEqual(["large", "small"]);
+    expect(getMinimapScale()).toBe("small");
+    unsub();
+  });
+
+  it("minimapScaleMultiplier returns the configured multiplier for each scale", () => {
+    expect(minimapScaleMultiplier("small")).toBe(0.5);
+    expect(minimapScaleMultiplier("medium")).toBe(1.0);
+    expect(minimapScaleMultiplier("large")).toBe(1.5);
+    expect(minimapScaleMultiplier("huge")).toBe(2.0);
+  });
+
+  it("MINIMAP_SCALES enumerates every multiplier label once", () => {
+    const seen = new Set<string>();
+    for (const s of MINIMAP_SCALES) {
+      expect(seen.has(s.id)).toBe(false);
+      seen.add(s.id);
+      expect(s.mult).toBeGreaterThan(0);
+    }
+    expect(seen.size).toBe(4);
   });
 });
