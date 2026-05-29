@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  MINIMAP_SCALES,
+  MINIMAP_DEFAULT,
+  MINIMAP_HEIGHT_RANGE,
+  MINIMAP_WIDTH_RANGE,
   PANELS,
   PanelId,
   anyPanelVisible,
-  getMinimapScale,
+  getMinimapDimensions,
   hideAllPanels,
   isPanelVisible,
-  minimapScaleMultiplier,
-  onMinimapScaleChange,
+  onMinimapDimensionsChange,
   onPanelVisibilityChange,
-  setMinimapScale,
+  setMinimapDimensions,
   setPanelVisible,
   showAllPanels,
   togglePanel,
@@ -94,35 +95,44 @@ describe("HUD per-panel visibility", () => {
   });
 });
 
-describe("minimap scale settings", () => {
-  beforeEach(() => setMinimapScale("medium"));
+describe("minimap dimensions", () => {
+  beforeEach(() => setMinimapDimensions(MINIMAP_DEFAULT));
 
-  it("setMinimapScale fires the listener only when the value actually changes", () => {
-    const seen: string[] = [];
-    const unsub = onMinimapScaleChange((s) => seen.push(s));
-    setMinimapScale("medium"); // no-op
-    setMinimapScale("large");
-    setMinimapScale("large"); // no-op
-    setMinimapScale("small");
-    expect(seen).toEqual(["large", "small"]);
-    expect(getMinimapScale()).toBe("small");
+  it("setMinimapDimensions fires the listener only when a value actually changes", () => {
+    const seen: Array<{ width: number; height: number }> = [];
+    const unsub = onMinimapDimensionsChange((d) => seen.push(d));
+    setMinimapDimensions({ width: 200, height: 80 }); // no-op
+    setMinimapDimensions({ width: 300 });
+    setMinimapDimensions({ width: 300 }); // no-op
+    setMinimapDimensions({ height: 120 });
+    expect(seen).toEqual([
+      { width: 300, height: 80 },
+      { width: 300, height: 120 },
+    ]);
+    expect(getMinimapDimensions()).toEqual({ width: 300, height: 120 });
     unsub();
   });
 
-  it("minimapScaleMultiplier returns the configured multiplier for each scale", () => {
-    expect(minimapScaleMultiplier("small")).toBe(0.5);
-    expect(minimapScaleMultiplier("medium")).toBe(1.0);
-    expect(minimapScaleMultiplier("large")).toBe(1.5);
-    expect(minimapScaleMultiplier("huge")).toBe(2.0);
+  it("dimensions are clamped to the configured ranges", () => {
+    setMinimapDimensions({ width: 999, height: 5 });
+    const d = getMinimapDimensions();
+    expect(d.width).toBe(MINIMAP_WIDTH_RANGE.max);
+    expect(d.height).toBe(MINIMAP_HEIGHT_RANGE.min);
   });
 
-  it("MINIMAP_SCALES enumerates every multiplier label once", () => {
-    const seen = new Set<string>();
-    for (const s of MINIMAP_SCALES) {
-      expect(seen.has(s.id)).toBe(false);
-      seen.add(s.id);
-      expect(s.mult).toBeGreaterThan(0);
-    }
-    expect(seen.size).toBe(4);
+  it("aspect ratio is whatever the player picked — not locked to a square", () => {
+    setMinimapDimensions({ width: 400, height: 50 });
+    const d1 = getMinimapDimensions();
+    expect(d1.width / d1.height).toBeCloseTo(8, 1);
+    setMinimapDimensions({ width: 100, height: 200 });
+    const d2 = getMinimapDimensions();
+    expect(d2.width / d2.height).toBeCloseTo(0.5, 2);
+  });
+
+  it("getMinimapDimensions returns a copy — mutating it doesn't change state", () => {
+    setMinimapDimensions({ width: 220, height: 90 });
+    const d = getMinimapDimensions();
+    d.width = 999;
+    expect(getMinimapDimensions().width).toBe(220);
   });
 });

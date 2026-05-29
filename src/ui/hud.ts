@@ -3,15 +3,16 @@ import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
 import { isMuted, setMuted } from "../audio/sound";
 import {
-  MINIMAP_SCALES,
+  MINIMAP_HEIGHT_RANGE,
+  MINIMAP_WIDTH_RANGE,
   PANELS,
   attachPanelVisibility,
-  getMinimapScale,
+  getMinimapDimensions,
   hideAllPanels,
   isPanelVisible,
-  onMinimapScaleChange,
+  onMinimapDimensionsChange,
   onPanelVisibilityChange,
-  setMinimapScale,
+  setMinimapDimensions,
   setPanelVisible,
   showAllPanels,
 } from "./displaySettings";
@@ -277,38 +278,53 @@ export class Hud {
       popover.addEventListener("popoverclose", () => unsub());
     }
 
-    // Minimap size row — four buttons (Small / Medium / Large /
-    // Huge). The currently-active size highlights via the existing
-    // ".active" CSS class. Live-update if the selection changes
-    // from elsewhere (e.g., a different popover instance).
+    // Minimap dimensions — two range sliders. Width and height
+    // are independent so the player can stretch the minimap to a
+    // shape that fits their HUD layout, even if it distorts the
+    // world's aspect ratio. The world-sampling refresh handles
+    // any ratio.
     const sizeTitle = document.createElement("div");
     sizeTitle.style.cssText = "font-size:9px;letter-spacing:2px;color:#888;margin-top:6px;";
     sizeTitle.textContent = "MINIMAP SIZE";
     popover.appendChild(sizeTitle);
 
-    const sizeRow = document.createElement("div");
-    sizeRow.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;";
-    const sizeButtons = new Map<string, HTMLButtonElement>();
-    const refreshSizeButtons = () => {
-      const active = getMinimapScale();
-      for (const [id, btn] of sizeButtons) {
-        btn.classList.toggle("active", id === active);
-      }
+    const makeDimSlider = (label: string, range: { min: number; max: number }, axis: "width" | "height") => {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;flex-direction:column;gap:2px;font-size:10px;color:#aaa;";
+      const labelRow = document.createElement("div");
+      labelRow.style.cssText = "display:flex;justify-content:space-between;";
+      const labelEl = document.createElement("span");
+      labelEl.textContent = label;
+      const valueEl = document.createElement("span");
+      valueEl.style.color = "#e0c080";
+      labelRow.appendChild(labelEl);
+      labelRow.appendChild(valueEl);
+      row.appendChild(labelRow);
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = String(range.min);
+      input.max = String(range.max);
+      input.step = "1";
+      input.style.width = "100%";
+      const dims = getMinimapDimensions();
+      input.value = String(dims[axis]);
+      valueEl.textContent = `${dims[axis]} px`;
+      input.addEventListener("input", () => {
+        const v = Number(input.value);
+        setMinimapDimensions({ [axis]: v });
+        valueEl.textContent = `${v} px`;
+      });
+      row.appendChild(input);
+      // Live-update if the dimensions change from elsewhere.
+      const unsub = onMinimapDimensionsChange((d) => {
+        if (Number(input.value) !== d[axis]) input.value = String(d[axis]);
+        valueEl.textContent = `${d[axis]} px`;
+      });
+      popover.addEventListener("popoverclose", () => unsub());
+      return row;
     };
-    for (const s of MINIMAP_SCALES) {
-      const b = document.createElement("button");
-      b.className = "btn";
-      b.textContent = s.label;
-      b.style.fontSize = "10px";
-      b.style.flex = "1";
-      b.addEventListener("click", () => setMinimapScale(s.id));
-      sizeRow.appendChild(b);
-      sizeButtons.set(s.id, b);
-    }
-    popover.appendChild(sizeRow);
-    refreshSizeButtons();
-    const unsubSize = onMinimapScaleChange(() => refreshSizeButtons());
-    popover.addEventListener("popoverclose", () => unsubSize());
+    popover.appendChild(makeDimSlider("Width", MINIMAP_WIDTH_RANGE, "width"));
+    popover.appendChild(makeDimSlider("Height", MINIMAP_HEIGHT_RANGE, "height"));
 
     const masterRow = document.createElement("div");
     masterRow.style.cssText = "display:flex;gap:4px;margin-top:6px;";

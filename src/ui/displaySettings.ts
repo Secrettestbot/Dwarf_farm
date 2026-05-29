@@ -8,7 +8,17 @@
 // sees; the sim runs the same regardless.
 
 const STORAGE_KEY = "hudVisibility";
-const MINIMAP_SCALE_KEY = "minimapScale";
+const MINIMAP_DIMENSIONS_KEY = "minimapDimensions";
+/** Migrate the old enum-style key written by the
+ * Small/Medium/Large/Huge version. Mapping uses the same
+ * multipliers that release shipped with. */
+const LEGACY_MINIMAP_SCALE_KEY = "minimapScale";
+const LEGACY_MINIMAP_SCALE_MULTIPLIERS: Record<string, number> = {
+  small: 0.5,
+  medium: 1.0,
+  large: 1.5,
+  huge: 2.0,
+};
 /** Older single-boolean key from the all-or-nothing version. We
  * migrate from this on first read so an existing player doesn't
  * lose their "everything hidden" preference. */
@@ -22,22 +32,29 @@ export type PanelId =
   | "notifications"
   | "minimap";
 
-/** Discrete minimap size buckets. Multipliers apply to the
- * minimap's default 200×80 target dimensions: small halves it,
- * huge doubles it. Stored alongside the panel visibility flags
- * because the Display popover surfaces both controls. */
-export type MinimapScale = "small" | "medium" | "large" | "huge";
+/** Minimap dimensions in screen pixels. The player sets width
+ * and height independently from the Display popover sliders —
+ * intentionally NOT locked to world aspect, so they can stretch
+ * or squish the minimap to fit whatever shape their HUD layout
+ * leaves. The minimap samples the world independently along
+ * each axis, so a 400×40 strip and a 100×200 column both show
+ * the whole world, just stretched. */
+export interface MinimapDimensions {
+  width: number;
+  height: number;
+}
 
-export const MINIMAP_SCALES: ReadonlyArray<{ id: MinimapScale; label: string; mult: number }> = [
-  { id: "small", label: "Small", mult: 0.5 },
-  { id: "medium", label: "Medium", mult: 1.0 },
-  { id: "large", label: "Large", mult: 1.5 },
-  { id: "huge", label: "Huge", mult: 2.0 },
-];
+export const MINIMAP_DEFAULT: MinimapDimensions = { width: 200, height: 80 };
+export const MINIMAP_WIDTH_RANGE: { min: number; max: number } = { min: 80, max: 500 };
+export const MINIMAP_HEIGHT_RANGE: { min: number; max: number } = { min: 40, max: 300 };
 
-export function minimapScaleMultiplier(s: MinimapScale): number {
-  for (const entry of MINIMAP_SCALES) if (entry.id === s) return entry.mult;
-  return 1.0;
+function clampMinimapDimensions(d: Partial<MinimapDimensions>): MinimapDimensions {
+  const w = Math.round(d.width ?? MINIMAP_DEFAULT.width);
+  const h = Math.round(d.height ?? MINIMAP_DEFAULT.height);
+  return {
+    width: Math.max(MINIMAP_WIDTH_RANGE.min, Math.min(MINIMAP_WIDTH_RANGE.max, w)),
+    height: Math.max(MINIMAP_HEIGHT_RANGE.min, Math.min(MINIMAP_HEIGHT_RANGE.max, h)),
+  };
 }
 
 /** Ordered list of panels for the Display popover UI. The order
@@ -171,41 +188,64 @@ export function attachPanelVisibility(id: PanelId, el: HTMLElement): () => void 
   return onPanelVisibilityChange(id, (visible) => applyVisibility(el, visible));
 }
 
-// ---- Minimap scale --------------------------------------------------
+// ---- Minimap dimensions --------------------------------------------
 
-let minimapScale: MinimapScale = readInitialMinimapScale();
-const minimapScaleListeners = new Set<(s: MinimapScale) => void>();
+let minimapDimensions: MinimapDimensions = readInitialMinimapDimensions();
+const minimapDimensionsListeners = new Set<(d: MinimapDimensions) => void>();
 
-function readInitialMinimapScale(): MinimapScale {
+function readInitialMinimapDimensions(): MinimapDimensions {
   try {
-    const raw = localStorage.getItem(MINIMAP_SCALE_KEY);
-    for (const entry of MINIMAP_SCALES) {
-      if (entry.id === raw) return entry.id;
+    const raw = localStorage.getItem(MINIMAP_DIMENSIONS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return clampMinimapDimensions(parsed);
+      }
+    }
+    // Migrate the prior Small/Medium/Large/Huge enum if present —
+    // multiply the default dimensions by the matching multiplier
+    // so a player who picked "Huge" keeps a huge minimap.
+    const legacy = localStorage.getItem(LEGACY_MINIMAP_SCALE_KEY);
+    if (legacy && LEGACY_MINIMAP_SCALE_MULTIPLIERS[legacy] !== undefined) {
+      const mult = LEGACY_MINIMAP_SCALE_MULTIPLIERS[legacy];
+      const migrated = clampMinimapDimensions({
+        width: MINIMAP_DEFAULT.width * mult,
+        height: MINIMAP_DEFAULT.height * mult,
+      });
+      try {
+        localStorage.setItem(MINIMAP_DIMENSIONS_KEY, JSON.stringify(migrated));
+        localStorage.removeItem(LEGACY_MINIMAP_SCALE_KEY);
+      } catch { /* best effort */ }
+      return migrated;
     }
   } catch {
-    // localStorage unavailable.
+    // localStorage unavailable or malformed JSON — defaults stand.
   }
-  return "medium";
+  return { ...MINIMAP_DEFAULT };
 }
 
-export function getMinimapScale(): MinimapScale {
-  return minimapScale;
+export function getMinimapDimensions(): MinimapDimensions {
+  return { ...minimapDimensions };
 }
 
-export function setMinimapScale(s: MinimapScale): void {
-  if (minimapScale === s) return;
-  minimapScale = s;
+export function setMinimapDimensions(d: Partial<MinimapDimensions>): void {
+  const next = clampMinimapDimensions({
+    width: d.width ?? minimapDimensions.width,
+    height: d.height ?? minimapDimensions.height,
+  });
+  if (next.width === minimapDimensions.width && next.height === minimapDimensions.height) return;
+  minimapDimensions = next;
   try {
-    localStorage.setItem(MINIMAP_SCALE_KEY, s);
+    localStorage.setItem(MINIMAP_DIMENSIONS_KEY, JSON.stringify(next));
   } catch {
     // Best-effort persistence.
   }
-  for (const fn of minimapScaleListeners) fn(s);
+  for (const fn of minimapDimensionsListeners) fn({ ...next });
 }
 
-export function onMinimapScaleChange(fn: (s: MinimapScale) => void): () => void {
-  minimapScaleListeners.add(fn);
-  return () => minimapScaleListeners.delete(fn);
+export function onMinimapDimensionsChange(fn: (d: MinimapDimensions) => void): () => void {
+  minimapDimensionsListeners.add(fn);
+  return () => minimapDimensionsListeners.delete(fn);
 }
 
 /** Bind the global H keyboard shortcut to toggle every panel.

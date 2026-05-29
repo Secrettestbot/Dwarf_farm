@@ -15,9 +15,8 @@ import { applyStoredSpriteSet } from "./render/spriteSetPref";
 import {
   installHudHotkey,
   isPanelVisible,
-  getMinimapScale,
-  minimapScaleMultiplier,
-  onMinimapScaleChange,
+  getMinimapDimensions,
+  onMinimapDimensionsChange,
 } from "./ui/displaySettings";
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
@@ -285,14 +284,16 @@ function runGame(active: ActiveFortress, camera: Camera) {
   clock.tick = sim.tick;
   clock.setSpeed(1);
 
+  const initialDims = getMinimapDimensions();
   const minimap = new Minimap(
     sim.grid.width,
     sim.grid.height,
-    minimapScaleMultiplier(getMinimapScale()),
+    initialDims.width,
+    initialDims.height,
   );
-  // Live-update the minimap canvas when the player picks a new
-  // size from the Display popover.
-  onMinimapScaleChange((s) => minimap.setScale(minimapScaleMultiplier(s)));
+  // Live-update the minimap canvas when the player drags the
+  // Display popover sliders.
+  onMinimapDimensionsChange((d) => minimap.setDimensions(d.width, d.height));
   minimap.refresh(sim, performance.now(), true);
 
   const historyPanel = new HistoryPanel(uiHost);

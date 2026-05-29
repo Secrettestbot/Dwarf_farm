@@ -7,8 +7,6 @@ import { LAYER_TINTS, layerOf } from "./sprites";
 // once per second; the visible viewport is overlaid each frame.
 
 const REFRESH_MS = 1000;
-const BASE_TARGET_W = 200;
-const BASE_TARGET_H = 80;
 
 export class Minimap {
   width: number = 0;
@@ -18,39 +16,28 @@ export class Minimap {
   private lastRefresh = -Infinity;
   private worldW: number;
   private worldH: number;
-  private scaleMult: number;
 
-  constructor(worldW: number, worldH: number, scaleMult = 1.0) {
+  constructor(worldW: number, worldH: number, width: number, height: number) {
     this.worldW = worldW;
     this.worldH = worldH;
-    this.scaleMult = scaleMult;
-    this.rebuildCanvas();
+    this.rebuildCanvas(width, height);
   }
 
-  /** Resize the minimap. Pass a multiplier against the base
-   * 200×80 target dimensions: 0.5 halves, 2.0 doubles. The next
-   * refresh() call repaints into the new canvas — pass `force` if
-   * the caller wants the new size visible immediately. */
-  setScale(scaleMult: number): void {
-    if (this.scaleMult === scaleMult) return;
-    this.scaleMult = scaleMult;
-    this.rebuildCanvas();
-    this.lastRefresh = -Infinity; // force a repaint at the next refresh()
+  /** Resize the minimap to an arbitrary pixel width × height. The
+   * minimap samples the world independently along each axis, so
+   * stretching / squishing here doesn't preserve the world's
+   * aspect — that's the trade-off the player explicitly chose
+   * when they grabbed the slider. The next refresh() call repaints
+   * into the new canvas (lastRefresh reset forces it). */
+  setDimensions(width: number, height: number): void {
+    if (this.width === width && this.height === height) return;
+    this.rebuildCanvas(width, height);
+    this.lastRefresh = -Infinity;
   }
 
-  private rebuildCanvas(): void {
-    const targetW = Math.max(40, Math.round(BASE_TARGET_W * this.scaleMult));
-    const targetH = Math.max(20, Math.round(BASE_TARGET_H * this.scaleMult));
-    // Pick dimensions that preserve the world aspect roughly within
-    // the scaled target frame.
-    const aspect = this.worldW / this.worldH;
-    if (aspect > targetW / targetH) {
-      this.width = targetW;
-      this.height = Math.max(20, Math.round(targetW / aspect));
-    } else {
-      this.height = targetH;
-      this.width = Math.max(40, Math.round(targetH * aspect));
-    }
+  private rebuildCanvas(width: number, height: number): void {
+    this.width = Math.max(1, Math.round(width));
+    this.height = Math.max(1, Math.round(height));
     const canvas = document.createElement("canvas");
     canvas.width = this.width;
     canvas.height = this.height;
