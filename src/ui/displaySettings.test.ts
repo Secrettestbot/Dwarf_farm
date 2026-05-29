@@ -1,57 +1,90 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  isHudHidden,
-  onHudVisibilityChange,
-  setHudHidden,
-  toggleHud,
+  PANELS,
+  PanelId,
+  anyPanelVisible,
+  hideAllPanels,
+  isPanelVisible,
+  onPanelVisibilityChange,
+  setPanelVisible,
+  showAllPanels,
+  togglePanel,
+  toggleAllPanels,
 } from "./displaySettings";
 
-// node test environment — no DOM. We exercise the pub/sub +
-// persistence logic only; the applyHudVisibility / attachHudVisibility
-// DOM-touching helpers are covered by manual playtest.
+// node test environment — no DOM. Exercises the pub/sub +
+// per-panel state logic; the attachPanelVisibility helper that
+// flips an element's display style is covered by manual playtest.
 
-describe("HUD display settings", () => {
+describe("HUD per-panel visibility", () => {
   beforeEach(() => {
-    setHudHidden(false); // reset between cases
+    // Reset every panel to visible between cases.
+    showAllPanels();
   });
 
-  it("toggleHud flips isHudHidden and fires listeners", () => {
-    const seen: boolean[] = [];
-    const unsub = onHudVisibilityChange((h) => seen.push(h));
-    toggleHud();
-    expect(isHudHidden()).toBe(true);
-    toggleHud();
-    expect(isHudHidden()).toBe(false);
-    expect(seen).toEqual([true, false]);
-    unsub();
+  it("setPanelVisible flips one panel's flag and fires only that panel's listeners", () => {
+    const sliderSeen: boolean[] = [];
+    const eventLogSeen: boolean[] = [];
+    const ua = onPanelVisibilityChange("sliders", (v) => sliderSeen.push(v));
+    const ub = onPanelVisibilityChange("eventLog", (v) => eventLogSeen.push(v));
+    setPanelVisible("sliders", false);
+    expect(isPanelVisible("sliders")).toBe(false);
+    expect(isPanelVisible("eventLog")).toBe(true); // unaffected
+    expect(sliderSeen).toEqual([false]);
+    expect(eventLogSeen).toEqual([]);
+    ua(); ub();
   });
 
-  it("setHudHidden with the current value is a no-op (no listener fires)", () => {
+  it("togglePanel flips a single flag in place", () => {
+    expect(isPanelVisible("minimap")).toBe(true);
+    togglePanel("minimap");
+    expect(isPanelVisible("minimap")).toBe(false);
+    togglePanel("minimap");
+    expect(isPanelVisible("minimap")).toBe(true);
+  });
+
+  it("setPanelVisible with the current value is a no-op (no listener fires)", () => {
     const seen: boolean[] = [];
-    const unsub = onHudVisibilityChange((h) => seen.push(h));
-    setHudHidden(false); // already false
+    const unsub = onPanelVisibilityChange("hud", (v) => seen.push(v));
+    setPanelVisible("hud", true); // already true
     expect(seen).toEqual([]);
     unsub();
   });
 
-  it("unsubscribing stops the listener from firing", () => {
-    let count = 0;
-    const unsub = onHudVisibilityChange(() => count++);
-    toggleHud();
-    expect(count).toBe(1);
-    unsub();
-    toggleHud();
-    expect(count).toBe(1); // unchanged after unsubscribe
+  it("hideAllPanels + showAllPanels affect every panel", () => {
+    hideAllPanels();
+    for (const p of PANELS) expect(isPanelVisible(p.id)).toBe(false);
+    expect(anyPanelVisible()).toBe(false);
+    showAllPanels();
+    for (const p of PANELS) expect(isPanelVisible(p.id)).toBe(true);
+    expect(anyPanelVisible()).toBe(true);
   });
 
-  it("multiple listeners all see the change", () => {
-    const a: boolean[] = [];
-    const b: boolean[] = [];
-    const ua = onHudVisibilityChange((h) => a.push(h));
-    const ub = onHudVisibilityChange((h) => b.push(h));
-    toggleHud();
-    expect(a).toEqual([true]);
-    expect(b).toEqual([true]);
-    ua(); ub();
+  it("toggleAllPanels collapses everything if anything is visible, else restores all", () => {
+    // Mixed state: hide sliders only.
+    setPanelVisible("sliders", false);
+    expect(anyPanelVisible()).toBe(true);
+    toggleAllPanels(); // still some visible → hide everything
+    for (const p of PANELS) expect(isPanelVisible(p.id)).toBe(false);
+    toggleAllPanels(); // none visible → show everything
+    for (const p of PANELS) expect(isPanelVisible(p.id)).toBe(true);
+  });
+
+  it("unsubscribing stops the listener from firing", () => {
+    let count = 0;
+    const unsub = onPanelVisibilityChange("hud", () => count++);
+    togglePanel("hud");
+    expect(count).toBe(1);
+    unsub();
+    togglePanel("hud");
+    expect(count).toBe(1);
+  });
+
+  it("PANELS lists every PanelId exactly once", () => {
+    const seen = new Set<PanelId>();
+    for (const p of PANELS) {
+      expect(seen.has(p.id)).toBe(false);
+      seen.add(p.id);
+    }
   });
 });
