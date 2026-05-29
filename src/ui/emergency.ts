@@ -3,6 +3,7 @@ import {
   EVACUATE_COOLDOWN_TICKS,
   isShelterMode,
 } from "../sim/emergency";
+import { attachHudVisibility } from "./displaySettings";
 
 /**
  * Three large, instant emergency buttons (GDD §4.3) — Alarm, Evacuate,
@@ -21,6 +22,7 @@ export class EmergencyPanel {
   private root: HTMLDivElement;
   private alarmBtn!: HTMLButtonElement;
   private evacBtn!: HTMLButtonElement;
+  private unsubscribeVisibility: () => void = () => {};
   private lockBtn!: HTMLButtonElement;
   private statusLabel!: HTMLDivElement;
 
@@ -48,6 +50,7 @@ export class EmergencyPanel {
 
     host.appendChild(root);
     this.root = root;
+    this.unsubscribeVisibility = attachHudVisibility(root);
   }
 
   private toggleAlarm(): void {
@@ -137,6 +140,7 @@ export class EmergencyPanel {
   }
 
   destroy(): void {
+    this.unsubscribeVisibility();
     this.root.remove();
   }
 }

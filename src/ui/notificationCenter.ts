@@ -13,6 +13,7 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { Camera } from "../render/camera";
 import { LogEvent } from "../sim/events/eventLog";
+import { attachHudVisibility } from "./displaySettings";
 
 const TOAST_LIFETIME_MS = 8000;
 const MAX_TOASTS = 5;
@@ -51,6 +52,9 @@ export class NotificationCenter {
       "position:absolute;top:288px;left:8px;display:flex;flex-direction:column;gap:6px;z-index:10;pointer-events:none;width:240px;max-height:calc(100vh - 580px);overflow:hidden;";
     this.host.appendChild(wrap);
     this.root = wrap;
+    // NotificationCenter has no destroy() — it lives for the page
+    // lifetime — so we intentionally leak the subscription.
+    attachHudVisibility(wrap);
   }
 
   /** Pump new events into toasts and prune expired ones. Call this

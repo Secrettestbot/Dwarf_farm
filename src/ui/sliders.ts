@@ -1,5 +1,6 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { SLIDER_KEYS, SLIDER_LABELS, SliderState } from "../sim/sliders";
+import { attachHudVisibility } from "./displaySettings";
 
 /**
  * Right-side panel of ten priority sliders (GDD §4.1). The user adjusts a
@@ -16,6 +17,7 @@ export class SliderPanel {
   private root: HTMLDivElement;
   private valueLabels: Map<keyof SliderState, HTMLElement> = new Map();
   private inputs: Map<keyof SliderState, HTMLInputElement> = new Map();
+  private unsubscribeVisibility: () => void = () => {};
 
   constructor(host: HTMLElement, private sim: SimWorld) {
     const root = document.createElement("div");
@@ -68,6 +70,7 @@ export class SliderPanel {
 
     host.appendChild(root);
     this.root = root;
+    this.unsubscribeVisibility = attachHudVisibility(root);
   }
 
   /** Re-read sim state — used after save/load swaps the SimWorld instance. */
@@ -83,6 +86,7 @@ export class SliderPanel {
   }
 
   destroy(): void {
+    this.unsubscribeVisibility();
     this.root.remove();
   }
 }

@@ -7,6 +7,7 @@
 
 import { LogEvent } from "../sim/events/eventLog";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../sim/time";
+import { attachHudVisibility } from "./displaySettings";
 
 const MAX_VISIBLE = 8;
 
@@ -33,6 +34,7 @@ export class EventLogPanel {
   /** Tick of the last event we rendered, used to skip pointless DOM updates. */
   private lastRenderedTick = -1;
   private lastSize = 0;
+  private unsubscribeVisibility: () => void = () => {};
   /** Active category filter set. Empty = show everything. */
   private filter: Set<string> = new Set();
 
@@ -49,6 +51,7 @@ export class EventLogPanel {
     host.appendChild(wrap);
     this.root = wrap;
     this.list = wrap.querySelector("#event-log-list") as HTMLElement;
+    this.unsubscribeVisibility = attachHudVisibility(wrap);
 
     const filterHost = wrap.querySelector("#event-log-filters") as HTMLElement;
     for (const f of FILTER_CATEGORIES) {
@@ -97,6 +100,7 @@ export class EventLogPanel {
   }
 
   destroy(): void {
+    this.unsubscribeVisibility();
     this.root.remove();
   }
 }

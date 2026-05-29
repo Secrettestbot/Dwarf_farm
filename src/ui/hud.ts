@@ -2,6 +2,7 @@ import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY, seasonO
 import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
 import { isMuted, setMuted } from "../audio/sound";
+import { applyHudVisibility, isHudHidden, onHudVisibilityChange, toggleHud } from "./displaySettings";
 
 export interface HudHandlers {
   /** Reads the current fortress name; called on each render so the
@@ -29,6 +30,7 @@ export interface HudHandlers {
 
 export class Hud {
   private root: HTMLElement;
+  private showHudChip!: HTMLButtonElement;
   private speedButtons: Map<SpeedLevel, HTMLButtonElement> = new Map();
   private clockLabel: HTMLDivElement;
   private dwarfLabel: HTMLDivElement;
@@ -36,6 +38,7 @@ export class Hud {
   private stockpileLabel!: HTMLDivElement;
   private nameLabel!: HTMLDivElement;
   private handlers: HudHandlers;
+  private unsubscribeVisibility: (() => void) | null = null;
 
   constructor(host: HTMLElement, handlers: HudHandlers) {
     this.handlers = handlers;
@@ -173,16 +176,50 @@ export class Hud {
     helpButton.addEventListener("click", () => handlers.onShowTutorial());
     tools.appendChild(helpButton);
 
+    // Hide-HUD toggle — collapses every persistent overlay (HUD
+    // info bar, sliders, event log, emergency banner, notifications,
+    // minimap) so the player can watch the ant farm uncluttered.
+    // The "Show HUD" chip in the corner brings it all back; H is
+    // the keyboard shortcut.
+    const hideHudButton = document.createElement("button");
+    hideHudButton.className = "btn";
+    hideHudButton.textContent = "Hide HUD";
+    hideHudButton.title = "Hide all overlay panels (H)";
+    hideHudButton.addEventListener("click", () => toggleHud());
+    tools.appendChild(hideHudButton);
+
     top.appendChild(tools);
 
     const help = document.createElement("div");
     help.style.cssText = "font-size:10px;color:#666;line-height:1.4;margin-top:6px;";
     help.innerHTML =
-      "Drag to pan · scroll to zoom · space pauses<br/>The dwarves work on their own. You only watch.";
+      "Drag to pan · scroll to zoom · space pauses · H hides the HUD<br/>The dwarves work on their own. You only watch.";
     top.appendChild(help);
 
     host.appendChild(top);
     this.root = top;
+
+    // Floating "Show HUD" chip — visible only while the HUD is
+    // hidden. Lives outside the main panel so it stays on-screen
+    // when applyHudVisibility hides `top`.
+    this.showHudChip = document.createElement("button");
+    this.showHudChip.className = "btn";
+    this.showHudChip.textContent = "Show HUD";
+    this.showHudChip.title = "Show the overlay panels (H)";
+    this.showHudChip.style.cssText =
+      "position:absolute;top:8px;left:8px;z-index:30;font-size:11px;padding:4px 8px;display:none;";
+    this.showHudChip.addEventListener("click", () => toggleHud());
+    host.appendChild(this.showHudChip);
+
+    // Apply initial state + subscribe to changes so the panel and
+    // the chip swap in / out together.
+    this.applyVisibility(isHudHidden());
+    this.unsubscribeVisibility = onHudVisibilityChange((hidden) => this.applyVisibility(hidden));
+  }
+
+  private applyVisibility(hidden: boolean): void {
+    applyHudVisibility(this.root, hidden);
+    this.showHudChip.style.display = hidden ? "" : "none";
   }
 
   update(clock: Clock, sim: SimWorld): void {
@@ -228,6 +265,9 @@ export class Hud {
 
   destroy(): void {
     this.root.remove();
+    this.showHudChip.remove();
+    this.unsubscribeVisibility?.();
+    this.unsubscribeVisibility = null;
   }
 
   private refreshFortressName(modeBadge: string): void {
