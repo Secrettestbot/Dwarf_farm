@@ -1,87 +1,160 @@
-// Player-controlled HUD visibility. One master "hide all overlays"
-// toggle that every persistent on-screen panel (HUD info bar,
-// sliders, event log, emergency banner, notifications, inspector,
-// minimap, activity glyphs) listens to. Persisted via localStorage
-// so the player's choice survives reloads.
+// Per-panel HUD visibility. Each persistent overlay (HUD info bar,
+// sliders, event log, emergency banner, notifications, minimap)
+// has its own visible / hidden flag the player can toggle from the
+// Display popover in the HUD. A master "show all / hide all"
+// shortcut (H key) flips the lot in one go.
 //
-// Indirect-control shape: the player doesn't lose any agency by
-// hiding the HUD — they can still pan, zoom, click dwarves, and
-// the sim runs the same. Press H or click the floating "Show HUD"
-// chip to bring everything back.
+// Indirect-control shape: visibility only changes what the player
+// sees; the sim runs the same regardless.
 
-const STORAGE_KEY = "hudHidden";
+const STORAGE_KEY = "hudVisibility";
+/** Older single-boolean key from the all-or-nothing version. We
+ * migrate from this on first read so an existing player doesn't
+ * lose their "everything hidden" preference. */
+const LEGACY_STORAGE_KEY = "hudHidden";
 
-type Listener = (hidden: boolean) => void;
-const listeners = new Set<Listener>();
+export type PanelId =
+  | "hud"
+  | "sliders"
+  | "eventLog"
+  | "emergency"
+  | "notifications"
+  | "minimap";
 
-let hudHidden = readInitialState();
+/** Ordered list of panels for the Display popover UI. The order
+ * here is the order checkboxes render in. */
+export const PANELS: ReadonlyArray<{ id: PanelId; label: string }> = [
+  { id: "hud", label: "HUD info & tools" },
+  { id: "sliders", label: "Priority sliders" },
+  { id: "eventLog", label: "Event log" },
+  { id: "emergency", label: "Emergency buttons" },
+  { id: "notifications", label: "Notification toasts" },
+  { id: "minimap", label: "Minimap" },
+];
 
-function readInitialState(): boolean {
+type Listener = (visible: boolean) => void;
+const listeners: Map<PanelId, Set<Listener>> = new Map();
+
+function defaultVisibility(): Record<PanelId, boolean> {
+  return {
+    hud: true,
+    sliders: true,
+    eventLog: true,
+    emergency: true,
+    notifications: true,
+    minimap: true,
+  };
+}
+
+let visibility: Record<PanelId, boolean> = readInitialState();
+
+function readInitialState(): Record<PanelId, boolean> {
+  const base = defaultVisibility();
   try {
-    return localStorage.getItem(STORAGE_KEY) === "1";
+    // Migrate the legacy single-boolean key. If it was "1" (hidden
+    // mode), set every panel hidden. Then delete the legacy key so
+    // the new format owns the preference going forward.
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy === "1") {
+      for (const p of PANELS) base[p.id] = false;
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(base));
+      return base;
+    }
+    if (legacy !== null) localStorage.removeItem(LEGACY_STORAGE_KEY);
+
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      for (const p of PANELS) {
+        if (typeof parsed[p.id] === "boolean") base[p.id] = parsed[p.id];
+      }
+    }
   } catch {
-    return false;
+    // localStorage unavailable or malformed JSON — defaults stand.
   }
+  return base;
 }
 
 function persist(): void {
   try {
-    if (hudHidden) localStorage.setItem(STORAGE_KEY, "1");
-    else localStorage.removeItem(STORAGE_KEY);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(visibility));
   } catch {
-    // localStorage might be unavailable (private browsing); the
-    // setting still applies for this session.
+    // Best-effort persistence.
   }
 }
 
-/** True iff the player has chosen to hide the persistent overlay
- * panels. New panels should call onHudVisibilityChange in their
- * constructor and immediately apply isHudHidden() to their root. */
-export function isHudHidden(): boolean {
-  return hudHidden;
+export function isPanelVisible(id: PanelId): boolean {
+  return visibility[id];
 }
 
-export function setHudHidden(hidden: boolean): void {
-  if (hudHidden === hidden) return;
-  hudHidden = hidden;
+export function setPanelVisible(id: PanelId, visible: boolean): void {
+  if (visibility[id] === visible) return;
+  visibility[id] = visible;
   persist();
-  for (const fn of listeners) fn(hidden);
+  const subs = listeners.get(id);
+  if (subs) for (const fn of subs) fn(visible);
 }
 
-export function toggleHud(): void {
-  setHudHidden(!hudHidden);
+export function togglePanel(id: PanelId): void {
+  setPanelVisible(id, !visibility[id]);
 }
 
-/** Subscribe to visibility changes. Returns an unsubscribe function. */
-export function onHudVisibilityChange(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
+/** Master controls. "Hide all" sets every panel to hidden; "Show all"
+ * brings them back; "Toggle all" inspects current state — if anything
+ * is visible it hides everything, otherwise it shows everything.
+ * Toggle-all is what the H keyboard shortcut binds to. */
+export function hideAllPanels(): void {
+  for (const p of PANELS) setPanelVisible(p.id, false);
 }
 
-/** Apply the hidden flag to an element's display style. Returns
- * the element so callers can chain. Convenience wrapper that
- * remembers each panel's original `display` value so unrelated
- * inline styles (flex, grid, etc.) stay intact when toggled. */
+export function showAllPanels(): void {
+  for (const p of PANELS) setPanelVisible(p.id, true);
+}
+
+export function anyPanelVisible(): boolean {
+  for (const p of PANELS) if (visibility[p.id]) return true;
+  return false;
+}
+
+export function toggleAllPanels(): void {
+  if (anyPanelVisible()) hideAllPanels();
+  else showAllPanels();
+}
+
+/** Subscribe to one panel's visibility changes. */
+export function onPanelVisibilityChange(id: PanelId, fn: Listener): () => void {
+  let subs = listeners.get(id);
+  if (!subs) {
+    subs = new Set();
+    listeners.set(id, subs);
+  }
+  subs.add(fn);
+  return () => subs!.delete(fn);
+}
+
+/** Apply the visible flag to an element's display style, restoring
+ * the original (flex / grid / "") inline value when unhiding. */
 const originalDisplay = new WeakMap<HTMLElement, string>();
-export function applyHudVisibility(el: HTMLElement, hidden: boolean): void {
+function applyVisibility(el: HTMLElement, visible: boolean): void {
   if (!originalDisplay.has(el)) {
     originalDisplay.set(el, el.style.display || "");
   }
-  el.style.display = hidden ? "none" : originalDisplay.get(el)!;
+  el.style.display = visible ? originalDisplay.get(el)! : "none";
 }
 
-/** Wire a panel's root element to follow the global HUD-hidden
- * flag. Applies the current state immediately and subscribes for
- * future changes. Returns an unsubscribe function the panel's
- * destroy() can call. */
-export function attachHudVisibility(el: HTMLElement): () => void {
-  applyHudVisibility(el, hudHidden);
-  return onHudVisibilityChange((hidden) => applyHudVisibility(el, hidden));
+/** Wire a panel's root element to follow its visibility flag.
+ * Applies the current state immediately and subscribes for future
+ * changes. Returns an unsubscribe function. */
+export function attachPanelVisibility(id: PanelId, el: HTMLElement): () => void {
+  applyVisibility(el, visibility[id]);
+  return onPanelVisibilityChange(id, (visible) => applyVisibility(el, visible));
 }
 
-/** Bind the global H keyboard shortcut so the player can toggle
- * the HUD from anywhere. Skipped if any text input is focused so
- * typing "h" into the fortress-rename prompt doesn't fire. */
+/** Bind the global H keyboard shortcut to toggle every panel.
+ * Skipped if any text input is focused so typing "h" into a
+ * rename prompt doesn't fire the shortcut. */
 export function installHudHotkey(): void {
   window.addEventListener("keydown", (ev) => {
     if (ev.key !== "h" && ev.key !== "H") return;
@@ -89,6 +162,6 @@ export function installHudHotkey(): void {
     const target = ev.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
     ev.preventDefault();
-    toggleHud();
+    toggleAllPanels();
   });
 }

@@ -1,6 +1,6 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { SLIDER_KEYS, SLIDER_LABELS, SliderState } from "../sim/sliders";
-import { attachHudVisibility } from "./displaySettings";
+import { attachPanelVisibility } from "./displaySettings";
 
 /**
  * Right-side panel of ten priority sliders (GDD §4.1). The user adjusts a
@@ -70,7 +70,7 @@ export class SliderPanel {
 
     host.appendChild(root);
     this.root = root;
-    this.unsubscribeVisibility = attachHudVisibility(root);
+    this.unsubscribeVisibility = attachPanelVisibility("sliders", root);
   }
 
   /** Re-read sim state — used after save/load swaps the SimWorld instance. */

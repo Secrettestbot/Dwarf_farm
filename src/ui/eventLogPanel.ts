@@ -7,7 +7,7 @@
 
 import { LogEvent } from "../sim/events/eventLog";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../sim/time";
-import { attachHudVisibility } from "./displaySettings";
+import { attachPanelVisibility } from "./displaySettings";
 
 const MAX_VISIBLE = 8;
 
@@ -51,7 +51,7 @@ export class EventLogPanel {
     host.appendChild(wrap);
     this.root = wrap;
     this.list = wrap.querySelector("#event-log-list") as HTMLElement;
-    this.unsubscribeVisibility = attachHudVisibility(wrap);
+    this.unsubscribeVisibility = attachPanelVisibility("eventLog", wrap);
 
     const filterHost = wrap.querySelector("#event-log-filters") as HTMLElement;
     for (const f of FILTER_CATEGORIES) {

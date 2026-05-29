@@ -12,7 +12,7 @@ import { EventLogPanel } from "./ui/eventLogPanel";
 import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
 import { applyStoredSpriteSet } from "./render/spriteSetPref";
-import { installHudHotkey, isHudHidden } from "./ui/displaySettings";
+import { installHudHotkey, isPanelVisible } from "./ui/displaySettings";
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
@@ -454,7 +454,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
 
     renderWorld(ctx, sim, camera, viewW, viewH);
 
-    if (!isHudHidden()) {
+    if (isPanelVisible("minimap")) {
       const mx = viewW - minimap.width - 14;
       const my = viewH - minimap.height - 14;
       minimap.draw(ctx, mx, my, camera, viewW, viewH);

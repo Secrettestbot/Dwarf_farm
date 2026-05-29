@@ -2,7 +2,15 @@ import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY, seasonO
 import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
 import { isMuted, setMuted } from "../audio/sound";
-import { applyHudVisibility, isHudHidden, onHudVisibilityChange, toggleHud } from "./displaySettings";
+import {
+  PANELS,
+  attachPanelVisibility,
+  hideAllPanels,
+  isPanelVisible,
+  onPanelVisibilityChange,
+  setPanelVisible,
+  showAllPanels,
+} from "./displaySettings";
 
 export interface HudHandlers {
   /** Reads the current fortress name; called on each render so the
@@ -39,6 +47,7 @@ export class Hud {
   private nameLabel!: HTMLDivElement;
   private handlers: HudHandlers;
   private unsubscribeVisibility: (() => void) | null = null;
+  private displayPopover: HTMLDivElement | null = null;
 
   constructor(host: HTMLElement, handlers: HudHandlers) {
     this.handlers = handlers;
@@ -176,51 +185,135 @@ export class Hud {
     helpButton.addEventListener("click", () => handlers.onShowTutorial());
     tools.appendChild(helpButton);
 
-    // Hide-HUD toggle — collapses every persistent overlay (HUD
-    // info bar, sliders, event log, emergency banner, notifications,
-    // minimap) so the player can watch the ant farm uncluttered.
-    // The "Show HUD" chip in the corner brings it all back; H is
-    // the keyboard shortcut.
-    const hideHudButton = document.createElement("button");
-    hideHudButton.className = "btn";
-    hideHudButton.textContent = "Hide HUD";
-    hideHudButton.title = "Hide all overlay panels (H)";
-    hideHudButton.addEventListener("click", () => toggleHud());
-    tools.appendChild(hideHudButton);
+    // Display popover — per-panel checkboxes so the player can
+    // hide just the slider rail, just the event log, etc. A "Hide
+    // all / Show all" pair at the bottom is the master toggle that
+    // mirrors the H keyboard shortcut.
+    const displayButton = document.createElement("button");
+    displayButton.className = "btn";
+    displayButton.textContent = "Display";
+    displayButton.title = "Choose which overlays are visible (H toggles all)";
+    displayButton.addEventListener("click", () => this.openDisplayPopover(displayButton));
+    tools.appendChild(displayButton);
 
     top.appendChild(tools);
 
     const help = document.createElement("div");
     help.style.cssText = "font-size:10px;color:#666;line-height:1.4;margin-top:6px;";
     help.innerHTML =
-      "Drag to pan · scroll to zoom · space pauses · H hides the HUD<br/>The dwarves work on their own. You only watch.";
+      "Drag to pan · scroll to zoom · space pauses · H toggles HUD<br/>The dwarves work on their own. You only watch.";
     top.appendChild(help);
 
     host.appendChild(top);
     this.root = top;
 
-    // Floating "Show HUD" chip — visible only while the HUD is
-    // hidden. Lives outside the main panel so it stays on-screen
-    // when applyHudVisibility hides `top`.
+    // Floating "Show HUD" chip — visible only while the main HUD
+    // panel itself is hidden. Lives outside `top` so it stays on
+    // screen after attachPanelVisibility hides the main panel.
+    // Clicking it opens the Display popover so the player can
+    // restore any subset they want, not just "everything."
     this.showHudChip = document.createElement("button");
     this.showHudChip.className = "btn";
     this.showHudChip.textContent = "Show HUD";
-    this.showHudChip.title = "Show the overlay panels (H)";
+    this.showHudChip.title = "Choose which overlays are visible (H toggles all)";
     this.showHudChip.style.cssText =
       "position:absolute;top:8px;left:8px;z-index:30;font-size:11px;padding:4px 8px;display:none;";
-    this.showHudChip.addEventListener("click", () => toggleHud());
+    this.showHudChip.addEventListener("click", () => this.openDisplayPopover(this.showHudChip));
     host.appendChild(this.showHudChip);
 
-    // Apply initial state + subscribe to changes so the panel and
-    // the chip swap in / out together.
-    this.applyVisibility(isHudHidden());
-    this.unsubscribeVisibility = onHudVisibilityChange((hidden) => this.applyVisibility(hidden));
+    // Wire the main panel's visibility + keep the chip's display
+    // mirroring it so the player always has a way back in.
+    this.unsubscribeVisibility = attachPanelVisibility("hud", top);
+    this.refreshChip();
+    const unsubChip = onPanelVisibilityChange("hud", () => this.refreshChip());
+    const prevUnsub = this.unsubscribeVisibility;
+    this.unsubscribeVisibility = () => { prevUnsub(); unsubChip(); };
   }
 
-  private applyVisibility(hidden: boolean): void {
-    applyHudVisibility(this.root, hidden);
-    this.showHudChip.style.display = hidden ? "" : "none";
+  private refreshChip(): void {
+    this.showHudChip.style.display = isPanelVisible("hud") ? "none" : "";
   }
+
+  private openDisplayPopover(anchor: HTMLElement): void {
+    // If a popover is already open, close it (click-to-toggle).
+    if (this.displayPopover) {
+      this.displayPopover.remove();
+      this.displayPopover = null;
+      return;
+    }
+    const popover = document.createElement("div");
+    popover.className = "panel";
+    popover.style.cssText =
+      "position:absolute;background:#15151b;border:1px solid #2a2a35;border-radius:6px;" +
+      "padding:10px 12px;display:flex;flex-direction:column;gap:6px;z-index:40;min-width:200px;";
+    const rect = anchor.getBoundingClientRect();
+    popover.style.left = `${Math.round(rect.left)}px`;
+    popover.style.top = `${Math.round(rect.bottom + 4)}px`;
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:10px;letter-spacing:2px;color:#888;";
+    title.textContent = "DISPLAY";
+    popover.appendChild(title);
+
+    for (const p of PANELS) {
+      const row = document.createElement("label");
+      row.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#ddd;cursor:pointer;";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = isPanelVisible(p.id);
+      cb.addEventListener("change", () => setPanelVisible(p.id, cb.checked));
+      row.appendChild(cb);
+      const label = document.createElement("span");
+      label.textContent = p.label;
+      row.appendChild(label);
+      popover.appendChild(row);
+      // Live-update each checkbox if the master buttons (or H key)
+      // flip the underlying state while the popover's open.
+      const unsub = onPanelVisibilityChange(p.id, (v) => { cb.checked = v; });
+      popover.addEventListener("popoverclose", () => unsub());
+    }
+
+    const masterRow = document.createElement("div");
+    masterRow.style.cssText = "display:flex;gap:4px;margin-top:4px;";
+    const showAllBtn = document.createElement("button");
+    showAllBtn.className = "btn";
+    showAllBtn.textContent = "Show all";
+    showAllBtn.style.fontSize = "10px";
+    showAllBtn.addEventListener("click", () => showAllPanels());
+    masterRow.appendChild(showAllBtn);
+    const hideAllBtn = document.createElement("button");
+    hideAllBtn.className = "btn";
+    hideAllBtn.textContent = "Hide all";
+    hideAllBtn.style.fontSize = "10px";
+    hideAllBtn.addEventListener("click", () => hideAllPanels());
+    masterRow.appendChild(hideAllBtn);
+    popover.appendChild(masterRow);
+
+    const hint = document.createElement("div");
+    hint.style.cssText = "font-size:9px;color:#666;margin-top:2px;";
+    hint.textContent = "Tip: press H to flip everything at once.";
+    popover.appendChild(hint);
+
+    document.body.appendChild(popover);
+    this.displayPopover = popover;
+
+    // Dismiss on outside-click. Defer the listener install by one
+    // event loop so the click that opened the popover doesn't
+    // immediately close it.
+    setTimeout(() => {
+      const onDocClick = (ev: MouseEvent) => {
+        if (!this.displayPopover) return;
+        if (this.displayPopover.contains(ev.target as Node)) return;
+        if (anchor.contains(ev.target as Node)) return;
+        this.displayPopover.dispatchEvent(new CustomEvent("popoverclose"));
+        this.displayPopover.remove();
+        this.displayPopover = null;
+        document.removeEventListener("mousedown", onDocClick);
+      };
+      document.addEventListener("mousedown", onDocClick);
+    }, 0);
+  }
+
 
   update(clock: Clock, sim: SimWorld): void {
     const tick = clock.tick;
