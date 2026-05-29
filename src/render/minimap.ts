@@ -7,29 +7,49 @@ import { LAYER_TINTS, layerOf } from "./sprites";
 // once per second; the visible viewport is overlaid each frame.
 
 const REFRESH_MS = 1000;
-const TARGET_W = 200;
-const TARGET_H = 80;
+const BASE_TARGET_W = 200;
+const BASE_TARGET_H = 80;
 
 export class Minimap {
-  readonly width: number;
-  readonly height: number;
-  private buffer: HTMLCanvasElement;
-  private bctx: CanvasRenderingContext2D;
+  width: number = 0;
+  height: number = 0;
+  private buffer!: HTMLCanvasElement;
+  private bctx!: CanvasRenderingContext2D;
   private lastRefresh = -Infinity;
   private worldW: number;
   private worldH: number;
+  private scaleMult: number;
 
-  constructor(worldW: number, worldH: number) {
+  constructor(worldW: number, worldH: number, scaleMult = 1.0) {
     this.worldW = worldW;
     this.worldH = worldH;
-    // Pick dimensions that preserve the world aspect roughly within the panel.
-    const aspect = worldW / worldH;
-    if (aspect > TARGET_W / TARGET_H) {
-      this.width = TARGET_W;
-      this.height = Math.max(20, Math.round(TARGET_W / aspect));
+    this.scaleMult = scaleMult;
+    this.rebuildCanvas();
+  }
+
+  /** Resize the minimap. Pass a multiplier against the base
+   * 200×80 target dimensions: 0.5 halves, 2.0 doubles. The next
+   * refresh() call repaints into the new canvas — pass `force` if
+   * the caller wants the new size visible immediately. */
+  setScale(scaleMult: number): void {
+    if (this.scaleMult === scaleMult) return;
+    this.scaleMult = scaleMult;
+    this.rebuildCanvas();
+    this.lastRefresh = -Infinity; // force a repaint at the next refresh()
+  }
+
+  private rebuildCanvas(): void {
+    const targetW = Math.max(40, Math.round(BASE_TARGET_W * this.scaleMult));
+    const targetH = Math.max(20, Math.round(BASE_TARGET_H * this.scaleMult));
+    // Pick dimensions that preserve the world aspect roughly within
+    // the scaled target frame.
+    const aspect = this.worldW / this.worldH;
+    if (aspect > targetW / targetH) {
+      this.width = targetW;
+      this.height = Math.max(20, Math.round(targetW / aspect));
     } else {
-      this.height = TARGET_H;
-      this.width = Math.max(40, Math.round(TARGET_H * aspect));
+      this.height = targetH;
+      this.width = Math.max(40, Math.round(targetH * aspect));
     }
     const canvas = document.createElement("canvas");
     canvas.width = this.width;

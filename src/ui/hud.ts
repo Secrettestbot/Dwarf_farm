@@ -3,11 +3,15 @@ import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
 import { isMuted, setMuted } from "../audio/sound";
 import {
+  MINIMAP_SCALES,
   PANELS,
   attachPanelVisibility,
+  getMinimapScale,
   hideAllPanels,
   isPanelVisible,
+  onMinimapScaleChange,
   onPanelVisibilityChange,
+  setMinimapScale,
   setPanelVisible,
   showAllPanels,
 } from "./displaySettings";
@@ -273,8 +277,41 @@ export class Hud {
       popover.addEventListener("popoverclose", () => unsub());
     }
 
+    // Minimap size row — four buttons (Small / Medium / Large /
+    // Huge). The currently-active size highlights via the existing
+    // ".active" CSS class. Live-update if the selection changes
+    // from elsewhere (e.g., a different popover instance).
+    const sizeTitle = document.createElement("div");
+    sizeTitle.style.cssText = "font-size:9px;letter-spacing:2px;color:#888;margin-top:6px;";
+    sizeTitle.textContent = "MINIMAP SIZE";
+    popover.appendChild(sizeTitle);
+
+    const sizeRow = document.createElement("div");
+    sizeRow.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;";
+    const sizeButtons = new Map<string, HTMLButtonElement>();
+    const refreshSizeButtons = () => {
+      const active = getMinimapScale();
+      for (const [id, btn] of sizeButtons) {
+        btn.classList.toggle("active", id === active);
+      }
+    };
+    for (const s of MINIMAP_SCALES) {
+      const b = document.createElement("button");
+      b.className = "btn";
+      b.textContent = s.label;
+      b.style.fontSize = "10px";
+      b.style.flex = "1";
+      b.addEventListener("click", () => setMinimapScale(s.id));
+      sizeRow.appendChild(b);
+      sizeButtons.set(s.id, b);
+    }
+    popover.appendChild(sizeRow);
+    refreshSizeButtons();
+    const unsubSize = onMinimapScaleChange(() => refreshSizeButtons());
+    popover.addEventListener("popoverclose", () => unsubSize());
+
     const masterRow = document.createElement("div");
-    masterRow.style.cssText = "display:flex;gap:4px;margin-top:4px;";
+    masterRow.style.cssText = "display:flex;gap:4px;margin-top:6px;";
     const showAllBtn = document.createElement("button");
     showAllBtn.className = "btn";
     showAllBtn.textContent = "Show all";
