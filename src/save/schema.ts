@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave";
     targetX: number;
     targetY: number;
     progress: number;
@@ -150,6 +150,9 @@ export interface SavedBlueprint {
   /** Room quality (0-100). Optional for back-compat — older saves
    * default to base quality on restore. */
   quality?: number;
+  /** Engravings + gem inlays accumulated in this room. Optional;
+   * older saves default to 0 on restore. */
+  decorationsCount?: number;
 }
 
 export interface SavedLogEvent {
@@ -280,8 +283,42 @@ export interface SaveV1 {
     dealCost?: number;
     dealImport?: string;
     dealGain?: number;
+    /** Secondary basket import — optional. Empty / 0 if the deal is
+     * single-good. */
+    dealImport2?: string;
+    dealGain2?: number;
     dealComplete?: boolean;
   };
+  /** Per-kingdom trade reputation table — climbs with successful
+   * deals, drops when the colony misses a caravan. Optional; older
+   * saves load with an empty record and reputation starts at 0 for
+   * every kingdom. */
+  tradeReputation?: Record<string, number>;
+  /** Scheduled-caravan state for the outrider pre-announcement
+   * system. Round-trips so the player's outrider warning doesn't
+   * evaporate over a save/reload. */
+  caravanSchedule?: {
+    tick: number;
+    origin: string;
+    preAnnounced: boolean;
+  };
+  /** Scheduled-siege state — same pattern as the caravan schedule.
+   * Round-trips so a mid-warning save reload doesn't lose the
+   * countdown. siegesSurvived is the cumulative count for the
+   * chronicle. */
+  siege?: {
+    scheduledTick: number;
+    announced: boolean;
+    active: boolean;
+    survived: number;
+    /** Name of the warlord currently leading the active siege, if
+     * any. Empty when no warlord is in play. */
+    warlordName?: string;
+  };
+  /** Per-hostile display names — pinned for named foes (the
+   * goblin warlord, future named bosses). Keyed by entity id;
+   * absent for anonymous hostiles. Optional. */
+  hostileNames?: Array<{ id: number; name: string }>;
   /** Cemetery registry — every dwarf interred in a Headstone tile.
    * Round-trips so a reload restores the colony's full memorial
    * roll call. */
@@ -314,6 +351,18 @@ export interface SaveV1 {
   }>;
   /** Currently-recognised Mayor's name. */
   mayorName?: string;
+  /** Active mayoral mandate. Empty `resource` means no mandate.
+   * Round-trips so a save mid-season doesn't lose the deadline. */
+  mandate?: {
+    resource: string;
+    target: number;
+    baseline: number;
+    endTick: number;
+  };
+  /** Cumulative satisfied / failed mandate counts for the
+   * chronicle and future king-election heuristics. */
+  mandatesSatisfied?: number;
+  mandatesFailed?: number;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
   /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,

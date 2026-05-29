@@ -12,6 +12,7 @@ export type HostileKind =
   | "giant_spider"
   | "cave_bear"
   | "goblin_scout"
+  | "goblin_warlord"
   | "cave_troll"
   | "undead"
   | "fire_imp"
@@ -123,6 +124,22 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 22,
     minDepth: 80,
     pursueRange: 18,
+    dropsHide: true,
+  },
+  // Goblin warlord — one per siege at pop ≥ 15. Named, slower
+  // than a scout but hits twice as hard with double the HP.
+  // Drops a hide so the colony has loot to tan after the
+  // chronicle's named-foe moment.
+  goblin_warlord: {
+    id: "goblin_warlord",
+    name: "goblin warlord",
+    spawnArticle: "a goblin warlord",
+    maxHp: 110,
+    damage: 16,
+    attackCooldown: 70,
+    moveCooldown: 26,
+    minDepth: 0, // siege spawns at the surface; no depth gate
+    pursueRange: 22,
     dropsHide: true,
   },
   // Deep Rock (§5.2): cave troll. Slow, brutal, hard to kill — the kind

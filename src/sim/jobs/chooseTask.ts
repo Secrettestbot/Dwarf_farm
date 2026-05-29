@@ -8,7 +8,7 @@ import { EntityId } from "../ecs/world";
 import { findMineTarget } from "./chooseJob";
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
-import { BlueprintKind, FURNITURE_REQUIREMENTS, isRoomNeglected } from "../planner/blueprint";
+import { BlueprintKind, FURNITURE_REQUIREMENTS, isRoomNeglected, maxDecorationsFor } from "../planner/blueprint";
 import { isShelterMode } from "../emergency";
 import { recipeFor } from "../planner/recipes";
 
@@ -327,6 +327,18 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     const craftTarget = findCraftTarget(sim, pos.x, pos.y);
     if (craftTarget) {
       return { kind: "craft" as JobKind, targetX: craftTarget.x, targetY: craftTarget.y, progress: 0 };
+    }
+  }
+
+  // 6.72 Engrave a wall. Late-tier work — only fires when the
+  //     colony has spare blocks (or cut gems) and a complete room
+  //     that isn't already maxed on decorations. Sinks the surplus
+  //     mason / jeweller output into permanent room-quality bumps
+  //     and chronicle-worthy art. Same Crafting slider gate.
+  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+    const engraveTarget = findEngraveTarget(sim, pos.x, pos.y);
+    if (engraveTarget) {
+      return { kind: "engrave" as JobKind, targetX: engraveTarget.x, targetY: engraveTarget.y, progress: 0 };
     }
   }
 
@@ -1253,6 +1265,42 @@ function findHostileTarget(sim: SimWorld, sx: number, sy: number): { x: number; 
       (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
     ) {
       best = { x: p.x, y: p.y, d };
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Find the nearest tile inside a complete room that can take
+ * another engraving. Skips passages (corridor / mine / stairwell /
+ * lumberyard) and rooms already at their per-cavity decoration cap.
+ * Requires at least 1 block in the stockpile — cut_gems are nicer
+ * but optional. Tiles claimed by another engrave job are excluded
+ * so multiple decorators spread across rooms instead of stacking. */
+function findEngraveTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  // No materials = no engraving possible.
+  if (sim.stockpile.blocks <= 0 && sim.stockpile.cut_gems <= 0) return null;
+  const claimed = collectJobTargets(sim, "engrave");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    if (b.kind === "corridor" || b.kind === "mine" || b.kind === "stairwell" || b.kind === "lumberyard") continue;
+    const placed = b.decorationsCount ?? 0;
+    const cap = maxDecorationsFor(b);
+    if (placed >= cap) continue;
+    const quality = b.quality ?? 0;
+    if (quality >= 95) continue; // already a masterpiece
+    // Pick any walkable cavity tile that isn't already claimed by
+    // another engraver — gives the decorator a place to stand.
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (!sim.grid.isWalkable(x, y)) continue;
+      if (claimed.has((y << 16) | x)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (!best || d < best.d) best = { x, y, d };
     }
   }
   return best ? { x: best.x, y: best.y } : null;

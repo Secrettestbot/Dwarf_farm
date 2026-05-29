@@ -1598,6 +1598,29 @@ const GOBLIN_SCOUT_PIXELS: string[] = [
   "0000000000000000",
 ];
 
+// Goblin warlord: bigger silhouette than the scout (filled rows
+// 1-13 instead of 2-13), red-banded torso (E = clothes red) for
+// the chieftain's sash, and horns at the top to distinguish them
+// at any zoom.
+const GOBLIN_WARLORD_PIXELS: string[] = [
+  "0001100000110000",
+  "0011AA0000AA1100",
+  "0001AA1111AA1000",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001AAA11AAA1000",
+  "0001AAA11AAA1000",
+  "0011EEEEEEEE1100",
+  "001EEEEEEEEEE100",
+  "0011EEEEEEEE1100",
+  "0001AAAAAAAA1000",
+  "0001AAAAAAAA1000",
+  "0001A1100AA1A100",
+  "0011A1000AA1A100",
+  "0010100000110000",
+  "0000000000000000",
+];
+
 // Cave troll: hulking, slow, palette-grey-blue (4 = dusk).
 const CAVE_TROLL_PIXELS: string[] = [
   "0000111111100000",
@@ -1868,6 +1891,7 @@ const HOSTILE_PIXELS: Record<string, string[]> = {
   giant_spider: GIANT_SPIDER_PIXELS,
   cave_bear: CAVE_BEAR_PIXELS,
   goblin_scout: GOBLIN_SCOUT_PIXELS,
+  goblin_warlord: GOBLIN_WARLORD_PIXELS,
   cave_troll: CAVE_TROLL_PIXELS,
   undead: UNDEAD_PIXELS,
   fire_imp: FIRE_IMP_PIXELS,

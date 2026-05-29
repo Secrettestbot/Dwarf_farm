@@ -282,7 +282,64 @@ export class SimWorld {
   caravanDealCost = 0;
   caravanDealImport: string = "";
   caravanDealGain = 0;
+  /** Secondary import in a multi-good basket — the broker can come
+   * back with up to two staples per trade so a single caravan visit
+   * can replenish both food AND drink (or food and rope, etc.).
+   * Empty / 0 when the deal is a single-import trade. */
+  caravanDealImport2: string = "";
+  caravanDealGain2 = 0;
   caravanDealComplete = false;
+  /** Per-kingdom trade reputation, keyed by kingdom name. Climbs
+   * with successful deals (REPUTATION_GAIN_PER_DEAL) and falls when
+   * the colony fails to meet a caravan (broker dies en route, no
+   * goods to offer, etc.). Higher reputation gets the colony better
+   * prices when that kingdom comes back. Round-trips through save
+   * so a long-running fortress accumulates real trading history. */
+  tradeReputation: Record<string, number> = {};
+  /** Tick at which the next caravan is scheduled to arrive. The
+   * pre-announcement system fires an outrider event ~3 days before
+   * this tick so the player can react via the production sliders.
+   * -1 means no caravan currently scheduled. */
+  caravanScheduledTick: number = -1;
+  /** Origin of the scheduled caravan. Empty when no caravan is
+   * scheduled. */
+  caravanScheduledOrigin: string = "";
+  /** True once the pre-announcement event has fired for the
+   * currently-scheduled caravan, so we don't announce twice. */
+  caravanPreAnnounced: boolean = false;
+
+  /** Scheduled-siege state. A goblin warband shows up roughly once
+   * per in-game year, announced via an outrider event 5 days before
+   * arrival so the player can pull the army together / man the
+   * armoury / stockpile drink for the soldiers. -1 means none
+   * scheduled. */
+  siegeScheduledTick: number = -1;
+  /** True once the pre-siege warning event has fired for the
+   * currently-scheduled siege. */
+  siegeAnnounced: boolean = false;
+  /** Cumulative sieges the colony has survived (all warband
+   * members killed) — surfaces in the chronicle and trade-flavour
+   * later on. */
+  siegesSurvived: number = 0;
+  /** True from the tick the warband spawns until they're all
+   * killed or the player wins. Used to suppress new sieges from
+   * being scheduled mid-siege, and to keep the chronicle line
+   * about the siege ending clean. */
+  siegeActive: boolean = false;
+  /** Snapshot of siegesSurvived at the moment a siege starts, so
+   * the end-of-siege event knows whether to bump the counter. */
+  siegeKilledSinceStart: number = 0;
+  /** Name of the warlord leading the active siege, if any. Empty
+   * when no siege is active or the colony's too small for a
+   * warlord to lead. */
+  siegeWarlordName: string = "";
+
+  /** Per-hostile display name. Most hostiles are anonymous (a cave
+   * rat is a cave rat), but named foes — the goblin warlord, future
+   * dragon lord, etc. — pin a name to their entity here so the
+   * chronicle can reference them by name when they kill someone or
+   * when they fall. */
+  hostileNames: Map<EntityId, string> = new Map();
 
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips
@@ -310,6 +367,21 @@ export class SimWorld {
    * highest leadership skill ≥ 5; their presence anywhere on the
    * map gives a small fortress-wide morale aura. */
   mayorName = "";
+
+  /** Mayor's current quarterly mandate — a production target the
+   * colony has the season to meet. Empty `resource` means there's
+   * no mandate active (no mayor elected, or between cycles). The
+   * baseline is the stockpile counter at the moment the mandate
+   * was issued so target reflects new production, not absolute
+   * stock. */
+  mandateResource = "";
+  mandateTarget = 0;
+  mandateBaseline = 0;
+  mandateEndTick = -1;
+  /** Cumulative satisfied / failed counts for the chronicle and
+   * future king-election heuristics. */
+  mandatesSatisfied = 0;
+  mandatesFailed = 0;
 
   /** Name of the colony's current King — emerges once the colony
    * reaches royal size (pop ≥ KING_POPULATION_THRESHOLD) and a

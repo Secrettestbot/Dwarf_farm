@@ -139,6 +139,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       cellTendedAt: b.cellTendedAt ? Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
       quality: b.quality,
+      decorationsCount: b.decorationsCount,
       furniturePlaced: b.furniturePlaced,
     };
   });
@@ -222,8 +223,32 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           dealCost: sim.caravanDealCost,
           dealImport: sim.caravanDealImport,
           dealGain: sim.caravanDealGain,
+          dealImport2: sim.caravanDealImport2 || undefined,
+          dealGain2: sim.caravanDealGain2 || undefined,
           dealComplete: sim.caravanDealComplete,
         }
+      : undefined,
+    tradeReputation: Object.keys(sim.tradeReputation).length > 0
+      ? { ...sim.tradeReputation }
+      : undefined,
+    caravanSchedule: sim.caravanScheduledTick > 0
+      ? {
+          tick: sim.caravanScheduledTick,
+          origin: sim.caravanScheduledOrigin,
+          preAnnounced: sim.caravanPreAnnounced,
+        }
+      : undefined,
+    siege: (sim.siegeScheduledTick > 0 || sim.siegeActive || sim.siegesSurvived > 0)
+      ? {
+          scheduledTick: sim.siegeScheduledTick,
+          announced: sim.siegeAnnounced,
+          active: sim.siegeActive,
+          survived: sim.siegesSurvived,
+          warlordName: sim.siegeWarlordName || undefined,
+        }
+      : undefined,
+    hostileNames: sim.hostileNames.size > 0
+      ? Array.from(sim.hostileNames.entries()).map(([id, name]) => ({ id, name }))
       : undefined,
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
@@ -231,6 +256,16 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
     mayorName: sim.mayorName || undefined,
     kingName: sim.kingName || undefined,
+    mandate: sim.mandateResource
+      ? {
+          resource: sim.mandateResource,
+          target: sim.mandateTarget,
+          baseline: sim.mandateBaseline,
+          endTick: sim.mandateEndTick,
+        }
+      : undefined,
+    mandatesSatisfied: sim.mandatesSatisfied || undefined,
+    mandatesFailed: sim.mandatesFailed || undefined,
     grudges: sim.grudges.size > 0
       ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick }))
       : undefined,
@@ -442,6 +477,7 @@ export function restore(save: SaveV1): SimWorld {
       cellTendedAt: b.cellTendedAt ? Int32Array.from(b.cellTendedAt) : undefined,
       lastMaintainedTick: b.lastMaintainedTick,
       quality: b.quality,
+      decorationsCount: b.decorationsCount,
       furniturePlaced: b.furniturePlaced ? { ...b.furniturePlaced } : undefined,
     };
   });
@@ -526,7 +562,25 @@ export function restore(save: SaveV1): SimWorld {
     if (save.caravan.dealCost !== undefined) sim.caravanDealCost = save.caravan.dealCost;
     if (save.caravan.dealImport !== undefined) sim.caravanDealImport = save.caravan.dealImport;
     if (save.caravan.dealGain !== undefined) sim.caravanDealGain = save.caravan.dealGain;
+    if (save.caravan.dealImport2 !== undefined) sim.caravanDealImport2 = save.caravan.dealImport2;
+    if (save.caravan.dealGain2 !== undefined) sim.caravanDealGain2 = save.caravan.dealGain2;
     if (save.caravan.dealComplete) sim.caravanDealComplete = true;
+  }
+  if (save.tradeReputation) sim.tradeReputation = { ...save.tradeReputation };
+  if (save.caravanSchedule) {
+    sim.caravanScheduledTick = save.caravanSchedule.tick;
+    sim.caravanScheduledOrigin = save.caravanSchedule.origin;
+    sim.caravanPreAnnounced = save.caravanSchedule.preAnnounced;
+  }
+  if (save.siege) {
+    sim.siegeScheduledTick = save.siege.scheduledTick;
+    sim.siegeAnnounced = save.siege.announced;
+    sim.siegeActive = save.siege.active;
+    sim.siegesSurvived = save.siege.survived;
+    sim.siegeWarlordName = save.siege.warlordName ?? "";
+  }
+  if (save.hostileNames) {
+    for (const e of save.hostileNames) sim.hostileNames.set(e.id, e.name);
   }
   if (save.graves) {
     for (const g of save.graves) sim.graves.push({ ...g });
@@ -540,6 +594,14 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.mayorName) sim.mayorName = save.mayorName;
   if (save.kingName) sim.kingName = save.kingName;
+  if (save.mandate) {
+    sim.mandateResource = save.mandate.resource;
+    sim.mandateTarget = save.mandate.target;
+    sim.mandateBaseline = save.mandate.baseline;
+    sim.mandateEndTick = save.mandate.endTick;
+  }
+  if (save.mandatesSatisfied !== undefined) sim.mandatesSatisfied = save.mandatesSatisfied;
+  if (save.mandatesFailed !== undefined) sim.mandatesFailed = save.mandatesFailed;
   if (save.grudges) {
     for (const g of save.grudges) {
       sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick });

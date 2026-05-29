@@ -10,7 +10,9 @@ const SEASON = TICKS_PER_DAY * 6;
 // Walk-to-depot + negotiate window. The deferred-trade refactor
 // means the deal closes only after the broker physically arrives,
 // so the test loops have to cover the walk plus NEGOTIATE_TICKS.
-const TRADE_WINDOW = TICKS_PER_DAY;
+// Pre-announcement adds ~3 days of lead time before the wagons
+// actually park, so the window also has to cover that delay.
+const TRADE_WINDOW = TICKS_PER_DAY * 5;
 
 /** Plant a synthetic completed trade depot near spawn so the trade
  * system fires on the next season boundary. Carves the cavity
@@ -94,6 +96,52 @@ describe("trade caravans", () => {
       tick(sim);
     }
     expect(sim.stockpile.stone).toBe(stoneBefore);
+  });
+
+  it("an outrider event fires a few days before the caravan arrives", () => {
+    const w = generateWorld({ seed: 191, width: 200, height: 500 });
+    const sim = new SimWorld(191, w.grid, w.surfaceY, w.spawn);
+    plantDepot(sim);
+    sim.spawnDwarf({ name: "Broker", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.stockpile.stone = 100;
+    sim.stockpile.food = 100;
+    let outriderTick = -1;
+    let arrivalTick = -1;
+    for (let i = 0; i < SEASON + TRADE_WINDOW; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      const last = sim.events.events[sim.events.events.length - 1];
+      if (last) {
+        if (outriderTick < 0 && last.text.includes("outrider")) outriderTick = sim.tick;
+        else if (arrivalTick < 0 && last.text.includes("arrives at the Trade Depot")) arrivalTick = sim.tick;
+      }
+    }
+    expect(outriderTick).toBeGreaterThan(0);
+    expect(arrivalTick).toBeGreaterThan(outriderTick);
+    expect(arrivalTick - outriderTick).toBeGreaterThanOrEqual(TICKS_PER_DAY * 2);
+  });
+
+  it("a successful deal raises the kingdom's trade reputation", () => {
+    const w = generateWorld({ seed: 193, width: 200, height: 500 });
+    const sim = new SimWorld(193, w.grid, w.surfaceY, w.spawn);
+    plantDepot(sim);
+    sim.spawnDwarf({ name: "Broker", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.stockpile.stone = 100;
+    sim.stockpile.food = 100;
+    expect(Object.keys(sim.tradeReputation).length).toBe(0);
+    for (let i = 0; i < SEASON + TRADE_WINDOW; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+    }
+    // After the deal closes the visiting kingdom's reputation
+    // entry should exist and be > 0.
+    const reps = Object.values(sim.tradeReputation);
+    expect(reps.length).toBeGreaterThan(0);
+    expect(Math.max(...reps)).toBeGreaterThan(0);
   });
 
   it("a caravan with no stone in the stockpile leaves empty-handed and logs an event", () => {

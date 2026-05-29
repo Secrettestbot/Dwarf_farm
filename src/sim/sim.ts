@@ -12,8 +12,8 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE } from "./planner/recipes";
-import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, isMaintainable } from "./planner/blueprint";
+import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE, KITCHEN_STEW_RECIPE, KITCHEN_FEAST_RECIPE } from "./planner/recipes";
+import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, ENGRAVE_QUALITY_PER_BLOCK, ENGRAVE_QUALITY_PER_GEM, isMaintainable, maxDecorationsFor } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
 
@@ -119,6 +119,7 @@ export function tick(sim: SimWorld): void {
   movementSystem(sim);
   workSystem(sim);
   hostileSpawnSystem(sim);
+  siegeSystem(sim);
   hostileMovementSystem(sim);
   combatSystem(sim);
   healingSystem(sim);
@@ -136,6 +137,7 @@ export function tick(sim: SimWorld): void {
   petSpawnSystem(sim);
   petSystem(sim);
   mayorSystem(sim);
+  mandateSystem(sim);
   kingSystem(sim);
   festivalSystem(sim);
   diseaseSystem(sim);
@@ -776,10 +778,92 @@ function mayorSystem(sim: SimWorld): void {
   );
 }
 
+/** Resources the mayor can mandate the colony produce. All are
+ * counter-backed (no item-entity routing) so progress is a simple
+ * stockpile delta from the baseline at mandate issue time to the
+ * counter at the deadline. */
+const MANDATE_RESOURCES: ReadonlyArray<string> = [
+  "cut_gems", "tools", "blocks", "bars", "planks",
+  "cloth", "leather", "pots",
+];
+
+/** Per-season mandate. Issued at season boundaries when a mayor's
+ * in office and there's no active mandate, evaluated when the
+ * deadline tick passes. Production-based: target = baseline + N,
+ * where N scales with population so a 30-dwarf colony has bigger
+ * mandates than a 12-dwarf one. */
+function mandateSystem(sim: SimWorld): void {
+  // Evaluate first — if a mandate is active and its deadline lands
+  // on this tick, score it and clear. Doing this before issuing a
+  // new one means a deadline-day tick can hand the colony its next
+  // target in the same hour.
+  if (sim.mandateResource && sim.mandateEndTick > 0 && sim.tick >= sim.mandateEndTick) {
+    const sp = sim.stockpile as unknown as Record<string, number>;
+    const produced = (sp[sim.mandateResource] ?? 0) - sim.mandateBaseline;
+    const need = sim.mandateTarget - sim.mandateBaseline;
+    const satisfied = produced >= need;
+    if (satisfied) {
+      sim.mandatesSatisfied++;
+      // Small fortress-wide morale bump for compliance.
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) n.morale = Math.min(100, n.morale + 4);
+      }
+      sim.events.add(
+        sim.tick,
+        "milestone",
+        `${sim.mayorName || "The mayor"}'s mandate is satisfied — ${produced} ${sim.mandateResource} produced this season. The colony's mood lifts.`,
+      );
+    } else {
+      sim.mandatesFailed++;
+      // Small morale hit for missed mandate. Indirect-control
+      // shape: ignoring mandates costs a little colony mood, but
+      // the player can absolutely choose to.
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) n.morale = Math.max(0, n.morale - 3);
+      }
+      sim.events.add(
+        sim.tick,
+        "social",
+        `${sim.mayorName || "The mayor"}'s mandate goes unmet — only ${Math.max(0, produced)} of ${need} ${sim.mandateResource} produced. The colony grumbles.`,
+      );
+    }
+    sim.mandateResource = "";
+    sim.mandateTarget = 0;
+    sim.mandateBaseline = 0;
+    sim.mandateEndTick = -1;
+  }
+
+  // Issue: at season boundary, when a mayor's in office and no
+  // mandate is currently active. Skips if pop is too small to
+  // justify a mandate or the mayor's been wiped out.
+  if (sim.tick === 0) return;
+  if (sim.tick % TICKS_PER_SEASON !== 0) return;
+  if (!sim.mayorName) return;
+  if (sim.mandateResource) return; // still mid-cycle
+  if (sim.dwarf.size() < 12) return;
+  const resource = MANDATE_RESOURCES[sim.aiRng.nextRange(0, MANDATE_RESOURCES.length)];
+  const sp = sim.stockpile as unknown as Record<string, number>;
+  const baseline = sp[resource] ?? 0;
+  // Production target: ~ pop / 4, floor 3. A 20-dwarf colony's
+  // mandate asks for 5 units; a 40-dwarf colony asks for 10.
+  const ask = Math.max(3, Math.floor(sim.dwarf.size() / 4));
+  sim.mandateResource = resource;
+  sim.mandateBaseline = baseline;
+  sim.mandateTarget = baseline + ask;
+  sim.mandateEndTick = sim.tick + TICKS_PER_SEASON;
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${sim.mayorName} issues a mandate: produce ${ask} more ${resource} before the season turns.`,
+  );
+}
 /** Population at which the colony stops being a Mayor's town and
  * starts wanting a King. Tuned so a small fortress doesn't crown
  * itself the moment a throne room finishes. */
 const KING_POPULATION_THRESHOLD = 50;
+
 /** Skill threshold a dwarf has to clear in BOTH leadership and
  * military to be eligible for kingship. The colony's leader has
  * to be both respected and dangerous. */
@@ -1660,37 +1744,35 @@ function depthPhraseFor(y: number, surfaceY: number): string {
 // ---- Trade caravans (GDD §8.3) ---------------------------------------
 //
 // Once per in-game season a caravan arrives at the colony's Trade Depot
-// (if one exists). The deal is computed from the colony's needs — short
-// on food, the caravan brings food; short on drink, it brings drink;
-// otherwise the caravan trades for tools to seed future production.
-// Stone is the currency (the colony has plenty after digging). Lockdown
-// blocks caravans entirely. The Trading skill of the dwarf with the
-// highest skill level acts as the broker — they get the XP and a small
-// bonus to the deal.
+// (if one exists). The deal is computed from the colony's needs and
+// the visiting kingdom's specialty: short on food, the caravan brings
+// food; short on drink, drink; some kingdoms specialise in cloth /
+// leather / tools, so when the Bronze Reach turns up they're more
+// likely to be hauling textile-finished goods. Stone is the floor
+// currency (early colonies have plenty), but a fortress with a mason
+// or smelter trades blocks / bars instead because the kingdom's
+// per-resource price multipliers reward it.
+//
+// Indirect control: the player never picks the trade. They influence
+// outcomes by what the colony has on hand when the wagons roll up,
+// shaped via the existing crafting / hauling / farming sliders. A
+// pre-announcement event a few days before arrival names the kingdom
+// and hints at cargo so the player has time to react.
 
 const TRADE_INTERVAL_TICKS = TICKS_PER_DAY * 6; // four caravans per in-game year
 const TRADE_BASE_GAIN = 50;
-
-/** Names the caravan-origin kingdoms cycle through. The chronicle
- * pulls from this pool deterministically per call so a player who
- * watches their event log over years sees recurring trade partners
- * rather than an interchangeable parade of "a caravan". */
-const CARAVAN_KINGDOMS: ReadonlyArray<string> = [
-  "the western kingdoms",
-  "the Iron Vaults of Karnesh",
-  "the Hold of Stoneholm",
-  "the Bronze Reach",
-  "Old Drumheim",
-  "the Free Mountain Confederacy",
-  "the Wandering Hammers guild",
-  "the Black Coal Cantons",
-];
+/** How early the outrider announces the next caravan, in ticks. ~3
+ * in-game days gives the player time to redirect the colony toward
+ * producing whatever surplus they'd like to trade with — bumping
+ * crafting / farming / hauling sliders before the wagons arrive. */
+const TRADE_PREANNOUNCE_LEAD = TICKS_PER_DAY * 3;
 
 /** Goods the colony can offer to a visiting caravan, ordered by
  * preference: surplus accumulators first, raw resources last.
  * Caravans accept whichever offered good the colony has the most of
  * (above a minimum), so a fortress with a Mason's Workshop trades
- * blocks instead of stone. */
+ * blocks instead of stone. Per-resource pricing is kingdom-specific
+ * — see kingdomByName in trade/kingdoms.ts. */
 type TradeOffer = { resource: keyof import("./world/simWorld").Stockpile; price: number; min: number };
 const TRADE_OFFERS: TradeOffer[] = [
   { resource: "cut_gems", price: 8, min: 3 },   // most valuable per unit
@@ -1706,32 +1788,77 @@ const TRADE_OFFERS: TradeOffer[] = [
   { resource: "stone", price: 1, min: 30 }, // legacy fallback
 ];
 
-/** Goods caravans bring in exchange. Picked by what the colony is
- * lowest on. */
-type TradeImport = "food" | "drink" | "tools" | "rope";
-
 /** How long a caravan lingers at the depot once it arrives. The
  * trade transaction resolves on arrival; the visual trader stays for
  * a day's worth of in-game wandering so the player can actually see
  * the caravan in the world. */
 const CARAVAN_STAY_TICKS = TICKS_PER_DAY;
 
+import { KINGDOMS, kingdomByName, REPUTATION_MIN, REPUTATION_MAX, REPUTATION_LOSS_PER_MISS, reputationPriceMultiplier, type KingdomProfile, type TradeImport } from "./trade/kingdoms";
+
+function pickImportNeeded(sim: SimWorld, kingdom: KingdomProfile, exclude?: TradeImport): TradeImport | null {
+  // Score each import by how badly the colony needs it. Higher score
+  // wins. Kingdom preferences break ties — when food and drink are
+  // equally low, a kingdom that prefers food wins out. excluded
+  // import (already picked as primary) returns null so we don't
+  // double-up on the same good.
+  type Cand = { kind: TradeImport; score: number; pref: number };
+  const candidates: Cand[] = [];
+  const has = sim.stockpile as unknown as Record<string, number>;
+  const lowFood = Math.max(0, 200 - (has["food"] ?? 0));
+  const lowDrink = Math.max(0, 200 - (has["drink"] ?? 0));
+  const tools = has["tools"] ?? 0;
+  const ropeNeed = sim.research.completed.includes("rope_and_fibre")
+    ? Math.max(0, 30 - (has["rope"] ?? 0))
+    : 0;
+  const clothNeed = sim.research.completed.includes("textile_craft")
+    ? Math.max(0, 15 - (has["cloth"] ?? 0))
+    : 0;
+  const leatherNeed = Math.max(0, 15 - (has["leather"] ?? 0));
+  const woodNeed = Math.max(0, 10 - (has["wood"] ?? 0));
+  candidates.push({ kind: "food", score: lowFood, pref: kingdom.preferredImports.indexOf("food") });
+  candidates.push({ kind: "drink", score: lowDrink, pref: kingdom.preferredImports.indexOf("drink") });
+  candidates.push({ kind: "tools", score: Math.max(8, 30 - tools), pref: kingdom.preferredImports.indexOf("tools") });
+  candidates.push({ kind: "rope", score: ropeNeed, pref: kingdom.preferredImports.indexOf("rope") });
+  candidates.push({ kind: "cloth", score: clothNeed, pref: kingdom.preferredImports.indexOf("cloth") });
+  candidates.push({ kind: "leather", score: leatherNeed, pref: kingdom.preferredImports.indexOf("leather") });
+  candidates.push({ kind: "wood", score: woodNeed, pref: kingdom.preferredImports.indexOf("wood") });
+  let best: Cand | null = null;
+  for (const c of candidates) {
+    if (c.score <= 0) continue;
+    if (exclude !== undefined && c.kind === exclude) continue;
+    if (!best) { best = c; continue; }
+    if (c.score > best.score) { best = c; continue; }
+    if (c.score === best.score) {
+      // Tie-break: lower pref index (kingdom prefers it more) wins.
+      // Negative pref (kingdom doesn't list it) loses to any non-negative.
+      const aPref = best.pref < 0 ? 999 : best.pref;
+      const bPref = c.pref < 0 ? 999 : c.pref;
+      if (bPref < aPref) best = c;
+    }
+  }
+  return best ? best.kind : null;
+}
+
 function tradeSystem(sim: SimWorld): void {
   // Despawn any caravan whose stay has elapsed and write a sendoff
   // line to the chronicle so the player can see the visit end as
-  // well as begin.
+  // well as begin. Reputation drops if the broker never arrived.
   if (sim.caravanLeavesTick > 0 && sim.tick >= sim.caravanLeavesTick) {
     if (sim.caravanOrigin) {
-      // Distinguish a clean send-off from a missed deal — the
-      // chronicle reads differently when the broker never reached
-      // the wagons.
+      const missed = !sim.caravanDealComplete && sim.caravanBrokerId !== -1;
       const departureLine = sim.caravanDealComplete || sim.caravanBrokerId === -1
         ? `The caravan from ${sim.caravanOrigin} packs its wagons and rolls back out the gate.`
         : `The caravan from ${sim.caravanOrigin} leaves empty-handed — no broker reached the depot in time.`;
       sim.events.add(sim.tick, "social", departureLine);
+      if (missed) {
+        sim.tradeReputation[sim.caravanOrigin] = clamp(
+          (sim.tradeReputation[sim.caravanOrigin] ?? 0) - REPUTATION_LOSS_PER_MISS,
+          REPUTATION_MIN,
+          REPUTATION_MAX,
+        );
+      }
     }
-    // Clear all caravan-related state so the next arrival starts
-    // from a clean slate.
     sim.caravanLeavesTick = -1;
     sim.caravanOrigin = "";
     sim.caravanBrokerId = -1;
@@ -1739,30 +1866,71 @@ function tradeSystem(sim: SimWorld): void {
     sim.caravanDealCost = 0;
     sim.caravanDealImport = "";
     sim.caravanDealGain = 0;
+    sim.caravanDealImport2 = "";
+    sim.caravanDealGain2 = 0;
     sim.caravanDealComplete = false;
   }
-  if (sim.tick === 0) return;
-  if (sim.tick % TRADE_INTERVAL_TICKS !== 0) return;
-  if (sim.emergency.mode === "lockdown") return;
-  // Seasonal arrival roll: winter cancels most caravans (snowed in),
-  // summer brings extras, spring/autumn baseline.
-  const season = seasonOf(sim.tick);
-  const arrivalChance =
-    season === "winter" ? 0.3 :
-    season === "summer" ? 1.0 :
-    0.85;
-  if (sim.aiRng.nextFloat() >= arrivalChance) {
-    if (season === "winter") {
+
+  // Pre-announcement: schedule the next caravan a few days out so the
+  // player gets an outrider event and can prep production. Scheduled
+  // once per TRADE_INTERVAL window, fires the actual arrival when
+  // the schedule lands.
+  if (sim.tick > 0 && sim.tick % TRADE_INTERVAL_TICKS === 0 && sim.caravanScheduledTick === -1) {
+    if (sim.emergency.mode !== "lockdown") {
+      const season = seasonOf(sim.tick + TRADE_PREANNOUNCE_LEAD);
+      const arrivalChance =
+        season === "winter" ? 0.3 :
+        season === "summer" ? 1.0 :
+        0.85;
+      if (sim.aiRng.nextFloat() < arrivalChance) {
+        const kingdom = KINGDOMS[sim.aiRng.nextRange(0, KINGDOMS.length)];
+        sim.caravanScheduledTick = sim.tick + TRADE_PREANNOUNCE_LEAD;
+        sim.caravanScheduledOrigin = kingdom.name;
+        sim.caravanPreAnnounced = false;
+      } else if (season === "winter") {
+        sim.events.add(
+          sim.tick,
+          "social",
+          `Heavy snow on the slopes — no caravan reaches the gate this season.`,
+        );
+      }
+    }
+  }
+
+  // Outrider — fires immediately on the same tick the caravan was
+  // scheduled (i.e., TRADE_PREANNOUNCE_LEAD ticks before arrival).
+  // This is the player's "you have ~3 in-game days to prep" cue.
+  if (
+    sim.caravanScheduledTick > 0 &&
+    !sim.caravanPreAnnounced &&
+    sim.caravanScheduledOrigin
+  ) {
+    const kingdom = kingdomByName(sim.caravanScheduledOrigin);
+    if (kingdom) {
       sim.events.add(
         sim.tick,
-        "social",
-        `Heavy snow on the slopes — no caravan reaches the gate this season.`,
+        "discovery",
+        `An outrider rides ahead of a caravan from ${kingdom.name} — ${kingdom.hint} The wagons reach the gate in a few days.`,
       );
+      sim.caravanPreAnnounced = true;
     }
-    return;
   }
-  // Need an active Trade Depot. Find its centre while we're at it so
-  // the visible trader can park there.
+
+  // Caravan arrival — when the scheduled tick lands, actually park the
+  // wagons at the depot and pick the deal.
+  if (sim.caravanScheduledTick > 0 && sim.tick >= sim.caravanScheduledTick) {
+    arriveCaravan(sim, sim.caravanScheduledOrigin);
+    sim.caravanScheduledTick = -1;
+    sim.caravanScheduledOrigin = "";
+    sim.caravanPreAnnounced = false;
+  }
+}
+
+function arriveCaravan(sim: SimWorld, originName: string): void {
+  if (sim.emergency.mode === "lockdown") return;
+  const kingdom = kingdomByName(originName);
+  if (!kingdom) return;
+  // Need an active Trade Depot.
   let depot: { cx: number; cy: number } | null = null;
   for (const b of sim.planner.blueprints) {
     if (b.kind === "trade_depot" && b.status === "complete") {
@@ -1773,23 +1941,32 @@ function tradeSystem(sim: SimWorld): void {
       break;
     }
   }
-  if (!depot) return;
-  // Pick a kingdom of origin deterministically — the aiRng's next
-  // draw rotates the pool so a watcher sees variety.
-  const kingdom = CARAVAN_KINGDOMS[sim.aiRng.nextRange(0, CARAVAN_KINGDOMS.length)];
-  // Park the caravan at the depot's centre. The renderer reads this
-  // and draws a trader pip there until caravanLeavesTick elapses.
+  if (!depot) {
+    sim.events.add(
+      sim.tick,
+      "social",
+      `A caravan from ${kingdom.name} arrives at the gate, but no Trade Depot is open — the wagons turn back.`,
+    );
+    return;
+  }
   sim.caravanX = depot.cx;
   sim.caravanY = depot.cy;
   sim.caravanLeavesTick = sim.tick + CARAVAN_STAY_TICKS;
-  sim.caravanOrigin = kingdom;
-  // Pick the offered good: the highest-stocked one above its
-  // minimum threshold. Falls back to stone when nothing else
-  // qualifies — that's the early-game caravan.
+  sim.caravanOrigin = kingdom.name;
+
+  // Pick the offered good. Apply the kingdom's buys-multiplier and
+  // reputation bonus so the same good fetches different prices from
+  // different kingdoms, and from the same kingdom at different
+  // reputation levels.
+  const rep = sim.tradeReputation[kingdom.name] ?? 0;
+  const repBonus = reputationPriceMultiplier(rep);
   let offer: TradeOffer | null = null;
+  let offerKingdomPrice = 0;
   for (const o of TRADE_OFFERS) {
     if ((sim.stockpile[o.resource] ?? 0) >= o.min) {
+      const kingdomMult = kingdom.buys[o.resource] ?? 1.0;
       offer = o;
+      offerKingdomPrice = o.price * kingdomMult * repBonus;
       break;
     }
   }
@@ -1797,10 +1974,13 @@ function tradeSystem(sim: SimWorld): void {
     sim.events.add(
       sim.tick,
       "social",
-      `A caravan from ${kingdom} arrives, but the colony has nothing worth trading. They depart empty-handed.`,
+      `A caravan from ${kingdom.name} arrives, but the colony has nothing worth trading. They depart empty-handed.`,
     );
+    // Don't dock reputation here — the colony has no surplus, the
+    // caravan still made the trip. Just no deal.
     return;
   }
+
   // Pick the broker — best Trading skill, tie-break by entity id.
   let bestBroker = -1;
   let bestSkill = -1;
@@ -1813,48 +1993,52 @@ function tradeSystem(sim: SimWorld): void {
       bestSkill = skill;
     }
   }
-  // Pick what to import: the colony's lowest-stocked staple. Rope is
-  // a rare delivery — only when food/drink are amply stocked AND the
-  // colony has researched textile work (otherwise rope is useless to
-  // them).
-  const foodLow = sim.stockpile.food < 200;
-  const drinkLow = sim.stockpile.drink < 200;
-  let importKind: TradeImport;
-  if (foodLow && (!drinkLow || sim.stockpile.food <= sim.stockpile.drink)) importKind = "food";
-  else if (drinkLow) importKind = "drink";
-  else if (sim.research.completed.includes("rope_and_fibre") && sim.stockpile.rope < 20) importKind = "rope";
-  else importKind = "tools";
-  // Broker bonus: each level above 1 adds 4% to the gain.
   const brokerDw = bestBroker !== -1 ? sim.dwarf.get(bestBroker) : undefined;
   const tradeBonus = brokerDw ? effectsFor(brokerDw.traitIds).tradeBonus : 0;
   const brokerBonus = (1 + Math.max(0, bestSkill - 1) * 0.04) * (1 + tradeBonus);
-  // The deal. Spend `min` units of the offered good at price-per-unit
-  // for `min * price * brokerBonus` worth of imports — scaled to
-  // TRADE_BASE_GAIN's tuning so an early stone caravan still feels
-  // like a meaningful exchange.
+
+  // The basket. Spend `min` units of the offered good and split the
+  // resulting gain across one or two imports — primary is whatever
+  // the colony's lowest staple is (weighted by kingdom preference).
   const cost = offer.min;
-  const grossValue = cost * offer.price;
-  const gain = Math.round(grossValue * brokerBonus * (TRADE_BASE_GAIN / 30));
-  // Stash the deal — chooseTask will route the broker to the depot,
-  // and progressTrade will apply the counter changes once they
-  // arrive. The caravan now actually waits for the broker.
+  const grossValue = cost * offerKingdomPrice;
+  const totalGain = Math.round(grossValue * brokerBonus * (TRADE_BASE_GAIN / 30));
+  const primary = pickImportNeeded(sim, kingdom);
+  if (primary === null) {
+    sim.events.add(
+      sim.tick,
+      "social",
+      `A caravan from ${kingdom.name} arrives, but the colony needs nothing they're carrying. They depart with their goods.`,
+    );
+    return;
+  }
+  const secondary = pickImportNeeded(sim, kingdom, primary);
+  // 70/30 split when there's a secondary, else 100% primary.
+  const primaryGain = secondary === null ? totalGain : Math.round(totalGain * 0.7);
+  const secondaryGain = secondary === null ? 0 : Math.max(1, totalGain - primaryGain);
+
   sim.caravanBrokerId = bestBroker;
   sim.caravanDealResource = offer.resource;
   sim.caravanDealCost = cost;
-  sim.caravanDealImport = importKind;
-  sim.caravanDealGain = gain;
+  sim.caravanDealImport = primary;
+  sim.caravanDealGain = primaryGain;
+  sim.caravanDealImport2 = secondary ?? "";
+  sim.caravanDealGain2 = secondaryGain;
   sim.caravanDealComplete = false;
   const brokerName = bestBroker !== -1 ? sim.dwarf.get(bestBroker)?.name ?? "the broker" : "the broker";
-  // Caravan arrivals fire as "discovery" so the notification toast
-  // surfaces them — visiting traders are infrequent and easy to
-  // miss in the chronicle scroll. Position is the depot tile so
-  // the toast's Jump-to button pans the camera to the wagons.
+  const basketStr = secondary
+    ? `${primaryGain} ${primary} + ${secondaryGain} ${secondary}`
+    : `${primaryGain} ${primary}`;
   sim.events.add(
     sim.tick,
     "discovery",
-    `A caravan from ${kingdom} arrives at the Trade Depot. ${brokerName} sets out to negotiate ${gain} ${importKind} for ${cost} ${offer.resource}.`,
+    `A caravan from ${kingdom.name} arrives at the Trade Depot. ${brokerName} sets out to negotiate ${basketStr} for ${cost} ${offer.resource}.`,
     { x: depot.cx, y: depot.cy },
   );
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 
 // ---- Research auto-pick -----------------------------------------------
@@ -3603,6 +3787,9 @@ function workSystem(sim: SimWorld): void {
       case "trade":
         progressTrade(sim, e, job, pos);
         break;
+      case "engrave":
+        progressEngrave(sim, e, job, pos);
+        break;
     }
   }
 }
@@ -3724,17 +3911,33 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   job.progress++;
   if (job.progress < NEGOTIATE_TICKS) return;
   // Negotiation finished — apply the deal we cached at arrival.
+  // Multi-good baskets credit both the primary and secondary import.
   const stockpile = sim.stockpile as unknown as Record<string, number>;
   stockpile[sim.caravanDealResource] = (stockpile[sim.caravanDealResource] ?? 0) - sim.caravanDealCost;
   stockpile[sim.caravanDealImport] = (stockpile[sim.caravanDealImport] ?? 0) + sim.caravanDealGain;
+  if (sim.caravanDealImport2 && sim.caravanDealGain2 > 0) {
+    stockpile[sim.caravanDealImport2] = (stockpile[sim.caravanDealImport2] ?? 0) + sim.caravanDealGain2;
+  }
   sim.caravanDealComplete = true;
+  // Successful deal raises the kingdom's reputation, capped so a
+  // long-running fortress doesn't end up with infinitely good prices.
+  if (sim.caravanOrigin) {
+    const REP_MIN = -10, REP_MAX = 20, REP_GAIN = 2;
+    sim.tradeReputation[sim.caravanOrigin] = Math.min(
+      REP_MAX,
+      Math.max(REP_MIN, (sim.tradeReputation[sim.caravanOrigin] ?? 0) + REP_GAIN),
+    );
+  }
   awardSkillXp(sim, e, "trading", 1);
   const dw = sim.dwarf.get(e);
   const brokerName = dw?.name ?? "the broker";
+  const basketStr = sim.caravanDealImport2 && sim.caravanDealGain2 > 0
+    ? `${sim.caravanDealGain} ${sim.caravanDealImport} + ${sim.caravanDealGain2} ${sim.caravanDealImport2}`
+    : `${sim.caravanDealGain} ${sim.caravanDealImport}`;
   sim.events.add(
     sim.tick,
     "social",
-    `${brokerName} closes the deal at the Trade Depot — ${sim.caravanDealGain} ${sim.caravanDealImport} for ${sim.caravanDealCost} ${sim.caravanDealResource}.`,
+    `${brokerName} closes the deal at the Trade Depot — ${basketStr} for ${sim.caravanDealCost} ${sim.caravanDealResource}.`,
     { x: sim.caravanX, y: sim.caravanY },
   );
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
@@ -4048,6 +4251,27 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = MASON_KILN_FIREBOX_RECIPE;
     }
   }
+  // Kitchen recipe swap: prefer the noble feast (food + cut_gem)
+  // when the jeweller's surplus is real (≥ 3 cut_gems on hand);
+  // otherwise prefer the stew (food + drink) when both stockpiles
+  // are healthy enough that the recipe's drink cost isn't a
+  // problem; fall back to the basic 1 food → 2 meals recipe. The
+  // food / drink thresholds are intentionally generous — the
+  // colony doesn't pull from drink for stew unless drink is
+  // genuinely plentiful, so a thirsty fortress isn't penalised.
+  if (blueprintKind === "kitchen" && recipe) {
+    if (
+      sim.stockpile.food >= KITCHEN_FEAST_RECIPE.inputQty &&
+      sim.stockpile.cut_gems >= (KITCHEN_FEAST_RECIPE.inputQty2 ?? 0) + 2
+    ) {
+      recipe = KITCHEN_FEAST_RECIPE;
+    } else if (
+      sim.stockpile.food >= KITCHEN_STEW_RECIPE.inputQty &&
+      sim.stockpile.drink >= (KITCHEN_STEW_RECIPE.inputQty2 ?? 0) + 30
+    ) {
+      recipe = KITCHEN_STEW_RECIPE;
+    }
+  }
   if (!recipe) {
     sim.job.remove(e);
     sim.pathing.remove(e);
@@ -4082,6 +4306,23 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
         return;
       }
       (sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] -= recipe.inputQty;
+    }
+    // Multi-ingredient recipes (kitchen stew / feast) consume a
+    // second resource alongside the primary. Both come from the
+    // stockpile counter — recipe.inputKind2 isn't an entity kind,
+    // it's a counter resource like "drink" or "cut_gems". We
+    // already checked availability in the kitchen-swap gate, but
+    // a race could have drained it; bail with no progress (and
+    // no refund — the primary ingredient is already gone) rather
+    // than crashing.
+    if (recipe.inputKind2 && recipe.inputQty2) {
+      const sp = sim.stockpile as unknown as Record<string, number>;
+      if ((sp[recipe.inputKind2] ?? 0) < recipe.inputQty2) {
+        sim.job.remove(e);
+        sim.pathing.remove(e);
+        return;
+      }
+      sp[recipe.inputKind2] -= recipe.inputQty2;
     }
   }
   const dw = sim.dwarf.get(e);
@@ -5157,6 +5398,79 @@ function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: {
   }
 }
 
+/** Carve an engraving into the walls / floor of a finished room.
+ * Burns 1 cut_gem (preferred — bigger quality bump) or 1 block,
+ * raises the room's quality and decorationsCount, and drops a
+ * named chronicle entry. Skips if the room's already at its
+ * decoration cap (e.g., another engraver finished first while
+ * this one walked over). */
+const ENGRAVE_TICKS = 80;
+function progressEngrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  job.progress++;
+  if (job.progress < ENGRAVE_TICKS) return;
+  // Find the room this tile belongs to.
+  let room: import("./planner/blueprint").Blueprint | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete") continue;
+    if (pos.x < b.originX || pos.x >= b.originX + b.width) continue;
+    if (pos.y < b.originY || pos.y >= b.originY + b.height) continue;
+    let inside = false;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      if ((c & 0xffff) === pos.x && ((c >>> 16) & 0xffff) === pos.y) {
+        inside = true;
+        break;
+      }
+    }
+    if (inside) { room = b; break; }
+  }
+  if (!room) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  const placed = room.decorationsCount ?? 0;
+  const cap = maxDecorationsFor(room);
+  if (placed >= cap) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  // Prefer cut_gems (more dramatic quality jump). Fall back to a
+  // stone block. If neither's available — race lost — bail.
+  let material: "cut_gems" | "blocks" | null = null;
+  let bump = 0;
+  if (sim.stockpile.cut_gems > 0) { material = "cut_gems"; bump = ENGRAVE_QUALITY_PER_GEM; }
+  else if (sim.stockpile.blocks > 0) { material = "blocks"; bump = ENGRAVE_QUALITY_PER_BLOCK; }
+  if (!material) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  (sim.stockpile as unknown as Record<string, number>)[material] -= 1;
+  room.decorationsCount = placed + 1;
+  room.quality = Math.min(QUALITY_MAX, (room.quality ?? QUALITY_BASE) + bump);
+  // Engraving is jeweller's work when cut gems land, mason's when
+  // stone blocks. Either way it's slow, attentive craft — give the
+  // dwarf the matching skill XP.
+  const skill = material === "cut_gems" ? "jewelling" : "masonry";
+  awardSkillXp(sim, e, skill, 1);
+  const dw = sim.dwarf.get(e);
+  const artist = dw?.name ?? "A dwarf";
+  const subject = material === "cut_gems"
+    ? `inlays a glittering cut-gem mosaic`
+    : `carves an engraving`;
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${artist} ${subject} in the ${room.kind.replace("_", " ")}. The room's beauty deepens.`,
+    { x: pos.x, y: pos.y },
+  );
+  sim.dwarf.get(e)!.lastJobTick = sim.tick;
+  sim.job.remove(e);
+  sim.pathing.remove(e);
+}
+
 function progressDrink(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   const needs = sim.needs.get(e);
   if (!needs) {
@@ -5303,6 +5617,167 @@ const HOSTILE_MIN_DISTANCE_FROM_DWARF = 8;
 const DWARF_BASE_DAMAGE = 6;
 const DWARF_ATTACK_COOLDOWN = 60;
 
+// ---- Sieges ----------------------------------------------------------
+//
+// Once per in-game year a goblin warband marches on the colony's
+// entrance. Unlike the steady drip of HOSTILE_SPAWN_INTERVAL_TICKS
+// creatures, sieges are a coordinated 8-20 enemy event: they arrive
+// at the surface near the entrance shaft, the player gets a 5-day
+// warning to muster the draft / forge / armoury chain, and the
+// chronicle treats them as a named event (Siege of Year 5).
+//
+// Indirect control: the player doesn't pick when sieges happen, but
+// the pre-announcement gives them time to bump Military / Crafting
+// sliders to ready weapons and pull soldiers from civilian work.
+
+const SIEGE_INTERVAL_TICKS = TICKS_PER_YEAR; // once per in-game year
+const SIEGE_PREANNOUNCE_LEAD = TICKS_PER_DAY * 5;
+const SIEGE_MIN_POPULATION = 10; // sieges start when the colony is worth raiding
+
+function siegeSystem(sim: SimWorld): void {
+  // Mid-siege check: if the warband is wiped, fire a victory event.
+  if (sim.siegeActive) {
+    let liveAttackers = 0;
+    for (const id of sim.hostile.entities) {
+      const h = sim.hostile.get(id);
+      if (h && (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord")) liveAttackers++;
+    }
+    if (liveAttackers === 0) {
+      sim.siegeActive = false;
+      sim.siegesSurvived++;
+      sim.events.add(
+        sim.tick,
+        "milestone",
+        `The siege is broken. The fortress holds — count it the ${ordinal(sim.siegesSurvived)} the colony has survived.`,
+      );
+    }
+  }
+
+  // Schedule the next siege at year boundaries (after the first
+  // year, so a brand-new colony isn't sieged on day one).
+  if (
+    sim.tick > 0 &&
+    sim.tick % SIEGE_INTERVAL_TICKS === 0 &&
+    sim.siegeScheduledTick === -1 &&
+    !sim.siegeActive
+  ) {
+    if (sim.dwarf.size() >= SIEGE_MIN_POPULATION) {
+      sim.siegeScheduledTick = sim.tick + SIEGE_PREANNOUNCE_LEAD;
+      sim.siegeAnnounced = false;
+    }
+  }
+
+  // Outrider: fire the warning event a full lead-window before the
+  // warband arrives so the player has time to react.
+  if (sim.siegeScheduledTick > 0 && !sim.siegeAnnounced) {
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      `Scouts spot a goblin warband approaching from the slopes. The colony has five days to prepare — call up the militia and stock the depot with weapons.`,
+    );
+    sim.siegeAnnounced = true;
+  }
+
+  // Arrival: spawn the warband at the surface near the entrance.
+  if (sim.siegeScheduledTick > 0 && sim.tick >= sim.siegeScheduledTick) {
+    spawnSiegeWarband(sim);
+    sim.siegeScheduledTick = -1;
+    sim.siegeAnnounced = false;
+  }
+}
+
+/** First-name + epithet pool the warlord rolls a name from. Picked
+ * deterministically off aiRng so the same seed produces the same
+ * "Siege of Year 5 was led by Drogmar Black-Tongue" entry every
+ * replay. Names skew Norse / orcish but stay short — chronicle
+ * lines need to read at a glance. */
+const WARLORD_FIRST_NAMES: ReadonlyArray<string> = [
+  "Drogmar", "Skarn", "Ulgrim", "Vurok", "Ghazak", "Murz", "Krogh",
+  "Brakka", "Hashtar", "Yargol", "Nazgrim", "Snaga", "Thrak",
+];
+const WARLORD_EPITHETS: ReadonlyArray<string> = [
+  "Black-Tongue", "the Cleaver", "Iron-Jaw", "Six-Fingers",
+  "the Cunning", "Bone-Drinker", "Red-Banner", "the Patient",
+  "Sharp-Eye", "Two-Axes", "the Pale", "Stone-Breaker",
+];
+
+function rollWarlordName(sim: SimWorld): string {
+  const first = WARLORD_FIRST_NAMES[sim.aiRng.nextRange(0, WARLORD_FIRST_NAMES.length)];
+  const epithet = WARLORD_EPITHETS[sim.aiRng.nextRange(0, WARLORD_EPITHETS.length)];
+  return `${first} ${epithet}`;
+}
+
+function spawnSiegeWarband(sim: SimWorld): void {
+  // Scale the warband with population. ~4 base + 1 extra per 4
+  // dwarves caps a 60-dwarf colony at ~19 goblins. Add a single
+  // troll once the colony's substantial. Once the colony's at the
+  // siege-min threshold (pop ≥ 15) a named warlord leads the
+  // warband — gives the chronicle a real foe to remember.
+  const pop = sim.dwarf.size();
+  const goblinCount = Math.min(20, 4 + Math.floor(pop / 4));
+  const trollCount = pop >= 25 ? 1 : 0;
+  const warlordCount = pop >= 15 ? 1 : 0;
+  const warlordName = warlordCount > 0 ? rollWarlordName(sim) : "";
+
+  // Spawn site: surface row near spawn.x. We sample a small
+  // horizontal range so the warband fans out rather than stacking
+  // on one tile.
+  const grid = sim.grid;
+  const baseX = sim.spawn.x;
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let dx = -8; dx <= 8; dx++) {
+    const x = baseX + dx;
+    if (x < 0 || x >= grid.width) continue;
+    const y = sim.surfaceY[x];
+    const tile = grid.getTile(x, y);
+    if (tile === TileType.Grass || tile === TileType.CorridorFloor) {
+      candidates.push({ x, y });
+    }
+  }
+  if (candidates.length === 0) {
+    // No surface foothold — fall back to the spawn tile itself.
+    candidates.push({ x: baseX, y: sim.spawn.y });
+  }
+
+  for (let i = 0; i < goblinCount; i++) {
+    const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y });
+  }
+  for (let i = 0; i < trollCount; i++) {
+    const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y });
+  }
+  for (let i = 0; i < warlordCount; i++) {
+    const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    const wid = sim.spawnHostile({ kind: "goblin_warlord", x: c.x, y: c.y });
+    if (wid !== -1) sim.hostileNames.set(wid, warlordName);
+  }
+
+  sim.siegeActive = true;
+  sim.siegeKilledSinceStart = 0;
+  sim.siegeWarlordName = warlordName;
+  const leaderClause = warlordCount > 0
+    ? `, led by ${warlordName}`
+    : (trollCount > 0 ? ` with a cave troll at their head` : "");
+  sim.events.add(
+    sim.tick,
+    "crisis",
+    `The siege begins. ${goblinCount} goblins${leaderClause} pour onto the surface near the gate. The fortress is on its own now.`,
+    { x: candidates[0].x, y: candidates[0].y },
+  );
+}
+
+function ordinal(n: number): string {
+  const last2 = n % 100;
+  if (last2 >= 11 && last2 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
 /**
  * Periodically a creature finds its way into the colony. We pick a
  * reachable walkable tile that is (a) deep enough for the kind to spawn,
@@ -5431,15 +5906,41 @@ function hostileMovementSystem(sim: SimWorld): void {
     // Hostiles in a sealed-off corner of the map don't burn cycles
     // until a dwarf wanders close.
     if (!isInActiveZone(sim, pos.x, pos.y)) continue;
-    // Find nearest dwarf within pursue range.
-    let bestDist = def.pursueRange * def.pursueRange + 1;
+    // Goblins (scouts + warlord) target intelligently — the mayor
+    // first, then unarmed civilians and wounded dwarves, then
+    // soldiers last. Other hostiles (rats, spiders, trolls)
+    // still go for the nearest body. The softness bonus is
+    // converted to a "phantom distance reduction" so a soft
+    // target up to ~5 tiles farther can beat a closer hard target.
+    const isGoblin = h.kind === "goblin_scout" || h.kind === "goblin_warlord";
+    let bestScore = (def.pursueRange + 1) * (def.pursueRange + 1);
     let bestPos: { x: number; y: number } | null = null;
-    sim.forEachDwarf((_id, p) => {
+    sim.forEachDwarf((id, p) => {
       const dx = p.x - pos.x;
       const dy = p.y - pos.y;
       const d2 = dx * dx + dy * dy;
-      if (d2 < bestDist) {
-        bestDist = d2;
+      if (d2 > def.pursueRange * def.pursueRange) return;
+      let score = d2;
+      if (isGoblin) {
+        const dw = sim.dwarf.get(id);
+        const hp = sim.health.get(id);
+        // Mayor's a banner kill — most-preferred target.
+        if (dw && dw.name === sim.mayorName) score -= 50;
+        // Civilians (not in the militia squad) score better than
+        // armoured soldiers — soft underbellies first.
+        if (!sim.squad.has(id)) score -= 25;
+        // Children — under MIN_WORK_AGE 18 — are easy kills.
+        if (sim.ageOf(id) < 18) score -= 35;
+        // Already-wounded dwarves finish faster than fresh ones.
+        if (hp && hp.hp < hp.maxHp * 0.5) score -= 15;
+        // No floor — softness can drive a target's score below
+        // zero. The pursueRange gate above keeps the goblin from
+        // chasing a maximally-soft target across the map, and
+        // letting the score go negative is what lets two equal-
+        // distance targets be ordered by their softness sum.
+      }
+      if (score < bestScore) {
+        bestScore = score;
         bestPos = { x: p.x, y: p.y };
       }
     });
@@ -5550,11 +6051,23 @@ function combatSystem(sim: SimWorld): void {
       awardSkillXp(sim, target, "military", 1);
       if (hHealth.hp <= 0) {
         const dwarfName = dwarf?.name ?? "A dwarf";
-        sim.events.add(
-          sim.tick,
-          "crisis",
-          narrateHostileSlain(sim.aiRng, dwarfName, def.name),
-        );
+        // Named foes get a bespoke chronicle line so the warlord's
+        // fall is memorable instead of "a goblin warlord falls."
+        const foeName = sim.hostileNames.get(h);
+        if (foeName) {
+          sim.events.add(
+            sim.tick,
+            "milestone",
+            `${dwarfName} fells ${foeName}, the goblin warlord. The siege loses its banner.`,
+          );
+          sim.hostileNames.delete(h);
+        } else {
+          sim.events.add(
+            sim.tick,
+            "crisis",
+            narrateHostileSlain(sim.aiRng, dwarfName, def.name),
+          );
+        }
         // Track void-shade kills toward The Siege Endured milestone —
         // surviving the King's emissaries. Defeating the King himself
         // is a separate beat, gated on the actual hollow_king hostile
