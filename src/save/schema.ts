@@ -54,6 +54,8 @@ export interface SavedDwarf {
     progress: number;
     /** Partner referenced by index into the saved dwarves array. */
     partnerIndex?: number;
+    /** Pinned recipe key for mid-craft jobs — see JobAssignment. */
+    recipeKey?: string;
   };
   /** In-flight pathing if mid-walk at save time. */
   pathing?: {

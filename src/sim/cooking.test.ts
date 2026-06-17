@@ -108,6 +108,49 @@ describe("kitchen cooking depth", () => {
     expect(countMealItems(sim)).toBeGreaterThanOrEqual(5);
   });
 
+  it("a started craft finishes on the recipe it began with, even if the stockpile crosses a swap threshold mid-craft", () => {
+    // Regression: progressCraft used to re-evaluate the kitchen
+    // swap on every tick, so a stew that started with drink ≥ 31
+    // could ship basic-meal outputs (2 meals) after the brewery
+    // drained drink below the gate — paying the stew tax for a
+    // basic deal.
+    const w = generateWorld({ seed: 907, width: 200, height: 500 });
+    const sim = new SimWorld(907, w.grid, w.surfaceY, w.spawn);
+    plantKitchen(sim);
+    sim.stockpile.food = 50;
+    sim.stockpile.drink = 100; // above the 31-unit stew gate
+    sim.stockpile.cut_gems = 0;
+    sim.sliders.excavation = 0;
+    sim.sliders.hauling = 0;
+    sim.emergency.mode = "lockdown";
+    sim.emergency.startedAtTick = 0;
+    sim.spawnDwarf({ name: "Cook", x: sim.spawn.x, y: sim.spawn.y, age: 30, skills: { cooking: 5 } });
+    const id = sim.dwarf.entities[0];
+    const initialMeals = countMealItems(sim);
+    // Run until the craft picks up its recipe (job.recipeKey set).
+    let started = false;
+    for (let i = 0; i < 200 && !started; i++) {
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      const job = sim.job.get(id);
+      if (job?.kind === "craft" && job.recipeKey === "kitchen.stew") started = true;
+    }
+    expect(started).toBe(true);
+    // Now drain drink below the gate. The next tick's swap chain
+    // would otherwise reclassify the kitchen as basic.
+    sim.stockpile.drink = 5;
+    // Run to completion of the started stew.
+    for (let i = 0; i < 200; i++) {
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (countMealItems(sim) >= initialMeals + 5) break;
+    }
+    // Stew output is 5 meals — basic would be only 2.
+    expect(countMealItems(sim) - initialMeals).toBeGreaterThanOrEqual(5);
+  });
+
   it("kitchen runs the noble feast (food + cut gem → 6 meals) when cut_gems are surplus", () => {
     const w = generateWorld({ seed: 905, width: 200, height: 500 });
     const sim = new SimWorld(905, w.grid, w.surfaceY, w.spawn);

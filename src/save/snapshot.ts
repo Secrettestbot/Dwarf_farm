@@ -48,6 +48,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           targetY: j.targetY,
           progress: j.progress,
           partnerIndex: j.partnerId !== undefined ? entityToIndex.get(j.partnerId) : undefined,
+          recipeKey: j.recipeKey,
         }
       : undefined;
     const savedPathing = p
@@ -412,6 +413,7 @@ export function restore(save: SaveV1): SimWorld {
         targetY: d.job.targetY,
         progress: d.job.progress,
         partnerId,
+        recipeKey: d.job.recipeKey,
       });
       if (d.job.kind === "mine") {
         sim.claimMineTarget(d.job.targetX, d.job.targetY);

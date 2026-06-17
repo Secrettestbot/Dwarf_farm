@@ -327,4 +327,12 @@ export interface JobAssignment {
   progress: number;
   /** For socialise + treat jobs, the partner / patient dwarf entity id. */
   partnerId?: number;
+  /** Pinned recipe key for in-progress craft jobs. Set at progress=0
+   * after the swap evaluation picks a recipe so subsequent ticks
+   * use the same recipe for completion / output / duration — without
+   * this, a stockpile threshold crossing mid-craft could swap the
+   * recipe and pay one recipe's inputs while shipping another's
+   * outputs. Round-trips through save (src/save/schema.ts) so a
+   * reload mid-craft also finishes the recipe it started. */
+  recipeKey?: string;
 }

@@ -509,3 +509,60 @@ export const CARPENTER_WATER_WHEEL_AXLE_RECIPE: Recipe = {
   skill: "carpentry",
   station: TileType.CarpenterStation,
 };
+
+// ---- Recipe key registry --------------------------------------------
+//
+// Stable string keys for every recipe — both the per-workshop base
+// recipes (RECIPES table) and the swap recipes (the named exports).
+// Used by progressCraft to pin a recipe on a job at progress=0 so
+// later swap-evaluation can't change which recipe finishes — paying
+// stew inputs and shipping basic-meal outputs was a real bug. The
+// keys also round-trip through save so a mid-craft reload finishes
+// the recipe it started.
+
+export const RECIPES_BY_KEY: Record<string, Recipe> = {
+  "carpenter.bed": CARPENTER_BED_RECIPE,
+  "carpenter.barrel": CARPENTER_BARREL_RECIPE,
+  "carpenter.wheelbarrow": CARPENTER_WHEELBARROW_RECIPE,
+  "carpenter.bin": CARPENTER_BIN_RECIPE,
+  "carpenter.library_desk": CARPENTER_LIBRARY_DESK_RECIPE,
+  "carpenter.hospital_bed": CARPENTER_HOSPITAL_BED_RECIPE,
+  "carpenter.tavern_counter": CARPENTER_TAVERN_COUNTER_RECIPE,
+  "carpenter.armoury_rack": CARPENTER_ARMOURY_RACK_RECIPE,
+  "carpenter.pump_part": CARPENTER_PUMP_PART_RECIPE,
+  "carpenter.mason_bench": CARPENTER_MASON_BENCH_RECIPE,
+  "carpenter.jeweller_bench": CARPENTER_JEWELLER_BENCH_RECIPE,
+  "carpenter.tannery_vat": CARPENTER_TANNERY_VAT_RECIPE,
+  "carpenter.loom_frame": CARPENTER_LOOM_FRAME_RECIPE,
+  "carpenter.trade_scales": CARPENTER_TRADE_SCALES_RECIPE,
+  "carpenter.water_wheel_axle": CARPENTER_WATER_WHEEL_AXLE_RECIPE,
+  "mason.table": MASON_TABLE_RECIPE,
+  "mason.stove": MASON_STOVE_RECIPE,
+  "mason.throne": MASON_THRONE_RECIPE,
+  "mason.carpenter_bench": MASON_CARPENTER_BENCH_RECIPE,
+  "mason.smelter_furnace": MASON_SMELTER_FURNACE_RECIPE,
+  "mason.forge_anvil": MASON_FORGE_ANVIL_RECIPE,
+  "mason.magma_anvil": MASON_MAGMA_ANVIL_RECIPE,
+  "mason.kiln_firebox": MASON_KILN_FIREBOX_RECIPE,
+  "kitchen.stew": KITCHEN_STEW_RECIPE,
+  "kitchen.feast": KITCHEN_FEAST_RECIPE,
+};
+
+const KEY_BY_RECIPE = new Map<Recipe, string>();
+for (const [key, r] of Object.entries(RECIPES_BY_KEY)) KEY_BY_RECIPE.set(r, key);
+// Add the per-blueprint base recipes under "<kind>.base".
+for (const k of Object.keys(RECIPES) as Array<keyof typeof RECIPES>) {
+  const r = RECIPES[k];
+  if (!r) continue;
+  const key = `${k}.base`;
+  RECIPES_BY_KEY[key] = r;
+  if (!KEY_BY_RECIPE.has(r)) KEY_BY_RECIPE.set(r, key);
+}
+
+export function recipeKey(r: Recipe): string | undefined {
+  return KEY_BY_RECIPE.get(r);
+}
+
+export function recipeByKey(k: string): Recipe | undefined {
+  return RECIPES_BY_KEY[k];
+}

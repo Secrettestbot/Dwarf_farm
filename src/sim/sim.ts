@@ -12,7 +12,7 @@ import { levelFromXp } from "./dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "./dwarves/skills";
 import { HOSTILE_DEFS, HostileKind } from "./hostiles/types";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
-import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE, KITCHEN_STEW_RECIPE, KITCHEN_FEAST_RECIPE } from "./planner/recipes";
+import { recipeFor, recipeKey, recipeByKey, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE, KITCHEN_STEW_RECIPE, KITCHEN_FEAST_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, ENGRAVE_QUALITY_PER_BLOCK, ENGRAVE_QUALITY_PER_GEM, isMaintainable, maxDecorationsFor } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
 import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
@@ -4167,6 +4167,17 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     blueprintKind = b.kind;
     break;
   }
+  // Mid-craft (progress > 0): use the recipe pinned at progress=0
+  // so a stockpile threshold crossing this tick can't swap us into
+  // a different recipe between input-consume and output-spawn.
+  // Falls back to the swap chain if the pinned key isn't recognized
+  // (recipe renamed across save versions).
+  if (job.progress > 0 && job.recipeKey) {
+    const pinned = recipeByKey(job.recipeKey);
+    if (pinned) {
+      recipe = pinned;
+    }
+  }
   // Carpenter swaps recipes by demand. Priority (top is most urgent):
   //   pump part     — flood control
   //   barrel        — brewery, drink survival
@@ -4187,7 +4198,13 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   //   trade scales  — caravan revenue
   //   water-wheel   — power
   //   default       — plank milling
-  if (blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
+  //
+  // Swap chains run only at progress=0 — once a craft is underway
+  // we use the recipe pinned on the job (see above) so the colony
+  // can't pay one recipe's inputs and ship another's outputs when
+  // a stockpile threshold crosses mid-craft.
+  const isFreshCraft = job.progress === 0;
+  if (isFreshCraft && blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
     if (needsPumpStationFurniture(sim) && sim.stockpile.planks >= CARPENTER_PUMP_PART_RECIPE.inputQty) {
       // Pump beats everything else — an unpumped flood damages
       // the entire colony, faster than any other room's miss.
@@ -4232,7 +4249,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   //   magma anvil     — Tier-4 high-end production
   //   kiln firebox    — ceramics, trade goods
   //   default         — plain blocks
-  if (blueprintKind === "mason" && recipe && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
+  if (isFreshCraft && blueprintKind === "mason" && recipe && sim.stockpile.blocks >= MASON_TABLE_RECIPE.inputQty) {
     if (needsThroneRoomFurniture(sim) && sim.stockpile.blocks >= MASON_THRONE_RECIPE.inputQty) {
       recipe = MASON_THRONE_RECIPE;
     } else if (needsKitchenFurniture(sim)) {
@@ -4259,7 +4276,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   // food / drink thresholds are intentionally generous — the
   // colony doesn't pull from drink for stew unless drink is
   // genuinely plentiful, so a thirsty fortress isn't penalised.
-  if (blueprintKind === "kitchen" && recipe) {
+  if (isFreshCraft && blueprintKind === "kitchen" && recipe) {
     if (
       sim.stockpile.food >= KITCHEN_FEAST_RECIPE.inputQty &&
       sim.stockpile.cut_gems >= (KITCHEN_FEAST_RECIPE.inputQty2 ?? 0) + 2
@@ -4286,6 +4303,17 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   //    pre-routing flow that still works for food / drink / bars /
   //    tools (which don't have ItemKinds yet).
   if (job.progress === 0) {
+    // Pin the chosen recipe to the job so subsequent ticks don't
+    // re-swap into a different recipe. recipeKey(recipe) returns
+    // a string registered in RECIPES_BY_KEY; an undefined return
+    // (recipe not in registry) leaves recipeKey unset and the next
+    // tick falls through the swap chain. Every shipped recipe is
+    // in the registry today, so undefined would only happen for a
+    // future recipe nobody remembered to add — accept the
+    // degradation (back to the old "always re-evaluate" behavior)
+    // rather than crash the craft.
+    const key = recipeKey(recipe);
+    if (key) job.recipeKey = key;
     let consumedItem = false;
     const ents = sim.item.entities;
     for (let i = 0; i < ents.length; i++) {
