@@ -53,6 +53,7 @@ export class Hud {
   private handlers: HudHandlers;
   private unsubscribeVisibility: (() => void) | null = null;
   private displayPopover: HTMLDivElement | null = null;
+  private displayPopoverDocHandler: ((ev: MouseEvent) => void) | null = null;
 
   constructor(host: HTMLElement, handlers: HudHandlers) {
     this.handlers = handlers;
@@ -240,10 +241,12 @@ export class Hud {
   }
 
   private openDisplayPopover(anchor: HTMLElement): void {
-    // If a popover is already open, close it (click-to-toggle).
+    // If a popover is already open, close it (click-to-toggle). Dispatch
+    // popoverclose so the per-row checkbox + minimap-slider subscriptions
+    // tear down, and detach the document mousedown handler that the open
+    // path installed.
     if (this.displayPopover) {
-      this.displayPopover.remove();
-      this.displayPopover = null;
+      this.closeDisplayPopover();
       return;
     }
     const popover = document.createElement("div");
@@ -354,17 +357,27 @@ export class Hud {
     // event loop so the click that opened the popover doesn't
     // immediately close it.
     setTimeout(() => {
+      if (!this.displayPopover) return;
       const onDocClick = (ev: MouseEvent) => {
         if (!this.displayPopover) return;
         if (this.displayPopover.contains(ev.target as Node)) return;
         if (anchor.contains(ev.target as Node)) return;
-        this.displayPopover.dispatchEvent(new CustomEvent("popoverclose"));
-        this.displayPopover.remove();
-        this.displayPopover = null;
-        document.removeEventListener("mousedown", onDocClick);
+        this.closeDisplayPopover();
       };
+      this.displayPopoverDocHandler = onDocClick;
       document.addEventListener("mousedown", onDocClick);
     }, 0);
+  }
+
+  private closeDisplayPopover(): void {
+    if (!this.displayPopover) return;
+    this.displayPopover.dispatchEvent(new CustomEvent("popoverclose"));
+    this.displayPopover.remove();
+    this.displayPopover = null;
+    if (this.displayPopoverDocHandler) {
+      document.removeEventListener("mousedown", this.displayPopoverDocHandler);
+      this.displayPopoverDocHandler = null;
+    }
   }
 
 
@@ -410,6 +423,7 @@ export class Hud {
   }
 
   destroy(): void {
+    this.closeDisplayPopover();
     this.root.remove();
     this.showHudChip.remove();
     this.unsubscribeVisibility?.();
