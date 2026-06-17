@@ -3913,6 +3913,32 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   // Negotiation finished — apply the deal we cached at arrival.
   // Multi-good baskets credit both the primary and secondary import.
   const stockpile = sim.stockpile as unknown as Record<string, number>;
+  // Sanity-check the offered resource: a workshop may have drained
+  // the stockpile between the caravan's arrival (where cost was
+  // cached) and the broker finishing the 60-tick negotiation. If
+  // the colony can no longer pay, the deal fails — counters don't
+  // go negative, reputation drops the same way as a missed visit.
+  if ((stockpile[sim.caravanDealResource] ?? 0) < sim.caravanDealCost) {
+    sim.caravanDealComplete = true; // mark closed so the next tick treats it as resolved
+    if (sim.caravanOrigin) {
+      sim.tradeReputation[sim.caravanOrigin] = Math.max(
+        -10,
+        Math.min(20, (sim.tradeReputation[sim.caravanOrigin] ?? 0) - 3),
+      );
+    }
+    const dwBail = sim.dwarf.get(e);
+    const brokerNameBail = dwBail?.name ?? "the broker";
+    sim.events.add(
+      sim.tick,
+      "social",
+      `${brokerNameBail} reaches the depot to find the colony's ${sim.caravanDealResource} reserves spent. The caravan packs up insulted.`,
+      { x: sim.caravanX, y: sim.caravanY },
+    );
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
   stockpile[sim.caravanDealResource] = (stockpile[sim.caravanDealResource] ?? 0) - sim.caravanDealCost;
   stockpile[sim.caravanDealImport] = (stockpile[sim.caravanDealImport] ?? 0) + sim.caravanDealGain;
   if (sim.caravanDealImport2 && sim.caravanDealGain2 > 0) {

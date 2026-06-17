@@ -159,4 +159,44 @@ describe("trade caravans", () => {
     const empty = sim.events.events.find((e) => e.text.includes("empty-handed"));
     expect(empty).toBeDefined();
   });
+
+  it("the offered stockpile being drained mid-negotiation aborts the deal without going negative", () => {
+    // Regression: progressTrade used to subtract caravanDealCost
+    // unconditionally. If a workshop consumed the offered resource
+    // between arrival and the broker reaching the depot, the
+    // stockpile counter went negative.
+    const w = generateWorld({ seed: 199, width: 200, height: 500 });
+    const sim = new SimWorld(199, w.grid, w.surfaceY, w.spawn);
+    plantDepot(sim);
+    sim.spawnDwarf({ name: "Broker", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.stockpile.stone = 100;
+    sim.stockpile.food = 100;
+    // Run until the caravan arrives and the broker is en route /
+    // negotiating. We watch for the deal slot to populate.
+    let dealStarted = false;
+    for (let i = 0; i < SEASON + TRADE_WINDOW && !dealStarted; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+      if (sim.caravanDealResource && !sim.caravanDealComplete) dealStarted = true;
+    }
+    expect(dealStarted).toBe(true);
+    // Drain the offered resource so the broker can no longer pay.
+    const offered = sim.caravanDealResource as keyof typeof sim.stockpile;
+    (sim.stockpile as unknown as Record<string, number>)[offered] = 0;
+    // Run until the caravan leaves so the deal resolves one way or
+    // the other.
+    for (let i = 0; i < TRADE_WINDOW + TICKS_PER_DAY * 2; i++) {
+      const id = sim.dwarf.entities[0];
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      tick(sim);
+    }
+    // No counter went negative.
+    expect(sim.stockpile.stone).toBeGreaterThanOrEqual(0);
+    expect(sim.stockpile.blocks).toBeGreaterThanOrEqual(0);
+    expect(sim.stockpile.bars).toBeGreaterThanOrEqual(0);
+    expect(sim.stockpile.cut_gems).toBeGreaterThanOrEqual(0);
+  });
 });
