@@ -240,6 +240,18 @@ export interface Hostile {
   kind: HostileKind;
   lastAttackTick: number;
   lastMoveTick: number;
+  /** Display name for named foes (the goblin warlord today, future
+   * dragon lords). Empty / undefined for anonymous hostiles. Carried
+   * on the component itself rather than a side-channel map so it
+   * follows the entity through save/restore without the entity-id
+   * remapping that broke the old sim.hostileNames approach. */
+  name?: string;
+  /** True iff this hostile spawned as part of a scheduled siege
+   * (spawnSiegeWarband) rather than the periodic hostileSpawnSystem.
+   * siegeSystem reads this so "siege broken" only counts the actual
+   * warband — a random underground goblin from the periodic spawn
+   * can't keep siegeActive=true forever. */
+  fromSiege?: boolean;
 }
 
 /** HP carried by anything that can be hit — dwarves and hostiles alike. */

@@ -334,13 +334,6 @@ export class SimWorld {
    * warlord to lead. */
   siegeWarlordName: string = "";
 
-  /** Per-hostile display name. Most hostiles are anonymous (a cave
-   * rat is a cave rat), but named foes — the goblin warlord, future
-   * dragon lord, etc. — pin a name to their entity here so the
-   * chronicle can reference them by name when they kill someone or
-   * when they fall. */
-  hostileNames: Map<EntityId, string> = new Map();
-
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips
    * through save so a reload restores the colony's full memorial roll
@@ -650,6 +643,8 @@ export class SimWorld {
     hp?: number;
     lastAttackTick?: number;
     lastMoveTick?: number;
+    name?: string;
+    fromSiege?: boolean;
   }): EntityId {
     const def = HOSTILE_DEFS[spec.kind];
     const e = this.ecs.create();
@@ -657,6 +652,8 @@ export class SimWorld {
     this.position.set(e, { x: spec.x, y: spec.y });
     this.hostile.set(e, {
       kind: spec.kind,
+      name: spec.name,
+      fromSiege: spec.fromSiege,
       lastAttackTick: spec.lastAttackTick ?? 0,
       lastMoveTick: spec.lastMoveTick ?? 0,
     });

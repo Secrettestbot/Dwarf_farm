@@ -5694,7 +5694,11 @@ function siegeSystem(sim: SimWorld): void {
     let liveAttackers = 0;
     for (const id of sim.hostile.entities) {
       const h = sim.hostile.get(id);
-      if (h && (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord")) liveAttackers++;
+      // Only siege-spawned hostiles count toward the "broken" check.
+      // Without the fromSiege flag, a periodic goblin_scout spawned
+      // by hostileSpawnSystem during the siege would keep siegeActive
+      // true forever and block all future siege scheduling.
+      if (h && h.fromSiege) liveAttackers++;
     }
     if (liveAttackers === 0) {
       sim.siegeActive = false;
@@ -5795,16 +5799,21 @@ function spawnSiegeWarband(sim: SimWorld): void {
 
   for (let i = 0; i < goblinCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
-    sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y });
+    sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y, fromSiege: true });
   }
   for (let i = 0; i < trollCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
-    sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y });
+    sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y, fromSiege: true });
   }
   for (let i = 0; i < warlordCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
-    const wid = sim.spawnHostile({ kind: "goblin_warlord", x: c.x, y: c.y });
-    if (wid !== -1) sim.hostileNames.set(wid, warlordName);
+    sim.spawnHostile({
+      kind: "goblin_warlord",
+      x: c.x,
+      y: c.y,
+      fromSiege: true,
+      name: warlordName,
+    });
   }
 
   sim.siegeActive = true;
@@ -6107,14 +6116,17 @@ function combatSystem(sim: SimWorld): void {
         const dwarfName = dwarf?.name ?? "A dwarf";
         // Named foes get a bespoke chronicle line so the warlord's
         // fall is memorable instead of "a goblin warlord falls."
-        const foeName = sim.hostileNames.get(h);
+        // The name lives on the Hostile component now (was a
+        // side-channel sim.hostileNames map keyed by entity id —
+        // which broke across save/load because restore replays
+        // spawnHostile with fresh ids).
+        const foeName = hostile.name;
         if (foeName) {
           sim.events.add(
             sim.tick,
             "milestone",
             `${dwarfName} fells ${foeName}, the goblin warlord. The siege loses its banner.`,
           );
-          sim.hostileNames.delete(h);
         } else {
           sim.events.add(
             sim.tick,

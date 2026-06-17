@@ -90,6 +90,53 @@ describe("siege system", () => {
     expect(warlordHp).toBeGreaterThanOrEqual(100);
   });
 
+  it("warlord name survives save/restore via the Hostile component (not via stale entity ids)", async () => {
+    // Regression: the prior sim.hostileNames Map was keyed by
+    // EntityId. Restore replayed spawnHostile with fresh ids, so
+    // the saved (id, name) pairs pointed to nothing. After this
+    // fix the name lives on the Hostile component itself, so the
+    // restored warlord still knows its name.
+    const { snapshot, restore } = await import("../save/snapshot");
+    const w = generateWorld({ seed: 719, width: 200, height: 500 });
+    const sim = new SimWorld(719, w.grid, w.surfaceY, w.spawn);
+    for (let i = 0; i < 18; i++) {
+      sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + (i % 5) - 2, y: w.spawn.y, age: 30 });
+    }
+    for (let i = 0; i < TICKS_PER_YEAR + TICKS_PER_DAY * 7; i++) {
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      }
+      tick(sim);
+      if (sim.siegeActive) break;
+    }
+    expect(sim.siegeActive).toBe(true);
+    let savedName: string | undefined;
+    for (const id of sim.hostile.entities) {
+      const h = sim.hostile.get(id);
+      if (h?.kind === "goblin_warlord") savedName = h.name;
+    }
+    expect(savedName).toBeDefined();
+    expect(savedName!.length).toBeGreaterThan(0);
+
+    const save = snapshot({
+      sim,
+      slotId: "slot-1",
+      fortressName: "fortress",
+      mode: "legacy",
+      cameraX: 0,
+      cameraY: 0,
+      zoomIndex: 1,
+    });
+    const restored = restore(save);
+    let restoredName: string | undefined;
+    for (const id of restored.hostile.entities) {
+      const h = restored.hostile.get(id);
+      if (h?.kind === "goblin_warlord") restoredName = h.name;
+    }
+    expect(restoredName).toBe(savedName);
+  });
+
   it("warband size scales with population", () => {
     function countGoblinsAfterArrival(pop: number): number {
       const w = generateWorld({ seed: 715, width: 200, height: 500 });

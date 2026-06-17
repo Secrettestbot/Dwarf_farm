@@ -107,6 +107,12 @@ export interface SavedHostile {
   maxHp: number;
   lastAttackTick: number;
   lastMoveTick: number;
+  /** Display name for named foes (the goblin warlord). Empty for
+   * anonymous hostiles. */
+  name?: string;
+  /** True iff this hostile spawned as part of a scheduled siege —
+   * read by siegeSystem's "broken" check. */
+  fromSiege?: boolean;
 }
 
 /** Saved pet entity — wild or tame. ownerIndex is an index into
@@ -317,9 +323,12 @@ export interface SaveV1 {
      * any. Empty when no warlord is in play. */
     warlordName?: string;
   };
-  /** Per-hostile display names — pinned for named foes (the
-   * goblin warlord, future named bosses). Keyed by entity id;
-   * absent for anonymous hostiles. Optional. */
+  /** Legacy per-hostile name map keyed by entity id — the keys
+   * are stale across save/load (restore replays spawnHostile with
+   * fresh ids) so the entries were orphaned. Named foes now carry
+   * their name on the Hostile component itself. Kept on the schema
+   * for one release of back-compat reading; never written by
+   * snapshot() any more. */
   hostileNames?: Array<{ id: number; name: string }>;
   /** Cemetery registry — every dwarf interred in a Headstone tile.
    * Round-trips so a reload restores the colony's full memorial

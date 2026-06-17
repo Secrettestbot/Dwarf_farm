@@ -248,9 +248,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           warlordName: sim.siegeWarlordName || undefined,
         }
       : undefined,
-    hostileNames: sim.hostileNames.size > 0
-      ? Array.from(sim.hostileNames.entries()).map(([id, name]) => ({ id, name }))
-      : undefined,
+    // hostileNames is no longer written — names live on the Hostile
+    // component now and round-trip through collectHostiles below.
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
     artifactsNextId: sim.artifactsNextId,
@@ -331,6 +330,8 @@ function collectHostiles(sim: SimWorld): SavedHostile[] {
       maxHp: hp.maxHp,
       lastAttackTick: h.lastAttackTick,
       lastMoveTick: h.lastMoveTick,
+      name: h.name,
+      fromSiege: h.fromSiege,
     });
   }
   return out;
@@ -581,9 +582,10 @@ export function restore(save: SaveV1): SimWorld {
     sim.siegesSurvived = save.siege.survived;
     sim.siegeWarlordName = save.siege.warlordName ?? "";
   }
-  if (save.hostileNames) {
-    for (const e of save.hostileNames) sim.hostileNames.set(e.id, e.name);
-  }
+  // save.hostileNames is no longer read — names migrate onto the
+  // Hostile component below. Old saves with hostileNames entries
+  // and no per-hostile name field will load anonymously; the next
+  // siege re-rolls a name for any future warlord.
   if (save.graves) {
     for (const g of save.graves) sim.graves.push({ ...g });
   }
@@ -647,6 +649,8 @@ export function restore(save: SaveV1): SimWorld {
         hp: h.hp,
         lastAttackTick: h.lastAttackTick,
         lastMoveTick: h.lastMoveTick,
+        name: h.name,
+        fromSiege: h.fromSiege,
       });
     }
   }
