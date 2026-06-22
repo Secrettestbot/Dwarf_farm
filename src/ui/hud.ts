@@ -356,11 +356,20 @@ export class Hud {
     // Dismiss on outside-click. Defer the listener install by one
     // event loop so the click that opened the popover doesn't
     // immediately close it.
+    //
+    // The setTimeout captures `popover` by closure — at fire time
+    // we check it's still the live popover (this.displayPopover ===
+    // popover). Without that identity check, a rapid open→close→open
+    // cycle could fire a stale setTimeout that installs a listener
+    // referencing the closed popover's anchor, and overwrite
+    // this.displayPopoverDocHandler so closeDisplayPopover can no
+    // longer detach the previous handler — leaking it on document
+    // until the Hud is destroyed.
     setTimeout(() => {
-      if (!this.displayPopover) return;
+      if (this.displayPopover !== popover) return;
       const onDocClick = (ev: MouseEvent) => {
-        if (!this.displayPopover) return;
-        if (this.displayPopover.contains(ev.target as Node)) return;
+        if (this.displayPopover !== popover) return;
+        if (popover.contains(ev.target as Node)) return;
         if (anchor.contains(ev.target as Node)) return;
         this.closeDisplayPopover();
       };

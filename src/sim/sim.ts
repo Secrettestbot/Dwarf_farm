@@ -1794,7 +1794,7 @@ const TRADE_OFFERS: TradeOffer[] = [
  * the caravan in the world. */
 const CARAVAN_STAY_TICKS = TICKS_PER_DAY;
 
-import { KINGDOMS, kingdomByName, REPUTATION_MIN, REPUTATION_MAX, REPUTATION_LOSS_PER_MISS, reputationPriceMultiplier, type KingdomProfile, type TradeImport } from "./trade/kingdoms";
+import { KINGDOMS, kingdomByName, REPUTATION_MIN, REPUTATION_MAX, REPUTATION_LOSS_PER_MISS, REPUTATION_GAIN_PER_DEAL, reputationPriceMultiplier, type KingdomProfile, type TradeImport } from "./trade/kingdoms";
 
 function pickImportNeeded(sim: SimWorld, kingdom: KingdomProfile, exclude?: TradeImport): TradeImport | null {
   // Score each import by how badly the colony needs it. Higher score
@@ -3921,9 +3921,14 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   if ((stockpile[sim.caravanDealResource] ?? 0) < sim.caravanDealCost) {
     sim.caravanDealComplete = true; // mark closed so the next tick treats it as resolved
     if (sim.caravanOrigin) {
-      sim.tradeReputation[sim.caravanOrigin] = Math.max(
-        -10,
-        Math.min(20, (sim.tradeReputation[sim.caravanOrigin] ?? 0) - 3),
+      // Same reputation loss as the missed-broker path above —
+      // the colony failed to deliver what it advertised, regardless
+      // of whether the broker arrived. Uses the same clamp helper
+      // + named bounds so the three trade paths can't drift apart.
+      sim.tradeReputation[sim.caravanOrigin] = clamp(
+        (sim.tradeReputation[sim.caravanOrigin] ?? 0) - REPUTATION_LOSS_PER_MISS,
+        REPUTATION_MIN,
+        REPUTATION_MAX,
       );
     }
     const dwBail = sim.dwarf.get(e);
@@ -3934,7 +3939,7 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       `${brokerNameBail} reaches the depot to find the colony's ${sim.caravanDealResource} reserves spent. The caravan packs up insulted.`,
       { x: sim.caravanX, y: sim.caravanY },
     );
-    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    if (dwBail) dwBail.lastJobTick = sim.tick;
     sim.job.remove(e);
     sim.pathing.remove(e);
     return;
@@ -3948,10 +3953,10 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   // Successful deal raises the kingdom's reputation, capped so a
   // long-running fortress doesn't end up with infinitely good prices.
   if (sim.caravanOrigin) {
-    const REP_MIN = -10, REP_MAX = 20, REP_GAIN = 2;
-    sim.tradeReputation[sim.caravanOrigin] = Math.min(
-      REP_MAX,
-      Math.max(REP_MIN, (sim.tradeReputation[sim.caravanOrigin] ?? 0) + REP_GAIN),
+    sim.tradeReputation[sim.caravanOrigin] = clamp(
+      (sim.tradeReputation[sim.caravanOrigin] ?? 0) + REPUTATION_GAIN_PER_DEAL,
+      REPUTATION_MIN,
+      REPUTATION_MAX,
     );
   }
   awardSkillXp(sim, e, "trading", 1);
@@ -4196,13 +4201,22 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   // Mid-craft (progress > 0): use the recipe pinned at progress=0
   // so a stockpile threshold crossing this tick can't swap us into
   // a different recipe between input-consume and output-spawn.
-  // Falls back to the swap chain if the pinned key isn't recognized
-  // (recipe renamed across save versions).
-  if (job.progress > 0 && job.recipeKey) {
-    const pinned = recipeByKey(job.recipeKey);
-    if (pinned) {
-      recipe = pinned;
-    }
+  // The pin only applies when the workshop is still standing —
+  // if the player demolished the bench mid-craft, recipe is
+  // undefined from the blueprint scan above and we let the
+  // !recipe bail at line ~4318 end the craft cleanly rather
+  // than spawning outputs at an empty tile.
+  //
+  // usePin is the canonical "this job is locked to the pinned
+  // recipe" signal — used here AND below to gate the swap chains
+  // so we don't re-evaluate after pinning.
+  const pinResolved =
+    job.progress > 0 && job.recipeKey !== undefined
+      ? recipeByKey(job.recipeKey)
+      : undefined;
+  const usePin = pinResolved !== undefined && recipe !== undefined;
+  if (usePin) {
+    recipe = pinResolved;
   }
   // Carpenter swaps recipes by demand. Priority (top is most urgent):
   //   pump part     — flood control
@@ -4225,11 +4239,15 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   //   water-wheel   — power
   //   default       — plank milling
   //
-  // Swap chains run only at progress=0 — once a craft is underway
-  // we use the recipe pinned on the job (see above) so the colony
-  // can't pay one recipe's inputs and ship another's outputs when
-  // a stockpile threshold crosses mid-craft.
-  const isFreshCraft = job.progress === 0;
+  // Swap chains run when there's no pin to honour: either a fresh
+  // craft (progress === 0) or a mid-craft job whose recipeKey we
+  // couldn't resolve (back-compat with pre-pin saves, or a recipe
+  // renamed across save versions). Re-running the swap chains in
+  // the back-compat case replicates the pre-commit behavior — the
+  // colony might ship a different output than it paid for, but
+  // that's the same as it would have shipped before the pin was
+  // added; better than bailing and losing the inputs outright.
+  const isFreshCraft = !usePin;
   if (isFreshCraft && blueprintKind === "carpenter" && recipe && sim.stockpile.planks >= CARPENTER_BED_RECIPE.inputQty) {
     if (needsPumpStationFurniture(sim) && sim.stockpile.planks >= CARPENTER_PUMP_PART_RECIPE.inputQty) {
       // Pump beats everything else — an unpumped flood damages
