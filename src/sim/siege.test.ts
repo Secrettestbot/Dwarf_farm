@@ -137,6 +137,65 @@ describe("siege system", () => {
     expect(restoredName).toBe(savedName);
   });
 
+  it("legacy saves (hostileNames + no per-hostile fromSiege) restore with a named warlord AND a still-active siege", async () => {
+    // Regression: when the warlord name moved from sim.hostileNames
+    // to Hostile.name and the siege "broken" check moved from kind-
+    // matching to Hostile.fromSiege, saves written by the previous
+    // build became unrecoverable mid-siege: the warlord was anonymous
+    // and the next tick declared the siege broken because no hostile
+    // carried fromSiege=true. restore() now migrates these.
+    const { snapshot, restore } = await import("../save/snapshot");
+    const w = generateWorld({ seed: 723, width: 200, height: 500 });
+    const sim = new SimWorld(723, w.grid, w.surfaceY, w.spawn);
+    for (let i = 0; i < 18; i++) {
+      sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + (i % 5) - 2, y: w.spawn.y, age: 30 });
+    }
+    for (let i = 0; i < TICKS_PER_YEAR + TICKS_PER_DAY * 7; i++) {
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      }
+      tick(sim);
+      if (sim.siegeActive) break;
+    }
+    expect(sim.siegeActive).toBe(true);
+    let warlordName: string | undefined;
+    for (const id of sim.hostile.entities) {
+      const h = sim.hostile.get(id);
+      if (h?.kind === "goblin_warlord") warlordName = h.name;
+    }
+    expect(warlordName).toBeDefined();
+    const save = snapshot({
+      sim,
+      slotId: "slot-1",
+      fortressName: "fortress",
+      mode: "legacy",
+      cameraX: 0,
+      cameraY: 0,
+      zoomIndex: 1,
+    });
+    // Simulate a save written by the PREVIOUS build:
+    //  - hostileNames populated keyed by (now-stale) entity ids
+    //  - SavedHostile entries lack name + fromSiege
+    save.hostileNames = warlordName ? [{ id: 999, name: warlordName }] : [];
+    for (const h of save.hostiles ?? []) {
+      delete h.name;
+      delete h.fromSiege;
+    }
+    const restored = restore(save);
+    expect(restored.siegeActive).toBe(true);
+    let restoredWarlordName: string | undefined;
+    for (const id of restored.hostile.entities) {
+      const h = restored.hostile.get(id);
+      if (h?.kind === "goblin_warlord") restoredWarlordName = h.name;
+    }
+    expect(restoredWarlordName).toBe(warlordName);
+    // Run one tick — the migrated fromSiege flags should keep the
+    // siege live (the pre-fix bug ended it on this tick).
+    tick(restored);
+    expect(restored.siegeActive).toBe(true);
+  });
+
   it("warband size scales with population", () => {
     function countGoblinsAfterArrival(pop: number): number {
       const w = generateWorld({ seed: 715, width: 200, height: 500 });

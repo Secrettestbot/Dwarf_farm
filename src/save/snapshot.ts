@@ -654,6 +654,41 @@ export function restore(save: SaveV1): SimWorld {
       });
     }
   }
+  // Back-compat migration for saves written by the previous build:
+  //  - SavedHostile didn't carry `name` or `fromSiege`. The name lived
+  //    in the side-channel `save.hostileNames` map keyed by entity id
+  //    (stale across restore — the bug the new schema fixes).
+  //  - Without these fields, a mid-siege save loaded under the new
+  //    siegeSystem (which counts attackers via h.fromSiege) ends the
+  //    siege one tick later because liveAttackers=0, and the warlord
+  //    is permanently anonymous in chronicle lines.
+  // Pair saved names to the matching hostile by kind (only the
+  // goblin warlord is named today, so the kind match is unambiguous),
+  // and back-fill fromSiege on siege-typed hostiles when the saved
+  // state had an active siege.
+  if (save.hostileNames && save.hostileNames.length > 0) {
+    for (const e of save.hostileNames) {
+      for (const id of sim.hostile.entities) {
+        const h = sim.hostile.get(id);
+        if (h && h.kind === "goblin_warlord" && !h.name) {
+          h.name = e.name;
+          break;
+        }
+      }
+    }
+  }
+  if (save.siege?.active) {
+    for (const id of sim.hostile.entities) {
+      const h = sim.hostile.get(id);
+      if (
+        h &&
+        h.fromSiege === undefined &&
+        (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord")
+      ) {
+        h.fromSiege = true;
+      }
+    }
+  }
   // Restore pets — wild and tame both. ownerIndex maps back through
   // the dwarf-restoration array so the owner's entity id is correct
   // even though the save format doesn't carry raw ids.

@@ -327,8 +327,9 @@ export interface SaveV1 {
    * are stale across save/load (restore replays spawnHostile with
    * fresh ids) so the entries were orphaned. Named foes now carry
    * their name on the Hostile component itself. Kept on the schema
-   * for one release of back-compat reading; never written by
-   * snapshot() any more. */
+   * for back-compat reading: restore() pairs each saved name to a
+   * matching hostile by kind (only the goblin warlord is named
+   * today). Never written by snapshot() any more. */
   hostileNames?: Array<{ id: number; name: string }>;
   /** Cemetery registry — every dwarf interred in a Headstone tile.
    * Round-trips so a reload restores the colony's full memorial
