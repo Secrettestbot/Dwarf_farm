@@ -317,6 +317,78 @@ export function narrateDeath(rng: Rng, name: string, profession: string, age: nu
   return pick(rng, opts);
 }
 
+/** Context that flavours a tantrum-onset line. The narrator picks the
+ * variant pool by precedence: bereavement > rivalry > generic. All
+ * fields optional — a colony with no graves and no grudges still
+ * gets the generic pool, same as before. */
+export interface TantrumOnsetContext {
+  /** Name of a deceased partner whose grave the dwarf has been visiting. */
+  lostPartnerName?: string;
+  /** Name of a rival the dwarf has been feuding with (top live grudge). */
+  rivalName?: string;
+  /** True if the dwarf's HP recently dipped into the severe-wound band
+   * and hasn't been treated back to full. */
+  recentlyWounded?: boolean;
+}
+
+export function narrateTantrumOnset(rng: Rng, name: string, ctx: TantrumOnsetContext): string {
+  // Precedence: a fresh grave outweighs a feud outweighs a generic
+  // bad week. Each branch keeps the breakdown shape ("X has broken.")
+  // for chronicle consistency, then attributes a cause.
+  if (ctx.lostPartnerName) {
+    return pick(rng, [
+      `${name} has broken. They wander the halls muttering ${ctx.lostPartnerName}'s name.`,
+      `${name} has broken — they have not slept since ${ctx.lostPartnerName} was laid to rest.`,
+      `${name} has broken. The grief for ${ctx.lostPartnerName} has finally caught up with them.`,
+    ]);
+  }
+  if (ctx.rivalName) {
+    return pick(rng, [
+      `${name} has broken. They throw a stool at the wall and curse ${ctx.rivalName}'s name.`,
+      `${name} has broken. The feud with ${ctx.rivalName} has eaten what was left of their composure.`,
+      `${name} has broken. They will not work in the same room as ${ctx.rivalName}.`,
+    ]);
+  }
+  if (ctx.recentlyWounded) {
+    return pick(rng, [
+      `${name} has broken. The wounds from the last fight have not stopped aching.`,
+      `${name} has broken. They sit at the hospital cot and refuse to rise.`,
+    ]);
+  }
+  return pick(rng, [
+    `${name} has broken. They wander the halls muttering, refusing all work.`,
+    `${name} has broken. Nothing in the mountain pleases them today.`,
+    `${name} has broken. They sit in a corner and stare at the wall.`,
+  ]);
+}
+
+/** Context that flavours an obsession-onset line. When the fixation
+ * matches the dwarf's strongest skill, lean into mastery framing;
+ * otherwise the dwarf is taking up a new craft and the line says so. */
+export interface ObsessionOnsetContext {
+  /** The dwarf's currently-highest skill (any tier ≥ Skilled is worth
+   * naming). Undefined for a brand-new dwarf with no rank advantage. */
+  bestSkillId?: string;
+  /** Human-friendly skill label for the fixation ("smithing" → "Smithing"). */
+  skillLabel: string;
+}
+
+export function narrateObsessionOnset(rng: Rng, name: string, fixationSkillId: string, ctx: ObsessionOnsetContext): string {
+  const skill = ctx.skillLabel;
+  if (ctx.bestSkillId === fixationSkillId) {
+    return pick(rng, [
+      `${name} has fallen into a deep fixation with ${skill}. They will not leave the workshop for a week.`,
+      `${name} has retreated into ${skill}. The other dwarves know to bring food and not to ask questions.`,
+      `${name} has decided that everything they have ever made was a draft. ${skill} consumes them now.`,
+    ]);
+  }
+  return pick(rng, [
+    `${name} has fallen into a deep fixation with ${skill}. They are not to be reasoned with for a week.`,
+    `${name} announces they will master ${skill} or break trying. The mountain has seen this before.`,
+    `${name} has taken up ${skill} with a glint in their eye. A week of single-minded work follows.`,
+  ]);
+}
+
 export function narrateFounding(names: string[]): string {
   if (names.length === 0) return `Seven dwarves enter the mountain.`;
   // List the first 2-3 founders by name; the rest as count.

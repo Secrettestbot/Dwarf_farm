@@ -4,7 +4,7 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival } from "./events/narrator";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival, narrateTantrumOnset, narrateObsessionOnset } from "./events/narrator";
 import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, seasonOf, Season } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
@@ -211,10 +211,19 @@ function specialTraitSystem(sim: SimWorld): void {
       if (sim.aiRng.nextFloat() >= OBSESSION_DAILY_CHANCE) continue;
       const skillId = OBSESSION_SKILLS[sim.aiRng.nextRange(0, OBSESSION_SKILLS.length)];
       sim.obsession.set(id, { skillId, endsAtTick: sim.tick + OBSESSION_DURATION_TICKS });
+      // narrateObsessionOnset leans into mastery framing if the
+      // fixation lands on the dwarf's strongest skill — "retreated
+      // into smithing" reads differently from "taking up smithing
+      // with a glint in their eye." The skill label is the
+      // user-facing capitalised name from SKILLS_BY_ID, not the
+      // lower-case id.
       sim.events.add(
         sim.tick,
         "social",
-        `${dw.name} has fallen into a deep fixation with ${skillId}. They are not to be reasoned with for a week.`,
+        narrateObsessionOnset(sim.aiRng, dw.name, skillId, {
+          bestSkillId: bestSkillIdForDwarf(dw),
+          skillLabel: SKILLS_BY_ID[skillId]?.name ?? skillId,
+        }),
       );
     }
   }
@@ -369,6 +378,67 @@ const TANTRUM_SMASH_INTERVAL = 120; // every two in-game hours
  * Memorial / Headstone / Grave / FarmTile are not — even broken
  * dwarves don't deface graves or trample the crops. Chronicle
  * records each smash. */
+
+/** Look up the name of a dwarf's deceased partner by matching the
+ * survivor's lostPartnerGrave coordinates against sim.graves. Returns
+ * undefined when there's no buried partner (no grave coords, or the
+ * partner was lost outside the cemetery — the grief is still real but
+ * the chronicle can't name them). */
+function lostPartnerNameForDwarf(
+  sim: SimWorld,
+  dw: import("./ecs/components").Dwarf,
+): string | undefined {
+  const g = dw.lostPartnerGrave;
+  if (!g) return undefined;
+  const grave = sim.graves.find((gr) => gr.x === g.x && gr.y === g.y);
+  return grave?.name;
+}
+
+/** Find the dwarf this one is feuding with most. Iterates sim.grudges
+ * for entries that mention `e`, applies the same lazy-decay rule as
+ * grudgeCount, and returns the rival's display name once the
+ * (decayed) count crosses GRUDGE_NAMING_THRESHOLD. A handful of
+ * casual incidents isn't enough to brand someone an enemy — the
+ * threshold keeps the chronicle from manufacturing rivals out of two
+ * spats. */
+const GRUDGE_NAMING_THRESHOLD = 2;
+function topGrudgeRivalName(sim: SimWorld, e: EntityId): string | undefined {
+  let bestId = -1;
+  let bestCount = 0;
+  for (const key of sim.grudges.keys()) {
+    const sep = key.indexOf(":");
+    if (sep < 0) continue;
+    const a = Number(key.slice(0, sep));
+    const b = Number(key.slice(sep + 1));
+    const other = a === e ? b : b === e ? a : -1;
+    if (other === -1) continue;
+    const decayed = grudgeCount(sim, e, other);
+    if (decayed >= GRUDGE_NAMING_THRESHOLD && decayed > bestCount) {
+      bestCount = decayed;
+      bestId = other;
+    }
+  }
+  if (bestId === -1) return undefined;
+  return sim.dwarf.get(bestId)?.name;
+}
+
+/** The dwarf's currently-strongest skill id, or undefined if every
+ * skill is at the default Novice level. Used by narrateObsessionOnset
+ * to lean into mastery framing when the fixation lines up with what
+ * they're already known for. */
+function bestSkillIdForDwarf(dw: import("./ecs/components").Dwarf): SkillId | undefined {
+  let bestId: SkillId | undefined;
+  let bestLevel = 1;
+  for (const k of Object.keys(dw.skills) as SkillId[]) {
+    const v = dw.skills[k] ?? 0;
+    if (v > bestLevel) {
+      bestLevel = v;
+      bestId = k;
+    }
+  }
+  return bestId;
+}
+
 function smashAdjacentFurniture(sim: SimWorld, dw: import("./ecs/components").Dwarf, pos: { x: number; y: number }): void {
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
     const x = pos.x + dx;
@@ -441,10 +511,18 @@ function tantrumSystem(sim: SimWorld): void {
     });
     const dw = sim.dwarf.get(id);
     if (dw) {
+      // Pull the strongest signal from the dwarf's recent history so
+      // the chronicle line names a real cause rather than a generic
+      // "muttering, refusing all work." Bereavement outranks rivalry
+      // outranks generic in narrateTantrumOnset.
       sim.events.add(
         sim.tick,
         "crisis",
-        `${dw.name} has broken. They wander the halls muttering, refusing all work.`,
+        narrateTantrumOnset(sim.aiRng, dw.name, {
+          lostPartnerName: lostPartnerNameForDwarf(sim, dw),
+          rivalName: topGrudgeRivalName(sim, id),
+          recentlyWounded: sim.health.get(id)?.wasSevereWound === true,
+        }),
       );
     }
   }
