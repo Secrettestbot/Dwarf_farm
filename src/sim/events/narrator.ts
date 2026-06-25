@@ -303,18 +303,67 @@ export function narrateBereavement(rng: Rng, survivor: string, deceased: string,
   ]);
 }
 
+/** Disease cause labels the death narrator recognises (mirrors
+ * DISEASE_DEFS[].label in sim.ts). Kept as a literal list here so the
+ * narrator stays free of a sim-internals import; if a new disease is
+ * added there, it simply falls through to the generic line until
+ * listed here. */
+const DISEASE_CAUSE_LABELS: readonly string[] = ["cave cough", "deep fever", "wound sickness"];
+
 export function narrateDeath(rng: Rng, name: string, profession: string, age: number, cause: string): string {
-  const opts = cause === "old age"
-    ? [
-        `${name}, ${profession}, has died of old age. Aged ${age} years.`,
-        `Old ${name} is dead. ${age} years in the mountain, the last of them spent watching the young.`,
-        `${name} the ${profession.toLowerCase()} did not wake this morning. ${age} years.`,
-        `${name}, ${profession}, has passed peacefully in their sleep at ${age}.`,
-      ]
-    : [
-        `${name}, ${profession}, has died (${cause}). Aged ${age} years.`,
-      ];
-  return pick(rng, opts);
+  const prof = profession.toLowerCase();
+  if (cause === "old age") {
+    return pick(rng, [
+      `${name}, ${profession}, has died of old age. Aged ${age} years.`,
+      `Old ${name} is dead. ${age} years in the mountain, the last of them spent watching the young.`,
+      `${name} the ${prof} did not wake this morning. ${age} years.`,
+      `${name}, ${profession}, has passed peacefully in their sleep at ${age}.`,
+    ]);
+  }
+  // Slain by a hostile — cause is "slain by <article>" (e.g. "a
+  // goblin scout"). Pull the foe out for a sharper line.
+  if (cause.startsWith("slain by ")) {
+    const foe = cause.slice("slain by ".length);
+    return pick(rng, [
+      `${name}, ${profession}, has been killed by ${foe}. Aged ${age} years.`,
+      `${name} fell to ${foe}, ${prof} to the last. ${age} years.`,
+      `${foe} cut down ${name} the ${prof}. The mountain is poorer for it.`,
+      `${name} is dead, ${age} years old, struck down by ${foe}.`,
+    ]);
+  }
+  // Murdered by another dwarf — cause is "struck dead by <name>".
+  if (cause.startsWith("struck dead by ")) {
+    const killer = cause.slice("struck dead by ".length);
+    return pick(rng, [
+      `${name}, ${profession}, was struck dead by ${killer}. The colony will not soon forget.`,
+      `${killer} killed ${name} the ${prof} in a fit of rage. ${age} years, ended by one of their own.`,
+      `${name} is dead at the hand of ${killer}. ${age} years. Such things should not happen underground.`,
+    ]);
+  }
+  if (DISEASE_CAUSE_LABELS.includes(cause)) {
+    return pick(rng, [
+      `${name}, ${profession}, has died of ${cause}. The healers could not save them. ${age} years.`,
+      `${cause} took ${name} the ${prof} in the end. ${age} years.`,
+      `${name} is dead of ${cause}, ${age} years old. The sickness moved faster than the medicine.`,
+    ]);
+  }
+  if (cause === "starvation") {
+    return pick(rng, [
+      `${name}, ${profession}, has starved to death. ${age} years, and the stores were empty.`,
+      `${name} the ${prof} is dead of hunger. ${age} years. The fortress failed to feed its own.`,
+      `Starvation has taken ${name}. ${age} years old, and not a meal to be found.`,
+    ]);
+  }
+  if (cause === "dehydration") {
+    return pick(rng, [
+      `${name}, ${profession}, has died of thirst. ${age} years, with the wells run dry.`,
+      `${name} the ${prof} is dead of dehydration. ${age} years. There was nothing left to drink.`,
+      `Thirst has claimed ${name}. ${age} years old, and the barrels all empty.`,
+    ]);
+  }
+  return pick(rng, [
+    `${name}, ${profession}, has died (${cause}). Aged ${age} years.`,
+  ]);
 }
 
 /** Context that flavours a tantrum-onset line. The narrator picks the

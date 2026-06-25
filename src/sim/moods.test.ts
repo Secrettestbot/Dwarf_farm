@@ -12,7 +12,7 @@ import { narrateTantrumOnset, narrateObsessionOnset } from "./events/narrator";
 
 describe("tantrum narrator names the cause", () => {
   it("picks a bereavement line when the dwarf has a deceased partner", () => {
-    const rng = new Rng(101);
+    const rng = Rng.fromSeed(101);
     // 20 rolls — every line should mention the partner's name.
     for (let i = 0; i < 20; i++) {
       const line = narrateTantrumOnset(rng, "Urist", { lostPartnerName: "Doren" });
@@ -22,7 +22,7 @@ describe("tantrum narrator names the cause", () => {
   });
 
   it("picks a rivalry line when there's a feud but no lost partner", () => {
-    const rng = new Rng(102);
+    const rng = Rng.fromSeed(102);
     for (let i = 0; i < 20; i++) {
       const line = narrateTantrumOnset(rng, "Urist", { rivalName: "Kogan" });
       expect(line).toContain("Kogan");
@@ -31,7 +31,7 @@ describe("tantrum narrator names the cause", () => {
   });
 
   it("falls back to a generic line when nothing in context is set", () => {
-    const rng = new Rng(103);
+    const rng = Rng.fromSeed(103);
     for (let i = 0; i < 20; i++) {
       const line = narrateTantrumOnset(rng, "Urist", {});
       expect(line.startsWith("Urist has broken.")).toBe(true);
@@ -42,7 +42,7 @@ describe("tantrum narrator names the cause", () => {
   });
 
   it("bereavement outranks rivalry when both are set", () => {
-    const rng = new Rng(104);
+    const rng = Rng.fromSeed(104);
     for (let i = 0; i < 20; i++) {
       const line = narrateTantrumOnset(rng, "Urist", {
         lostPartnerName: "Doren",
@@ -54,7 +54,7 @@ describe("tantrum narrator names the cause", () => {
   });
 
   it("recently-wounded line fires when nothing more specific is set", () => {
-    const rng = new Rng(105);
+    const rng = Rng.fromSeed(105);
     let foundWoundLine = false;
     for (let i = 0; i < 30; i++) {
       const line = narrateTantrumOnset(rng, "Urist", { recentlyWounded: true });
@@ -66,7 +66,7 @@ describe("tantrum narrator names the cause", () => {
 
 describe("obsession narrator distinguishes mastery from new craft", () => {
   it("uses the mastery pool when the fixation matches the dwarf's best skill", () => {
-    const rng = new Rng(201);
+    const rng = Rng.fromSeed(201);
     let foundMasteryMarker = false;
     for (let i = 0; i < 30; i++) {
       const line = narrateObsessionOnset(rng, "Urist", "smithing", {
@@ -88,7 +88,7 @@ describe("obsession narrator distinguishes mastery from new craft", () => {
   });
 
   it("uses the new-craft pool when the fixation lands on a different skill", () => {
-    const rng = new Rng(202);
+    const rng = Rng.fromSeed(202);
     let foundNewCraftMarker = false;
     for (let i = 0; i < 30; i++) {
       const line = narrateObsessionOnset(rng, "Urist", "scholarship", {
@@ -108,8 +108,8 @@ describe("obsession narrator distinguishes mastery from new craft", () => {
   });
 
   it("is deterministic for the same seed", () => {
-    const r1 = new Rng(303);
-    const r2 = new Rng(303);
+    const r1 = Rng.fromSeed(303);
+    const r2 = Rng.fromSeed(303);
     const ctx = { skillLabel: "Brewing", bestSkillId: undefined };
     expect(narrateObsessionOnset(r1, "Urist", "brewing", ctx)).toBe(
       narrateObsessionOnset(r2, "Urist", "brewing", ctx),
