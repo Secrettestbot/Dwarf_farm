@@ -4,7 +4,7 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival, narrateTantrumOnset, narrateObsessionOnset } from "./events/narrator";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival, narrateTantrumOnset, narrateObsessionOnset, narrateGraveVisit } from "./events/narrator";
 import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, seasonOf, Season } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
@@ -3893,22 +3893,23 @@ function progressVisitGrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos:
     return;
   }
   if (job.progress === 0) {
-    // First tick — log the visit. Look up the buried name from the
+    // First tick — log the visit. Look up the buried dwarf from the
     // colony registry so the line reads as personal rather than
-    // generic.
+    // generic, and flavour the tone by how long ago they died.
     const dw = sim.dwarf.get(e);
-    let buriedName: string | null = null;
+    let buried: typeof sim.graves[number] | undefined;
     for (const g of sim.graves) {
       if (g.x === job.targetX && g.y === job.targetY) {
-        buriedName = g.name;
+        buried = g;
         break;
       }
     }
-    if (dw && buriedName) {
+    if (dw && buried) {
+      const seasonsSince = Math.max(0, Math.floor((sim.tick - buried.deathTick) / TICKS_PER_SEASON));
       sim.events.add(
         sim.tick,
         "social",
-        `${dw.name} stands at ${buriedName}'s grave for a long while. The mountain is quiet.`,
+        narrateGraveVisit(sim.aiRng, dw.name, buried.name, buried.profession, seasonsSince),
       );
     }
   }

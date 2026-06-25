@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Rng } from "./rng";
-import { narrateDeath } from "./events/narrator";
+import { narrateDeath, narrateGraveVisit } from "./events/narrator";
 
 // The death narrator switches voice by cause. The cause strings are
 // produced at the killDwarf call sites in sim.ts:
@@ -74,6 +74,52 @@ describe("death narrator picks a voice per cause", () => {
   it("is deterministic for the same seed and cause", () => {
     const a = narrateDeath(Rng.fromSeed(99), "Urist", "Miner", 50, "slain by a cave troll");
     const b = narrateDeath(Rng.fromSeed(99), "Urist", "Miner", 50, "slain by a cave troll");
+    expect(a).toBe(b);
+  });
+});
+
+describe("grave-visit narrator shifts tone with time", () => {
+  it("a visit within the first season reads as raw grief", () => {
+    const rng = Rng.fromSeed(21);
+    let rawMarker = false;
+    for (let i = 0; i < 30; i++) {
+      const line = narrateGraveVisit(rng, "Urist", "Doren", "Mason", 0);
+      expect(line).toContain("Urist");
+      expect(line).toContain("Doren");
+      if (line.includes("fresh") || line.includes("barely cold") || line.includes("jaw tight")) {
+        rawMarker = true;
+      }
+    }
+    expect(rawMarker).toBe(true);
+  });
+
+  it("a visit within the first year reads as settling grief", () => {
+    const rng = Rng.fromSeed(22);
+    let midMarker = false;
+    for (let i = 0; i < 30; i++) {
+      const line = narrateGraveVisit(rng, "Urist", "Doren", "Mason", 2);
+      if (line.includes("A season turns") || line.includes("brushes the dust") || line.includes("sits with")) {
+        midMarker = true;
+      }
+    }
+    expect(midMarker).toBe(true);
+  });
+
+  it("a visit years later reads as worn-smooth remembrance", () => {
+    const rng = Rng.fromSeed(23);
+    let oldMarker = false;
+    for (let i = 0; i < 30; i++) {
+      const line = narrateGraveVisit(rng, "Urist", "Doren", "Mason", 9);
+      if (line.includes("for years now") || line.includes("Years on") || line.includes("dulled the edge")) {
+        oldMarker = true;
+      }
+    }
+    expect(oldMarker).toBe(true);
+  });
+
+  it("is deterministic for the same seed and recency", () => {
+    const a = narrateGraveVisit(Rng.fromSeed(7), "Urist", "Doren", "Mason", 3);
+    const b = narrateGraveVisit(Rng.fromSeed(7), "Urist", "Doren", "Mason", 3);
     expect(a).toBe(b);
   });
 });

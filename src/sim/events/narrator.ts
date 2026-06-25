@@ -303,6 +303,41 @@ export function narrateBereavement(rng: Rng, survivor: string, deceased: string,
   ]);
 }
 
+/** A survivor pays respects at a buried partner's headstone. The
+ * tone shifts with how long ago the death was: raw within the first
+ * season, settling within the first year, worn smooth after that.
+ * `seasonsSince` is whole seasons elapsed since the burial;
+ * `deceasedProfession` flavours one line per pool so the grave reads
+ * as a specific dwarf rather than an anonymous plot. */
+export function narrateGraveVisit(
+  rng: Rng,
+  visitor: string,
+  deceased: string,
+  deceasedProfession: string,
+  seasonsSince: number,
+): string {
+  const prof = deceasedProfession.toLowerCase();
+  if (seasonsSince < 1) {
+    return pick(rng, [
+      `${visitor} kneels at ${deceased}'s grave. The earth is still fresh.`,
+      `${visitor} has not learned to pass the cemetery without stopping. ${deceased} is barely cold.`,
+      `${visitor} stands at ${deceased}'s headstone, jaw tight, saying nothing.`,
+    ]);
+  }
+  if (seasonsSince < 4) {
+    return pick(rng, [
+      `${visitor} visits ${deceased}'s grave. A season turns; the ache does not.`,
+      `${visitor} brushes the dust from ${deceased}'s headstone and stays a while.`,
+      `${visitor} sits with ${deceased} the ${prof} for a long while. The mountain is quiet.`,
+    ]);
+  }
+  return pick(rng, [
+    `${visitor} visits ${deceased}'s grave, as they have for years now. Old grief, worn smooth.`,
+    `Years on, ${visitor} still finds their way to ${deceased}'s headstone.`,
+    `${visitor} stands at ${deceased} the ${prof}'s grave. Time has dulled the edge, not the memory.`,
+  ]);
+}
+
 /** Disease cause labels the death narrator recognises (mirrors
  * DISEASE_DEFS[].label in sim.ts). Kept as a literal list here so the
  * narrator stays free of a sim-internals import; if a new disease is
