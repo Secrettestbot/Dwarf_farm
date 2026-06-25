@@ -394,6 +394,15 @@ function lostPartnerNameForDwarf(
   return grave?.name;
 }
 
+/** Look up the buried name at a specific grave coordinate. Used by
+ * the pairing path (where we need to name a re-pairing widow's
+ * previous partner) and by anything else that has grave coords
+ * already in hand but wants the name. */
+function lookupGraveName(sim: SimWorld, g: { x: number; y: number }): string | undefined {
+  const grave = sim.graves.find((gr) => gr.x === g.x && gr.y === g.y);
+  return grave?.name;
+}
+
 /** Find the dwarf this one is feuding with most. Iterates sim.grudges
  * for entries that mention `e`, applies the same lazy-decay rule as
  * grudgeCount, and returns the rival's display name once the
@@ -3323,9 +3332,27 @@ function pairingSystem(sim: SimWorld): void {
     const dwA = sim.dwarf.get(a);
     const dwB = sim.dwarf.get(b);
     if (!dwA || !dwB) continue;
+    // Resolve widowed flag + deceased name BEFORE the lostPartnerGrave
+    // is cleared, so the chronicle line can name who came before.
+    const aLost = dwA.lostPartnerGrave ? lookupGraveName(sim, dwA.lostPartnerGrave) : undefined;
+    const bLost = dwB.lostPartnerGrave ? lookupGraveName(sim, dwB.lostPartnerGrave) : undefined;
     dwA.partnerId = b;
     dwB.partnerId = a;
-    sim.events.add(sim.tick, "social", narratePairing(sim.aiRng, dwA.name, dwB.name));
+    // The lostPartnerGrave field's doc promises it's cleared when the
+    // survivor pairs with someone new. Without this clear the
+    // chooseTask grave-visit route would keep sending the widow to
+    // their old partner's headstone forever; clear it on both sides
+    // (only one normally has a grave, but symmetry costs nothing).
+    dwA.lostPartnerGrave = undefined;
+    dwB.lostPartnerGrave = undefined;
+    sim.events.add(
+      sim.tick,
+      "social",
+      narratePairing(sim.aiRng, dwA.name, dwB.name, {
+        aLostPartnerName: aLost,
+        bLostPartnerName: bLost,
+      }),
+    );
   }
 }
 
@@ -3493,7 +3520,32 @@ export function birthDwarf(sim: SimWorld, motherId: EntityId, fatherId: EntityId
   // — claiming a child was born when none exists would lie to the
   // chronicle. The reproduction roll just misses this year.
   if (childId === -1) return;
-  sim.events.add(sim.tick, "social", narrateBirth(sim.aiRng, childName, mother.name, father.name));
+  // "First colony child" — true if no dwarf alive RIGHT NOW (including
+  // the one we just spawned) carries bornInColony other than the
+  // newborn. Equivalent to checking "before this birth, was anyone
+  // colony-born?" without having to capture state earlier. We scan
+  // sim.dwarf rather than sim.forEachDwarf so the predicate sees the
+  // freshly-spawned child too and we can early-out cleanly.
+  let isFirstColonyChild = true;
+  for (const id of sim.dwarf.entities) {
+    if (id === childId) continue;
+    const d = sim.dwarf.get(id);
+    if (d?.bornInColony) {
+      isFirstColonyChild = false;
+      break;
+    }
+  }
+  sim.events.add(
+    sim.tick,
+    "social",
+    narrateBirth(sim.aiRng, childName, mother.name, father.name, {
+      isFirstColonyChild,
+      // Same flag the Three Generations milestone below reads. Both
+      // can be true simultaneously — first-colony-child takes
+      // precedence in the narrator.
+      bothParentsBornInColony: mother.bornInColony && father.bornInColony,
+    }),
+  );
   // Population milestones (GDD §10.2). One-shot per threshold via Set.
   checkPopulationMilestones(sim);
   // Three Generations (GDD §10.2): a child is born to two parents who

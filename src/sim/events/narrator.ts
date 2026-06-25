@@ -273,7 +273,37 @@ export function narrateHostileSlain(rng: Rng, dwarfName: string, kindName: strin
   ]);
 }
 
-export function narratePairing(rng: Rng, a: string, b: string): string {
+/** Context that flavours a pairing line. `aLostPartnerName` /
+ * `bLostPartnerName` are set when the dwarf has a recorded
+ * lostPartnerGrave — re-pairing reads very differently from a first
+ * bond, and the narrator leans into that when either side is widowed.
+ * Names (not just booleans) so the line can reference who came
+ * before; this only fires when the dwarf still has a grave on record,
+ * so the previous partner is always real. */
+export interface PairingContext {
+  aLostPartnerName?: string;
+  bLostPartnerName?: string;
+}
+
+export function narratePairing(rng: Rng, a: string, b: string, ctx: PairingContext = {}): string {
+  const bothWidowed = ctx.aLostPartnerName && ctx.bLostPartnerName;
+  if (bothWidowed) {
+    return pick(rng, [
+      `${a} and ${b}, both of whom buried partners, have found each other. The mountain has seen worse omens.`,
+      `Grief found grief: ${a} and ${b} have become partners. ${ctx.aLostPartnerName} and ${ctx.bLostPartnerName} are remembered.`,
+      `${a} and ${b} have decided that two solitudes are enough. They will share a hearth now.`,
+    ]);
+  }
+  if (ctx.aLostPartnerName || ctx.bLostPartnerName) {
+    const widowed = ctx.aLostPartnerName ? a : b;
+    const fresh = ctx.aLostPartnerName ? b : a;
+    const lost = ctx.aLostPartnerName ?? ctx.bLostPartnerName!;
+    return pick(rng, [
+      `${widowed}, who once mourned ${lost}, has bonded with ${fresh}. The grief is not gone, but it has made room.`,
+      `${fresh} and ${widowed} have become partners. ${widowed} carries ${lost}'s memory still, but no longer alone.`,
+      `${widowed} has taken ${fresh} as a partner. ${lost} would not have begrudged it.`,
+    ]);
+  }
   return pick(rng, [
     `${a} and ${b} have become partners.`,
     `Old friends ${a} and ${b} have decided to marry.`,
@@ -281,7 +311,31 @@ export function narratePairing(rng: Rng, a: string, b: string): string {
   ]);
 }
 
-export function narrateBirth(rng: Rng, child: string, mother: string, father: string): string {
+/** Context that flavours a birth line. `isFirstColonyChild` fires on
+ * the very first dwarf born to colony parents (a real milestone for a
+ * young fortress); `bothParentsBornInColony` fires for any later
+ * birth where both parents were themselves colony-born — the
+ * Three-Generations setup, worth its own voice. */
+export interface BirthContext {
+  isFirstColonyChild?: boolean;
+  bothParentsBornInColony?: boolean;
+}
+
+export function narrateBirth(rng: Rng, child: string, mother: string, father: string, ctx: BirthContext = {}): string {
+  if (ctx.isFirstColonyChild) {
+    return pick(rng, [
+      `${child} is the first child born in the mountain. ${mother} and ${father} did not sleep last night.`,
+      `A first: ${child} has been born to ${mother} and ${father}. The fortress is no longer only its founders.`,
+      `${child} is born. ${mother} and ${father} are well, and the colony has its first native daughter or son.`,
+    ]);
+  }
+  if (ctx.bothParentsBornInColony) {
+    return pick(rng, [
+      `${child} has been born to ${mother} and ${father}, both of them children of this mountain. A third generation begins.`,
+      `${child} is born. Their parents ${mother} and ${father} never saw the surface; neither will ${child} need to.`,
+      `${mother} has given birth to ${child}. Three generations under the same stone now.`,
+    ]);
+  }
   return pick(rng, [
     `${child} has been born to ${mother} and ${father}.`,
     `A child, ${child}, has been born in the mountain. ${mother} and ${father} are well.`,
