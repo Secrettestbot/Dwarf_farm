@@ -683,7 +683,7 @@ export function restore(save: SaveV1): SimWorld {
       if (
         h &&
         h.fromSiege === undefined &&
-        (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord")
+        (h.kind === "goblin_scout" || h.kind === "goblin_champion" || h.kind === "cave_troll" || h.kind === "goblin_warlord")
       ) {
         h.fromSiege = true;
       }

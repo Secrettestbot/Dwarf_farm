@@ -256,6 +256,52 @@ export function narrateArrival(rng: Rng, names: string[]): string {
   ]);
 }
 
+/** The "siege begins" chronicle line. Scales its voice with the siege
+ * tier so a tenth siege doesn't read the same as the first. Must keep
+ * the literal substring "siege begins" — the siege integration test
+ * keys off it. Leader-clause precedence: named warlord > trolls >
+ * champions > plain rabble. */
+export interface SiegeArrivalContext {
+  goblinCount: number;
+  championCount: number;
+  trollCount: number;
+  /** Name of the warlord leading the host, or "" if none. */
+  warlordName: string;
+  /** Tier of this siege (1 = the colony's first). */
+  tier: number;
+}
+
+export function narrateSiegeArrival(rng: Rng, ctx: SiegeArrivalContext): string {
+  const { goblinCount, championCount, trollCount, warlordName, tier } = ctx;
+  const host = tier <= 1 ? "warband" : tier <= 3 ? "war-host" : "great host";
+  let clause = "";
+  if (warlordName) {
+    clause = `, led by ${warlordName}`;
+  } else if (trollCount > 0) {
+    clause = trollCount === 1 ? ` with a cave troll at their head` : ` with ${trollCount} cave trolls at their head`;
+  } else if (championCount > 0) {
+    clause = `, champions among them`;
+  }
+  // A warlord-led host can still mention the trolls/champions backing
+  // them, so the heavies aren't invisible when a warlord steals the
+  // leader clause.
+  let backing = "";
+  if (warlordName && (trollCount > 0 || championCount > 0)) {
+    const parts: string[] = [];
+    if (championCount > 0) parts.push(championCount === 1 ? "a champion" : `${championCount} champions`);
+    if (trollCount > 0) parts.push(trollCount === 1 ? "a cave troll" : `${trollCount} cave trolls`);
+    backing = ` ${parts.join(" and ")} march at their flank.`;
+  }
+  const tierTail = tier >= 4
+    ? pick(rng, [
+        " The largest host the colony has yet faced.",
+        " The slopes are black with them.",
+        " There has not been a war-host like it.",
+      ])
+    : "";
+  return `The siege begins. ${goblinCount} goblins${clause} pour onto the surface near the gate as a ${host}.${backing}${tierTail} The fortress is on its own now.`;
+}
+
 export function narrateHostileSpawn(rng: Rng, kindArticle: string, depth: number, spawnY: number): string {
   const where = depthPhrase(depth, spawnY);
   return pick(rng, [

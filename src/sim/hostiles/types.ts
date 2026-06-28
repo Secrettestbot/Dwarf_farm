@@ -12,6 +12,7 @@ export type HostileKind =
   | "giant_spider"
   | "cave_bear"
   | "goblin_scout"
+  | "goblin_champion"
   | "goblin_warlord"
   | "cave_troll"
   | "undead"
@@ -124,6 +125,24 @@ export const HOSTILE_DEFS: Record<HostileKind, HostileDef> = {
     moveCooldown: 22,
     minDepth: 80,
     pursueRange: 18,
+    dropsHide: true,
+  },
+  // Goblin champion — siege-only elite that starts arriving from the
+  // third siege on (see siegeComposition). Sits between scout and
+  // warlord: tougher and harder-hitting than a scout, but anonymous
+  // and several-strong rather than a single named leader. Never
+  // spawned by the periodic surface loop (not in pickHostileKind) —
+  // a champion only ever marches with a warband.
+  goblin_champion: {
+    id: "goblin_champion",
+    name: "goblin champion",
+    spawnArticle: "a goblin champion",
+    maxHp: 80,
+    damage: 12,
+    attackCooldown: 65,
+    moveCooldown: 24,
+    minDepth: 0, // siege spawns at the surface; no depth gate
+    pursueRange: 20,
     dropsHide: true,
   },
   // Goblin warlord — one per siege at pop ≥ 15. Named, slower

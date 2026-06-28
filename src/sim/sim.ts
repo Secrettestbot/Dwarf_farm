@@ -4,7 +4,8 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival, narrateTantrumOnset, narrateObsessionOnset, narrateGraveVisit } from "./events/narrator";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival, narrateTantrumOnset, narrateObsessionOnset, narrateGraveVisit, narrateSiegeArrival } from "./events/narrator";
+import { siegeComposition } from "./siegeComposition";
 import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, seasonOf, Season } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
@@ -5915,15 +5916,13 @@ function rollWarlordName(sim: SimWorld): string {
 }
 
 function spawnSiegeWarband(sim: SimWorld): void {
-  // Scale the warband with population. ~4 base + 1 extra per 4
-  // dwarves caps a 60-dwarf colony at ~19 goblins. Add a single
-  // troll once the colony's substantial. Once the colony's at the
-  // siege-min threshold (pop ≥ 15) a named warlord leads the
-  // warband — gives the chronicle a real foe to remember.
+  // Composition scales with both colony size and siege tier (the
+  // number of the upcoming siege). The curve lives in siegeComposition
+  // so it can be unit-tested without a full year-long run. tier =
+  // siegesSurvived + 1; the field counts only broken sieges.
   const pop = sim.dwarf.size();
-  const goblinCount = Math.min(20, 4 + Math.floor(pop / 4));
-  const trollCount = pop >= 25 ? 1 : 0;
-  const warlordCount = pop >= 15 ? 1 : 0;
+  const tier = sim.siegesSurvived + 1;
+  const { goblinCount, championCount, trollCount, warlordCount } = siegeComposition(pop, sim.siegesSurvived);
   const warlordName = warlordCount > 0 ? rollWarlordName(sim) : "";
 
   // Spawn site: surface row near spawn.x. We sample a small
@@ -5950,6 +5949,10 @@ function spawnSiegeWarband(sim: SimWorld): void {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
     sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y, fromSiege: true });
   }
+  for (let i = 0; i < championCount; i++) {
+    const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
+    sim.spawnHostile({ kind: "goblin_champion", x: c.x, y: c.y, fromSiege: true });
+  }
   for (let i = 0; i < trollCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
     sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y, fromSiege: true });
@@ -5968,13 +5971,10 @@ function spawnSiegeWarband(sim: SimWorld): void {
   sim.siegeActive = true;
   sim.siegeKilledSinceStart = 0;
   sim.siegeWarlordName = warlordName;
-  const leaderClause = warlordCount > 0
-    ? `, led by ${warlordName}`
-    : (trollCount > 0 ? ` with a cave troll at their head` : "");
   sim.events.add(
     sim.tick,
     "crisis",
-    `The siege begins. ${goblinCount} goblins${leaderClause} pour onto the surface near the gate. The fortress is on its own now.`,
+    narrateSiegeArrival(sim.aiRng, { goblinCount, championCount, trollCount, warlordName, tier }),
     { x: candidates[0].x, y: candidates[0].y },
   );
 }
