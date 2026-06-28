@@ -12,6 +12,7 @@ import { TRAITS_BY_ID } from "../sim/dwarves/traits";
 import { SKILLS, SKILLS_BY_ID, skillTierLabel, SkillId } from "../sim/dwarves/skills";
 import { progressInLevel } from "../sim/dwarves/skillProgress";
 import { grudgeCount } from "../sim/sim";
+import { TICKS_PER_SEASON } from "../sim/time";
 
 const ACTIVITY_LABEL: Record<string, string> = {
   mine: "mining",
@@ -86,6 +87,23 @@ export class DwarfInspector {
     // this one). Lookups are O(N · siblings) but N is dwarves and
     // the inspector renders only when open.
     const family = computeFamily(sim, dw);
+
+    // Mourning: a widowed dwarf carries lostPartnerGrave until they
+    // re-pair. Surface it — the bereavement, tantrum, and grave-visit
+    // systems all key off this state, but the inspector never showed
+    // it. Look the deceased up in the grave registry for the name +
+    // how long ago, so the line reads as a specific loss.
+    let mourning: { name: string; seasonsSince: number } | null = null;
+    if (dw.lostPartnerGrave) {
+      const g = dw.lostPartnerGrave;
+      const grave = sim.graves.find((gr) => gr.x === g.x && gr.y === g.y);
+      if (grave) {
+        mourning = {
+          name: grave.name,
+          seasonsSince: Math.max(0, Math.floor((sim.tick - grave.deathTick) / TICKS_PER_SEASON)),
+        };
+      }
+    }
 
     const traits = dw.traitIds
       .map((id) => TRAITS_BY_ID[id])
@@ -194,12 +212,15 @@ export class DwarfInspector {
         </div>
         <button id="inspector-close" class="btn" style="padding:2px 8px;font-size:11px;">×</button>
       </div>
-      ${partner ? `<div style="margin-top:6px;font-size:11px;color:#888;">Partnered with <span style="color:#e0c080;">${escapeHtml(partner.name)}</span></div>` : ""}
-      ${familyHtml(family)}
+      ${relationshipsHtml({
+        partnerName: partner ? partner.name : null,
+        mourning,
+        family,
+        grudgesRow: grudgesLine,
+      })}
       ${kingLine}
       ${mayorLine}
       ${diseaseLine}
-      ${grudgesLine}
       ${militaryLine}
       <div style="margin-top:8px;font-size:11px;color:#888;">Activity: <span style="color:#bbb;">${escapeHtml(activity)}</span></div>
       ${hpHtml}
@@ -269,7 +290,7 @@ export class DwarfInspector {
  * by name in the living dwarves and the cemetery registry; children
  * and siblings are derived from any living dwarf whose parentNames
  * match. */
-interface FamilySnapshot {
+export interface FamilySnapshot {
   parents: Array<{ name: string; status: "living" | "deceased" | "unknown" }>;
   children: string[];
   siblings: string[];
@@ -361,7 +382,49 @@ function familyHtml(family: FamilySnapshot): string {
     const more = family.siblings.length > 4 ? ` (+${family.siblings.length - 4})` : "";
     rows.push(`<div>Siblings: ${stext}${more}</div>`);
   }
-  return `<div style="margin-top:6px;font-size:11px;color:#888;line-height:1.5;">${rows.join("")}</div>`;
+  // Bare rows — the Relationships section provides the wrapper + style.
+  return rows.join("");
+}
+
+/** "lost N seasons/years ago" phrasing for the mourning line. Mirrors
+ * the grave-visit narrator's recency bands so the inspector and the
+ * chronicle agree on how fresh a loss is. */
+export function mourningAgoPhrase(seasons: number): string {
+  if (seasons < 1) return "lost this season";
+  if (seasons === 1) return "lost a season ago";
+  if (seasons < 4) return `lost ${seasons} seasons ago`;
+  const years = Math.floor(seasons / 4);
+  return years === 1 ? "lost a year ago" : `lost ${years} years ago`;
+}
+
+/** Group every social tie — partner, mourning, family, grudges — into
+ * one labelled section so the inspector reads as a relationship web
+ * rather than scattered tags. Renders nothing when the dwarf has no
+ * ties at all (a lone founder before any pairing / feud / child). */
+export function relationshipsHtml(opts: {
+  partnerName: string | null;
+  mourning: { name: string; seasonsSince: number } | null;
+  family: FamilySnapshot;
+  grudgesRow: string;
+}): string {
+  const rows: string[] = [];
+  if (opts.partnerName) {
+    rows.push(`<div>Partnered with <span style="color:#e0c080;">${escapeHtml(opts.partnerName)}</span></div>`);
+  }
+  if (opts.mourning) {
+    rows.push(
+      `<div style="color:#9a8a72;">Mourning <span style="color:#c9b89a;">${escapeHtml(opts.mourning.name)}</span> · ${mourningAgoPhrase(opts.mourning.seasonsSince)}</div>`,
+    );
+  }
+  const fam = familyHtml(opts.family);
+  if (fam) rows.push(fam);
+  if (opts.grudgesRow) rows.push(opts.grudgesRow);
+  if (rows.length === 0) return "";
+  return `
+    <div style="margin-top:8px;">
+      <div style="font-size:10px;letter-spacing:1.5px;color:#666;">RELATIONSHIPS</div>
+      <div style="margin-top:3px;font-size:11px;color:#888;line-height:1.5;">${rows.join("")}</div>
+    </div>`;
 }
 
 function diseaseLabel(kind: string): string {
