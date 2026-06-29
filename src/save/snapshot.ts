@@ -269,6 +269,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     grudges: sim.grudges.size > 0
       ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick, peak: v.peak }))
       : undefined,
+    fortificationPlan: sim.fortificationPlan.length > 0 ? [...sim.fortificationPlan] : undefined,
     cumulative: Object.keys(sim.cumulative).length > 0 ? { ...sim.cumulative } : undefined,
     discoveries: sim.discoveries.size > 0 ? Array.from(sim.discoveries.values()).sort((a, b) => a - b) : undefined,
   };
@@ -618,6 +619,9 @@ export function restore(save: SaveV1): SimWorld {
         (sim.cumulative as Record<string, number>)[k] = v;
       }
     }
+  }
+  if (save.fortificationPlan) {
+    sim.fortificationPlan = [...save.fortificationPlan];
   }
   if (save.discoveries) {
     for (const t of save.discoveries) sim.discoveries.add(t);

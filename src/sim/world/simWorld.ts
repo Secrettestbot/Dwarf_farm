@@ -334,6 +334,13 @@ export class SimWorld {
    * warlord to lead. */
   siegeWarlordName: string = "";
 
+  /** Pending fortification-rampart tiles the architect has committed
+   * to but the dwarves haven't built yet. Packed (y << 16 | x). The
+   * fortify job drains this as walls go up; built tiles persist as
+   * normal tile overrides. Round-trips through save so a half-built
+   * rampart survives a reload. */
+  fortificationPlan: number[] = [];
+
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips
    * through save so a reload restores the colony's full memorial roll

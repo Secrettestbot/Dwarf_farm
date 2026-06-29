@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave" | "fortify";
     targetX: number;
     targetY: number;
     progress: number;
@@ -377,6 +377,12 @@ export interface SaveV1 {
   mandatesFailed?: number;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
+  /** Pending fortification-rampart tiles (packed y<<16|x) the architect
+   * has committed to but the masons haven't raised yet. Built segments
+   * persist as ordinary tile overrides; this only carries the
+   * outstanding plan. Optional for back-compat — older saves load with
+   * no pending rampart. */
+  fortificationPlan?: number[];
   /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
    * count rises with each spat. Round-trips so a feud survives a
    * reload (or a worker catch-up) instead of resetting to peace.

@@ -120,6 +120,7 @@ export function tick(sim: SimWorld): void {
   movementSystem(sim);
   workSystem(sim);
   hostileSpawnSystem(sim);
+  fortificationPlanningSystem(sim);
   siegeSystem(sim);
   hostileMovementSystem(sim);
   combatSystem(sim);
@@ -4020,6 +4021,9 @@ function workSystem(sim: SimWorld): void {
       case "engrave":
         progressEngrave(sim, e, job, pos);
         break;
+      case "fortify":
+        progressFortify(sim, e, job, pos);
+        break;
     }
   }
 }
@@ -5920,6 +5924,125 @@ const HOSTILE_MIN_DISTANCE_FROM_DWARF = 8;
 const DWARF_BASE_DAMAGE = 6;
 const DWARF_ATTACK_COOLDOWN = 60;
 
+// ---- Fortifications --------------------------------------------------
+//
+// The architect commits to a defensive rampart across the colony's
+// surface entrance once the colony is large enough to be raided. The
+// dwarves build it from stockpiled blocks in their own time — the
+// player never places a wall. The rampart is a horizontal line on the
+// surface row flanking the entrance column, with a deliberate gap left
+// open at the entrance so the colony's own traffic (and a funnelled
+// siege) passes through the breach. Fortification tiles block hostiles
+// but not dwarves, so the plan can never seal the colony in.
+
+/** Colony must reach this size before the architect rampart-plans —
+ * matches the siege gate (a colony too small to be sieged doesn't
+ * need walls). */
+const FORTIFY_MIN_POPULATION = 10;
+/** Half-width of the rampart line, in tiles, on each side of the
+ * entrance column. */
+const FORTIFY_HALF_SPAN = 7;
+/** Half-width of the central gap left open at the entrance. */
+const FORTIFY_GAP_HALF = 1;
+/** Ticks of work to raise one wall segment from a block. */
+const FORTIFY_TICKS = 80;
+
+/** Once the colony is raid-worthy, lay out a single surface rampart
+ * flanking the entrance (if one isn't already planned or built). Runs
+ * cheaply: bails immediately in the common case where a plan already
+ * exists or the colony's too small. */
+function fortificationPlanningSystem(sim: SimWorld): void {
+  if (sim.tick === 0) return;
+  // Re-evaluate only at day boundaries — rampart planning isn't urgent.
+  if (sim.tick % TICKS_PER_DAY !== 0) return;
+  if (sim.fortificationPlan.length > 0) return; // a plan is in progress
+  if (sim.dwarf.size() < FORTIFY_MIN_POPULATION) return;
+
+  const baseX = sim.spawn.x;
+  // If a rampart already stands (built on a previous plan), don't lay
+  // another — scan the entrance row for an existing Fortification.
+  for (let dx = -FORTIFY_HALF_SPAN; dx <= FORTIFY_HALF_SPAN; dx++) {
+    const x = baseX + dx;
+    if (x < 0 || x >= sim.grid.width) continue;
+    if (sim.grid.getTile(x, sim.surfaceY[x]) === TileType.Fortification) return;
+  }
+
+  // Lay the plan: surface tiles flanking the entrance, gap in the
+  // middle. Only commit tiles that are currently a walkable surface
+  // (grass / corridor floor) so we don't try to "build" inside rock
+  // or over open air.
+  const planned: number[] = [];
+  for (let dx = -FORTIFY_HALF_SPAN; dx <= FORTIFY_HALF_SPAN; dx++) {
+    if (Math.abs(dx) <= FORTIFY_GAP_HALF) continue; // leave the breach open
+    const x = baseX + dx;
+    if (x < 0 || x >= sim.grid.width) continue;
+    const y = sim.surfaceY[x];
+    const tile = sim.grid.getTile(x, y);
+    if (tile !== TileType.Grass && tile !== TileType.CorridorFloor) continue;
+    planned.push((y << 16) | x);
+  }
+  if (planned.length === 0) return;
+  sim.fortificationPlan = planned;
+  sim.events.add(
+    sim.tick,
+    "social",
+    `The architect marks out a defensive rampart across the entrance. The masons will raise it as blocks allow.`,
+    { x: baseX, y: sim.surfaceY[baseX] },
+  );
+}
+
+/** Build one rampart segment. The dwarf has walked to (or onto) the
+ * planned tile; consume a stockpiled block, raise the wall, and strike
+ * the tile from the plan. Bails cleanly if the block was spent
+ * elsewhere first, the tile's no longer planned, or the dwarf isn't
+ * close enough. */
+function progressFortify(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  const packed = (job.targetY << 16) | job.targetX;
+  const stillPlanned = sim.fortificationPlan.includes(packed);
+  // Adjacency (including standing on the tile — fortifications are
+  // dwarf-walkable, so the builder may be right on the spot).
+  const dx = Math.abs(pos.x - job.targetX);
+  const dy = Math.abs(pos.y - job.targetY);
+  if (!stillPlanned || dx > 1 || dy > 1) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  if (sim.stockpile.blocks <= 0) {
+    // No block to lay this tick — release and try again later; the
+    // tile stays on the plan.
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  job.progress += effectiveWorkSpeed(sim, e);
+  if (job.progress < FORTIFY_TICKS) return;
+  // Double-check the block is still there (a race with another
+  // consumer over the work interval) before spending it.
+  if (sim.stockpile.blocks <= 0) {
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    return;
+  }
+  sim.stockpile.blocks -= 1;
+  sim.grid.setTile(job.targetX, job.targetY, TileType.Fortification);
+  sim.regions.invalidate();
+  sim.fortificationPlan = sim.fortificationPlan.filter((p) => p !== packed);
+  awardSkillXp(sim, e, "masonry", 1);
+  const dw = sim.dwarf.get(e);
+  if (dw && sim.fortificationPlan.length === 0) {
+    sim.events.add(
+      sim.tick,
+      "social",
+      `${dw.name} sets the last stone of the entrance rampart. The colony's gate is walled.`,
+      { x: job.targetX, y: job.targetY },
+    );
+  }
+  sim.dwarf.get(e)!.lastJobTick = sim.tick;
+  sim.job.remove(e);
+  sim.pathing.remove(e);
+}
+
 // ---- Sieges ----------------------------------------------------------
 //
 // Once per in-game year a goblin warband marches on the colony's
@@ -6269,6 +6392,12 @@ function hostileMovementSystem(sim: SimWorld): void {
     for (const [nx, ny] of tries) {
       if (nx === pos.x && ny === pos.y) continue;
       if (!sim.grid.isWalkable(nx, ny)) continue;
+      // Fortifications are the colony's defensive ramparts: walkable
+      // for dwarves, impassable for the enemy. A hostile won't step
+      // onto one, so a rampart with a gap funnels the warband to the
+      // breach. (Greedy pursuit means they pile up against the wall
+      // rather than route around it — exactly the kill-zone we want.)
+      if (sim.grid.getTile(nx, ny) === TileType.Fortification) continue;
       pos.x = nx;
       pos.y = ny;
       break;

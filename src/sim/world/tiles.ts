@@ -173,6 +173,15 @@ export const enum TileType {
   /** Trade depot's weigh-station counter. A Trade Depot only
    * counts as functional once trade_scales have been delivered. */
   TradeScales = 55,
+  /** Fortification — a dwarf-built defensive rampart on the surface.
+   * Walkable by the colony's own folk (they know the murder-holes and
+   * sally-ports), but hostiles refuse to cross it, so a rampart line
+   * with a deliberate gap funnels a siege into a kill zone. Built by
+   * the fortify job from a stockpiled block; planned by the architect,
+   * never placed by the player. Not solid — it can't be mined, and it
+   * never seals the colony (dwarves always pass), which is what makes
+   * it safe to drop into live pathing. */
+  Fortification = 56,
 }
 
 export interface TileInfo {
@@ -184,6 +193,7 @@ export interface TileInfo {
 }
 
 export const TILE_INFO: Record<number, TileInfo> = {
+  [TileType.Fortification]: { name: "fortification", walkable: true, solid: false, color: 0x6e6a5a },
   [TileType.Air]: { name: "air", walkable: false, solid: false, color: 0x000000 },
   [TileType.Dirt]: { name: "dirt", walkable: false, solid: true, color: 0x6b4a2b },
   [TileType.Sand]: { name: "sand", walkable: false, solid: true, color: 0xb89868 },

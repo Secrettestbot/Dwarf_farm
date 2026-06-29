@@ -330,6 +330,18 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 6.71 Raise the entrance rampart. Defensive construction outranks
+  //      decoration (walls before art) but sits below all the core
+  //      survival / production / hauling work above. Only fires when
+  //      the architect has planned a rampart and the colony has a
+  //      block to spend on the next segment.
+  if (age >= MIN_WORK_AGE && sim.fortificationPlan.length > 0 && sim.stockpile.blocks > 0) {
+    const fortifyTarget = findFortifyTarget(sim, pos.x, pos.y);
+    if (fortifyTarget) {
+      return { kind: "fortify" as JobKind, targetX: fortifyTarget.x, targetY: fortifyTarget.y, progress: 0 };
+    }
+  }
+
   // 6.72 Engrave a wall. Late-tier work — only fires when the
   //     colony has spare blocks (or cut gems) and a complete room
   //     that isn't already maxed on decorations. Sinks the surplus
@@ -1302,6 +1314,26 @@ function findEngraveTarget(sim: SimWorld, sx: number, sy: number): { x: number; 
       const d = dx * dx + dy * dy;
       if (!best || d < best.d) best = { x, y, d };
     }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Nearest planned rampart tile that isn't already claimed by another
+ * builder, so a crew of masons spreads along the wall instead of
+ * stacking on one segment. The tile is reachable surface; the dwarf
+ * walks onto or beside it and progressFortify raises the wall. */
+function findFortifyTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  if (sim.fortificationPlan.length === 0) return null;
+  const claimed = collectJobTargets(sim, "fortify");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const packed of sim.fortificationPlan) {
+    const x = packed & 0xffff;
+    const y = (packed >>> 16) & 0xffff;
+    if (claimed.has((y << 16) | x)) continue;
+    const dx = x - sx;
+    const dy = y - sy;
+    const d = dx * dx + dy * dy;
+    if (!best || d < best.d) best = { x, y, d };
   }
   return best ? { x: best.x, y: best.y } : null;
 }
