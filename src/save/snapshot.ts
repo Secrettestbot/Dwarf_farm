@@ -267,7 +267,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     mandatesSatisfied: sim.mandatesSatisfied || undefined,
     mandatesFailed: sim.mandatesFailed || undefined,
     grudges: sim.grudges.size > 0
-      ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick }))
+      ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick, peak: v.peak }))
       : undefined,
     cumulative: Object.keys(sim.cumulative).length > 0 ? { ...sim.cumulative } : undefined,
     discoveries: sim.discoveries.size > 0 ? Array.from(sim.discoveries.values()).sort((a, b) => a - b) : undefined,
@@ -608,7 +608,7 @@ export function restore(save: SaveV1): SimWorld {
   if (save.mandatesFailed !== undefined) sim.mandatesFailed = save.mandatesFailed;
   if (save.grudges) {
     for (const g of save.grudges) {
-      sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick });
+      sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick, peak: g.peak ?? g.count });
     }
   }
   if (save.cumulative) {

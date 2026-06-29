@@ -302,6 +302,30 @@ export function narrateSiegeArrival(rng: Rng, ctx: SiegeArrivalContext): string 
   return `The siege begins. ${goblinCount} goblins${clause} pour onto the surface near the gate as a ${host}.${backing}${tierTail} The fortress is on its own now.`;
 }
 
+/** Two dwarves bury a grudge. `peak` is how high the grudge climbed
+ * before it was reconciled, so a years-deep feud ending reads bigger
+ * than a patched-up spat. Thresholds mirror the argument escalation
+ * wording (>= 6 "feud", >= 3 "old grievances", else minor). */
+export function narrateReconciliation(rng: Rng, a: string, b: string, peak: number): string {
+  if (peak >= 6) {
+    return pick(rng, [
+      `${a} and ${b}, enemies for as long as anyone remembers, are seen sharing a drink. The colony quietly exhales.`,
+      `The feud between ${a} and ${b} is over at last. Neither will say what finally ended it.`,
+      `${a} and ${b} have buried a years-deep grudge. The fortress feels lighter for it.`,
+    ]);
+  }
+  if (peak >= 3) {
+    return pick(rng, [
+      `${a} and ${b} have made their peace. The arguments stop.`,
+      `${a} and ${b} talk it out at last; the grudge between them fades.`,
+    ]);
+  }
+  return pick(rng, [
+    `${a} and ${b} patch up their quarrel.`,
+    `${a} and ${b} let a small grievance go.`,
+  ]);
+}
+
 export function narrateHostileSpawn(rng: Rng, kindArticle: string, depth: number, spawnY: number): string {
   const where = depthPhrase(depth, spawnY);
   return pick(rng, [

@@ -4,7 +4,7 @@ import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
 import { EntityId } from "./ecs/world";
-import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival, narrateTantrumOnset, narrateObsessionOnset, narrateGraveVisit, narrateSiegeArrival } from "./events/narrator";
+import { narrateOreFirstStrike, narrateDeath, narratePairing, narrateBirth, narrateBereavement, narrateHostileSpawn, narrateHostileSlain, narrateArrival, narrateTantrumOnset, narrateObsessionOnset, narrateGraveVisit, narrateSiegeArrival, narrateReconciliation } from "./events/narrator";
 import { siegeComposition } from "./siegeComposition";
 import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, seasonOf, Season } from "./time";
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
@@ -1192,6 +1192,21 @@ const GRUDGE_BRAWL_THRESHOLD = 4;
 const GRUDGE_BRAWL_BASE_CHANCE = 0.2;
 const GRUDGE_DECAY_TICKS = 30 * TICKS_PER_DAY; // an in-game month of quiet shaves a point
 
+// ---- Reconciliation: the counterweight to escalation ----------------
+//
+// Grudges used to only ever climb (arguments / brawls) or bleed off
+// passively (a point a month of quiet). There was no way for two
+// dwarves to actively make up, so a feud was a one-way ratchet until
+// time alone wore it down. Reconciliation gives the rivalry system an
+// arc: adjacent pairs who DON'T argue or brawl on the daily social
+// roll get a chance to patch things up, shaving the grudge faster
+// than decay. It's driven entirely by the dwarves — morale,
+// proximity, and traits — never the player.
+const RECONCILE_BASE_CHANCE = 0.5; // per quiet adjacency-day at grudge 1
+const RECONCILE_AMOUNT = 2; // grudge points shaved per successful reconcile
+const RECONCILE_CONTENT_MORALE = 60; // both above this → good-spirits bonus
+const RECONCILE_MORALE_BUMP = 5; // morale reward for fully burying a feud
+
 /** Canonical key for a grudge between two dwarves. Smaller id first
  * so (a,b) and (b,a) resolve to the same entry. */
 function grudgeKey(a: EntityId, b: EntityId): string {
@@ -1211,11 +1226,79 @@ export function grudgeCount(sim: SimWorld, a: EntityId, b: EntityId): number {
 
 /** Bump a pair's grudge by `delta` and record this tick as the most
  * recent incident. Lazy-decays first so a stale entry doesn't accrue
- * indefinitely. */
+ * indefinitely. Tracks the running peak so a later reconciliation can
+ * narrate how bad the feud got, not just the residual at burial. */
 function bumpGrudge(sim: SimWorld, a: EntityId, b: EntityId, delta: number): void {
   const key = grudgeKey(a, b);
   const cur = grudgeCount(sim, a, b);
-  sim.grudges.set(key, { count: cur + delta, lastIncidentTick: sim.tick });
+  const prevPeak = sim.grudges.get(key)?.peak ?? cur;
+  const next = cur + delta;
+  sim.grudges.set(key, { count: next, lastIncidentTick: sim.tick, peak: Math.max(prevPeak, next) });
+}
+
+/** Ease a pair's grudge down by `delta`, clamped at zero. Returns the
+ * peak the grudge reached if this brought it all the way to zero (so
+ * the caller can narrate the scale of the buried feud), or null if a
+ * grudge remains. Deletes the entry on full reconciliation so the
+ * pair leaves no trace in the ledger or the inspector. Mirror of
+ * bumpGrudge. */
+function easeGrudge(sim: SimWorld, a: EntityId, b: EntityId, delta: number): number | null {
+  const key = grudgeKey(a, b);
+  const entry = sim.grudges.get(key);
+  const cur = grudgeCount(sim, a, b);
+  const peak = entry?.peak ?? cur;
+  const next = Math.max(0, cur - delta);
+  if (next <= 0) {
+    sim.grudges.delete(key);
+    return peak;
+  }
+  sim.grudges.set(key, { count: next, lastIncidentTick: sim.tick, peak });
+  return null;
+}
+
+/** Cheap proximity check: is this tile a tavern counter, or next to
+ * one? Used as a "sharing a drink" bonus to reconciliation. */
+function nearTavern(sim: SimWorld, pos: { x: number; y: number }): boolean {
+  if (sim.grid.getTile(pos.x, pos.y) === TileType.TavernCounter) return true;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    if (sim.grid.getTile(pos.x + dx, pos.y + dy) === TileType.TavernCounter) return true;
+  }
+  return false;
+}
+
+/** A standing grudge between two adjacent, non-brawling dwarves has a
+ * chance to thaw. Deeper grudges are proportionally harder to let go
+ * of; good morale on both sides and sharing the tavern make peace
+ * easier; an Antagonistic dwarf rarely extends the olive branch.
+ * Burying a grudge entirely rewards both with a little morale and
+ * fires a chronicle line scaled to how bad the feud had been; partial
+ * thaws are silent so the log isn't spammed. */
+function attemptReconciliation(
+  sim: SimWorld,
+  a: EntityId,
+  b: EntityId,
+  aDw: import("./ecs/components").Dwarf,
+  bDw: import("./ecs/components").Dwarf,
+): void {
+  const grudge = grudgeCount(sim, a, b);
+  if (grudge <= 0) return;
+  const aN = sim.needs.get(a);
+  const bN = sim.needs.get(b);
+  const aMorale = aN?.morale ?? 50;
+  const bMorale = bN?.morale ?? 50;
+  let chance = RECONCILE_BASE_CHANCE / grudge;
+  if (aMorale >= RECONCILE_CONTENT_MORALE && bMorale >= RECONCILE_CONTENT_MORALE) chance *= 2;
+  const aPos = sim.position.get(a);
+  const bPos = sim.position.get(b);
+  if (aPos && bPos && nearTavern(sim, aPos) && nearTavern(sim, bPos)) chance *= 2;
+  if (aDw.traitIds.includes("antagonistic") || bDw.traitIds.includes("antagonistic")) chance *= 0.3;
+  if (sim.aiRng.nextFloat() >= chance) return;
+  const buriedPeak = easeGrudge(sim, a, b, RECONCILE_AMOUNT);
+  if (buriedPeak !== null) {
+    if (aN) aN.morale = Math.min(100, aN.morale + RECONCILE_MORALE_BUMP);
+    if (bN) bN.morale = Math.min(100, bN.morale + RECONCILE_MORALE_BUMP);
+    sim.events.add(sim.tick, "social", narrateReconciliation(sim.aiRng, aDw.name, bDw.name, buriedPeak));
+  }
 }
 
 function argumentSystem(sim: SimWorld): void {
@@ -1283,14 +1366,24 @@ function argumentSystem(sim: SimWorld): void {
       // grudge to be eligible. Grudge inflates the chance so a
       // feuding pair argues weekly, then daily, then escalates.
       const eligibleForArgument = aAntag || bAntag || grudge > 0;
+      let argued = false;
       if (eligibleForArgument) {
-        const chance = ARGUMENT_DAILY_CHANCE * (1 + GRUDGE_ARGUMENT_SCALE * grudge);
+        let chance = ARGUMENT_DAILY_CHANCE * (1 + GRUDGE_ARGUMENT_SCALE * grudge);
+        // Dwarves in good spirits snipe at each other far less. This
+        // is what gives reconciliation room to win for a calm,
+        // contented pair instead of the feud ratcheting up forever.
+        const aMoraleArg = sim.needs.get(id)?.morale ?? 50;
+        const bMoraleArg = sim.needs.get(other)?.morale ?? 50;
+        if (aMoraleArg >= RECONCILE_CONTENT_MORALE && bMoraleArg >= RECONCILE_CONTENT_MORALE) {
+          chance *= 0.4;
+        }
         if (sim.aiRng.nextFloat() < chance) {
           const aN = sim.needs.get(id);
           const bN = sim.needs.get(other);
           if (aN) aN.morale = Math.max(0, aN.morale - ARGUMENT_MORALE_HIT);
           if (bN) bN.morale = Math.max(0, bN.morale - ARGUMENT_MORALE_HIT);
           bumpGrudge(sim, id, other, GRUDGE_PER_ARGUMENT);
+          argued = true;
           // Wording shifts as grievances pile up — the colony's
           // chronicle reads differently for a one-off snip vs. a
           // years-deep feud.
@@ -1301,6 +1394,12 @@ function argumentSystem(sim: SimWorld): void {
               : `${dw.name} and ${otherDw.name} argue heatedly.`;
           sim.events.add(sim.tick, "social", text);
         }
+      }
+      // No flare-up this time — a standing grudge instead gets a
+      // chance to thaw. Driven by the dwarves alone (morale,
+      // proximity, traits); the player never intervenes.
+      if (!argued && grudge > 0) {
+        attemptReconciliation(sim, id, other, dw, otherDw);
       }
     }
   }

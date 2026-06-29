@@ -394,7 +394,7 @@ export class SimWorld {
    * argues more frequently and can escalate to a brawl even without
    * a tantrum. Grudges decay slowly so a one-off spat doesn't follow
    * the dwarves forever. Round-trips through save. */
-  grudges: Map<string, { count: number; lastIncidentTick: number }> = new Map();
+  grudges: Map<string, { count: number; lastIncidentTick: number; peak: number }> = new Map();
 
   /** Cumulative haul totals — tracks how much of each resource the
    * colony has ever produced. Drives material-gated research: once

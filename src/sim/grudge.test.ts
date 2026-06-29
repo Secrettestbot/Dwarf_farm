@@ -46,7 +46,7 @@ describe("grudges", () => {
     // the daily roll to climb. Simulating a brawl roll then becomes
     // a matter of running enough days.
     const key = a < b ? `${a}:${b}` : `${b}:${a}`;
-    sim.grudges.set(key, { count: 12, lastIncidentTick: 0 });
+    sim.grudges.set(key, { count: 12, lastIncidentTick: 0, peak: 12 });
     let brawlSeen = false;
     for (let i = 0; i < TICKS_PER_DAY * 60 && !brawlSeen; i++) {
       const apos = sim.position.get(a)!;

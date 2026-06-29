@@ -379,8 +379,12 @@ export interface SaveV1 {
   kingName?: string;
   /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
    * count rises with each spat. Round-trips so a feud survives a
-   * reload (or a worker catch-up) instead of resetting to peace. */
-  grudges?: Array<{ key: string; count: number; lastIncidentTick: number }>;
+   * reload (or a worker catch-up) instead of resetting to peace.
+   * `peak` is the highest the grudge ever reached, used to scale the
+   * reconciliation chronicle line; optional for back-compat with
+   * saves from before reconciliation shipped (restore falls back to
+   * the live count). */
+  grudges?: Array<{ key: string; count: number; lastIncidentTick: number; peak?: number }>;
   /** Cumulative haul totals — drives material-gated research. Once
    * a counter has crossed a topic's threshold the gate stays open
    * even if the stockpile is later spent, so we round-trip the
