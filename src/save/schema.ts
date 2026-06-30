@@ -383,6 +383,11 @@ export interface SaveV1 {
    * outstanding plan. Optional for back-compat — older saves load with
    * no pending rampart. */
   fortificationPlan?: number[];
+  /** Which pending plan tile is the gate (packed y<<16|x), or absent
+   * if no gate is pending. */
+  gatePlanTile?: number | null;
+  /** The built entrance gate's state, or absent if no gate stands. */
+  gate?: { x: number; y: number; closed: boolean; integrity: number };
   /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
    * count rises with each spat. Round-trips so a feud survives a
    * reload (or a worker catch-up) instead of resetting to peace.

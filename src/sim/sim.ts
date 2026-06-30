@@ -122,6 +122,7 @@ export function tick(sim: SimWorld): void {
   hostileSpawnSystem(sim);
   fortificationPlanningSystem(sim);
   siegeSystem(sim);
+  gateSystem(sim);
   hostileMovementSystem(sim);
   combatSystem(sim);
   healingSystem(sim);
@@ -5942,10 +5943,16 @@ const FORTIFY_MIN_POPULATION = 10;
 /** Half-width of the rampart line, in tiles, on each side of the
  * entrance column. */
 const FORTIFY_HALF_SPAN = 7;
-/** Half-width of the central gap left open at the entrance. */
-const FORTIFY_GAP_HALF = 1;
 /** Ticks of work to raise one wall segment from a block. */
 const FORTIFY_TICKS = 80;
+/** Integrity a freshly-raised gate carries — how much battering it
+ * absorbs before a siege-breaker forces it. Tuned so a lone scout
+ * can't realistically breach it but a troll (or a sustained warband)
+ * will. */
+const GATE_MAX_INTEGRITY = 600;
+/** Integrity regained per in-game hour of peace (no active siege).
+ * A breached or battered gate mends itself between sieges. */
+const GATE_REPAIR_PER_HOUR = 20;
 
 /** Once the colony is raid-worthy, lay out a single surface rampart
  * flanking the entrance (if one isn't already planned or built). Runs
@@ -5956,6 +5963,7 @@ function fortificationPlanningSystem(sim: SimWorld): void {
   // Re-evaluate only at day boundaries — rampart planning isn't urgent.
   if (sim.tick % TICKS_PER_DAY !== 0) return;
   if (sim.fortificationPlan.length > 0) return; // a plan is in progress
+  if (sim.gate) return; // a rampart with a gate already stands
   if (sim.dwarf.size() < FORTIFY_MIN_POPULATION) return;
 
   const baseX = sim.spawn.x;
@@ -5967,26 +5975,29 @@ function fortificationPlanningSystem(sim: SimWorld): void {
     if (sim.grid.getTile(x, sim.surfaceY[x]) === TileType.Fortification) return;
   }
 
-  // Lay the plan: surface tiles flanking the entrance, gap in the
-  // middle. Only commit tiles that are currently a walkable surface
-  // (grass / corridor floor) so we don't try to "build" inside rock
-  // or over open air.
+  // Lay the plan: a solid surface line across the entrance, with the
+  // centre tile reserved as the gate (the controllable breach). Only
+  // commit tiles that are currently a walkable surface (grass /
+  // corridor floor) so we don't try to "build" inside rock or air.
   const planned: number[] = [];
+  let gateTile: number | null = null;
   for (let dx = -FORTIFY_HALF_SPAN; dx <= FORTIFY_HALF_SPAN; dx++) {
-    if (Math.abs(dx) <= FORTIFY_GAP_HALF) continue; // leave the breach open
     const x = baseX + dx;
     if (x < 0 || x >= sim.grid.width) continue;
     const y = sim.surfaceY[x];
     const tile = sim.grid.getTile(x, y);
     if (tile !== TileType.Grass && tile !== TileType.CorridorFloor) continue;
-    planned.push((y << 16) | x);
+    const packed = (y << 16) | x;
+    planned.push(packed);
+    if (dx === 0) gateTile = packed; // the entrance column becomes the gate
   }
   if (planned.length === 0) return;
   sim.fortificationPlan = planned;
+  sim.gatePlanTile = gateTile;
   sim.events.add(
     sim.tick,
     "social",
-    `The architect marks out a defensive rampart across the entrance. The masons will raise it as blocks allow.`,
+    `The architect marks out a defensive rampart and gate across the entrance. The masons will raise it as blocks allow.`,
     { x: baseX, y: sim.surfaceY[baseX] },
   );
 }
@@ -6025,7 +6036,16 @@ function progressFortify(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { 
     return;
   }
   sim.stockpile.blocks -= 1;
-  sim.grid.setTile(job.targetX, job.targetY, TileType.Fortification);
+  const isGate = sim.gatePlanTile === packed;
+  if (isGate) {
+    // The centre segment is the gate, not a plain wall: lay the Gate
+    // tile and bring the gate online (open, full integrity).
+    sim.grid.setTile(job.targetX, job.targetY, TileType.Gate);
+    sim.gate = { x: job.targetX, y: job.targetY, closed: false, integrity: GATE_MAX_INTEGRITY };
+    sim.gatePlanTile = null;
+  } else {
+    sim.grid.setTile(job.targetX, job.targetY, TileType.Fortification);
+  }
   sim.regions.invalidate();
   sim.fortificationPlan = sim.fortificationPlan.filter((p) => p !== packed);
   awardSkillXp(sim, e, "masonry", 1);
@@ -6034,13 +6054,91 @@ function progressFortify(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { 
     sim.events.add(
       sim.tick,
       "social",
-      `${dw.name} sets the last stone of the entrance rampart. The colony's gate is walled.`,
+      `${dw.name} sets the last stone of the entrance rampart. The colony's gate is hung and ready.`,
       { x: job.targetX, y: job.targetY },
     );
   }
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
   sim.job.remove(e);
   sim.pathing.remove(e);
+}
+
+/** How hard a given hostile batters a closed gate, relative to the
+ * damage it deals a dwarf. Trolls are living battering rams; the
+ * warlord and his champions hack through; rank-and-file goblins and
+ * lesser cave creatures barely dent it (so a closed gate holds
+ * against a rabble but not against a siege-breaker — the goblins'
+ * answer to the wall). */
+function gateBashMultiplier(kind: HostileKind): number {
+  switch (kind) {
+    case "cave_troll": return 4;
+    case "goblin_warlord": return 3;
+    case "goblin_champion": return 2;
+    default: return 1;
+  }
+}
+
+/** The colony's gate reflex + the siege's answer to it.
+ *  - With a siege on, the dwarves raise the gate (close it), sealing
+ *    the rampart's gap. Hostiles can't path through a closed gate, so
+ *    they batter it: each adjacent attacker chips its integrity on
+ *    its attack cooldown, siege-breakers far faster. When integrity
+ *    hits zero the gate is breached — forced open for the rest of the
+ *    siege, and the warband pours through.
+ *  - With no siege, the gate is lowered (open) and slowly repairs.
+ * Entirely colony-driven: the player never toggles the gate. */
+function gateSystem(sim: SimWorld): void {
+  const g = sim.gate;
+  if (!g) return;
+
+  if (!sim.siegeActive) {
+    // Peace: lower the gate and mend it over time.
+    g.closed = false;
+    if (g.integrity < GATE_MAX_INTEGRITY && sim.tick % TICKS_PER_HOUR === 0) {
+      g.integrity = Math.min(GATE_MAX_INTEGRITY, g.integrity + GATE_REPAIR_PER_HOUR);
+    }
+    return;
+  }
+
+  // Siege on. Raise the gate if it still has integrity (a breached
+  // gate — integrity 0 — stays open until peace lets it mend).
+  if (g.integrity > 0 && !g.closed) {
+    g.closed = true;
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      `The dwarves raise the gate as the warband closes on the entrance.`,
+      { x: g.x, y: g.y },
+    );
+  }
+  if (!g.closed) return; // already breached this siege
+
+  // Battering: every hostile adjacent to the gate hits it on its own
+  // attack cooldown. Reuses lastAttackTick — a hostile bashing the
+  // gate isn't also swinging at a dwarf the same tick (and when the
+  // gate's closed there's no dwarf within reach through it anyway).
+  for (const id of sim.hostile.entities) {
+    const h = sim.hostile.get(id);
+    if (!h) continue;
+    const p = sim.position.get(id);
+    if (!p) continue;
+    if (Math.abs(p.x - g.x) > 1 || Math.abs(p.y - g.y) > 1) continue;
+    const def = HOSTILE_DEFS[h.kind];
+    if (sim.tick - h.lastAttackTick < def.attackCooldown) continue;
+    h.lastAttackTick = sim.tick;
+    g.integrity -= def.damage * gateBashMultiplier(h.kind);
+    if (g.integrity <= 0) {
+      g.integrity = 0;
+      g.closed = false;
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `The gate buckles and is breached! The warband floods through the gap.`,
+        { x: g.x, y: g.y },
+      );
+      break;
+    }
+  }
 }
 
 // ---- Sieges ----------------------------------------------------------
@@ -6398,6 +6496,9 @@ function hostileMovementSystem(sim: SimWorld): void {
       // breach. (Greedy pursuit means they pile up against the wall
       // rather than route around it — exactly the kill-zone we want.)
       if (sim.grid.getTile(nx, ny) === TileType.Fortification) continue;
+      // A raised (closed) gate blocks the same way; a lowered or
+      // breached one lets the warband funnel through.
+      if (sim.grid.getTile(nx, ny) === TileType.Gate && sim.gate?.closed) continue;
       pos.x = nx;
       pos.y = ny;
       break;

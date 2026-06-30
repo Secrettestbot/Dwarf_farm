@@ -182,6 +182,15 @@ export const enum TileType {
    * never seals the colony (dwarves always pass), which is what makes
    * it safe to drop into live pathing. */
   Fortification = 56,
+  /** Gate — the controllable breach in the rampart line, sited in the
+   * entrance gap. Always walkable by dwarves (like the rampart). When
+   * the colony raises it (closed) it blocks hostiles the same way a
+   * fortification does; when lowered (open) the warband funnels
+   * through. A closed gate is NOT invincible: siege-breakers batter
+   * its integrity down and breach it, so it buys time rather than
+   * granting immunity. Open/closed + integrity live on sim.gate; the
+   * tile id is constant. */
+  Gate = 57,
 }
 
 export interface TileInfo {
@@ -194,6 +203,7 @@ export interface TileInfo {
 
 export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Fortification]: { name: "fortification", walkable: true, solid: false, color: 0x6e6a5a },
+  [TileType.Gate]: { name: "gate", walkable: true, solid: false, color: 0x8a7a4a },
   [TileType.Air]: { name: "air", walkable: false, solid: false, color: 0x000000 },
   [TileType.Dirt]: { name: "dirt", walkable: false, solid: true, color: 0x6b4a2b },
   [TileType.Sand]: { name: "sand", walkable: false, solid: true, color: 0xb89868 },

@@ -13,7 +13,7 @@ function feedAll(sim: SimWorld): void {
 }
 
 describe("fortification ramparts", () => {
-  it("the architect plans a rampart with an open gap once the colony is raid-worthy", () => {
+  it("the architect plans a rampart with a gate at the entrance once raid-worthy", () => {
     const w = generateWorld({ seed: 911, width: 200, height: 500 });
     const sim = new SimWorld(911, w.grid, w.surfaceY, w.spawn);
     for (let i = 0; i < 12; i++) {
@@ -25,15 +25,16 @@ describe("fortification ramparts", () => {
       tick(sim);
     }
     expect(sim.fortificationPlan.length).toBeGreaterThan(0);
-    // The entrance column itself is the gap — it must NOT be planned.
-    const gapPacked = (sim.surfaceY[w.spawn.x] << 16) | w.spawn.x;
-    expect(sim.fortificationPlan.includes(gapPacked)).toBe(false);
-    // Planned tiles sit on the surface row, flanking the entrance.
+    // The entrance column is reserved as the gate (the controllable
+    // breach), and it's part of the plan.
+    const gatePacked = (sim.surfaceY[w.spawn.x] << 16) | w.spawn.x;
+    expect(sim.gatePlanTile).toBe(gatePacked);
+    expect(sim.fortificationPlan.includes(gatePacked)).toBe(true);
+    // Planned tiles all sit on the surface row.
     for (const p of sim.fortificationPlan) {
       const x = p & 0xffff;
       const y = (p >>> 16) & 0xffff;
       expect(y).toBe(sim.surfaceY[x]);
-      expect(Math.abs(x - w.spawn.x)).toBeGreaterThan(1); // outside the gap
     }
   });
 

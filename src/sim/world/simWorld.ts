@@ -341,6 +341,19 @@ export class SimWorld {
    * rampart survives a reload. */
   fortificationPlan: number[] = [];
 
+  /** Which pending plan tile (packed y<<16|x) is the gate rather than
+   * a plain wall segment, or null if the rampart has no gate planned /
+   * the gate's already built. The fortify job reads this to decide
+   * what a finished segment becomes. */
+  gatePlanTile: number | null = null;
+
+  /** The colony's entrance gate, once built. `closed` is the colony's
+   * own reflex (raised when a siege is on); `integrity` is how much
+   * battering it can take before a siege-breaker forces it open. Null
+   * until the architect's rampart gate is raised. Round-trips through
+   * save. */
+  gate: { x: number; y: number; closed: boolean; integrity: number } | null = null;
+
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips
    * through save so a reload restores the colony's full memorial roll
