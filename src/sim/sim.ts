@@ -124,6 +124,7 @@ export function tick(sim: SimWorld): void {
   siegeSystem(sim);
   gateSystem(sim);
   hostileMovementSystem(sim);
+  trapSystem(sim);
   combatSystem(sim);
   healingSystem(sim);
   farmSystem(sim);
@@ -5949,10 +5950,29 @@ const FORTIFY_TICKS = 80;
  * absorbs before a siege-breaker forces it. Tuned so a lone scout
  * can't realistically breach it but a troll (or a sustained warband)
  * will. */
-const GATE_MAX_INTEGRITY = 600;
+export const GATE_MAX_INTEGRITY = 600;
 /** Integrity regained per in-game hour of peace (no active siege).
  * A breached or battered gate mends itself between sieges. */
 const GATE_REPAIR_PER_HOUR = 20;
+/** How many trap tiles the architect lays in the kill zone behind the
+ * gate. */
+const TRAP_COUNT = 2;
+/** Damage one trap deals when it springs on a hostile — a meaningful,
+ * militia-independent burst (roughly half a goblin scout's health). */
+const TRAP_DAMAGE = 28;
+/** Ticks a sprung trap takes to re-arm. Long enough that a trap can't
+ * shred a whole warband on its own, short enough to catch successive
+ * waves funnelling through the breach. */
+const TRAP_RECHARGE_TICKS = 180;
+
+/** True if a trap is armed (not within its recharge window). Exported
+ * so the renderer can draw primed vs spent distinctly and tests can
+ * assert state without reaching into tick internals. */
+export function trapPrimed(trap: { lastSprungTick: number }, tick: number): boolean {
+  // A freshly-built trap (lastSprungTick very negative / 0 at tick 0)
+  // is primed; one that just fired waits out the recharge.
+  return tick - trap.lastSprungTick >= TRAP_RECHARGE_TICKS;
+}
 
 /** Once the colony is raid-worthy, lay out a single surface rampart
  * flanking the entrance (if one isn't already planned or built). Runs
@@ -5992,12 +6012,30 @@ function fortificationPlanningSystem(sim: SimWorld): void {
     if (dx === 0) gateTile = packed; // the entrance column becomes the gate
   }
   if (planned.length === 0) return;
+
+  // Lay a couple of weapon traps in the kill zone just behind the gate
+  // — the first walkable corridor tiles leading down into the colony.
+  // Hostiles that breach the gate funnel over them. Skip if there's no
+  // dug entrance yet (traps need floor to sit on).
+  const trapTiles: number[] = [];
+  for (let dy = 1; dy <= 6 && trapTiles.length < TRAP_COUNT; dy++) {
+    const y = sim.surfaceY[baseX] + dy;
+    if (y >= sim.grid.height) break;
+    const tile = sim.grid.getTile(baseX, y);
+    if (tile === TileType.CorridorFloor || tile === TileType.CavernFloor) {
+      trapTiles.push((y << 16) | baseX);
+    }
+  }
+  for (const t of trapTiles) planned.push(t);
+
   sim.fortificationPlan = planned;
   sim.gatePlanTile = gateTile;
+  sim.trapPlanTiles = trapTiles;
+  const trapClause = trapTiles.length > 0 ? `, gate, and entrance traps` : ` and gate`;
   sim.events.add(
     sim.tick,
     "social",
-    `The architect marks out a defensive rampart and gate across the entrance. The masons will raise it as blocks allow.`,
+    `The architect marks out a defensive rampart${trapClause} across the entrance. The masons will raise it as blocks allow.`,
     { x: baseX, y: sim.surfaceY[baseX] },
   );
 }
@@ -6037,12 +6075,19 @@ function progressFortify(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { 
   }
   sim.stockpile.blocks -= 1;
   const isGate = sim.gatePlanTile === packed;
+  const isTrap = sim.trapPlanTiles.includes(packed);
   if (isGate) {
     // The centre segment is the gate, not a plain wall: lay the Gate
     // tile and bring the gate online (open, full integrity).
     sim.grid.setTile(job.targetX, job.targetY, TileType.Gate);
     sim.gate = { x: job.targetX, y: job.targetY, closed: false, integrity: GATE_MAX_INTEGRITY };
     sim.gatePlanTile = null;
+  } else if (isTrap) {
+    // A kill-zone trap, armed on completion (lastSprungTick far in the
+    // past so trapPrimed() reads true immediately).
+    sim.grid.setTile(job.targetX, job.targetY, TileType.Trap);
+    sim.traps.push({ x: job.targetX, y: job.targetY, lastSprungTick: -TRAP_RECHARGE_TICKS });
+    sim.trapPlanTiles = sim.trapPlanTiles.filter((p) => p !== packed);
   } else {
     sim.grid.setTile(job.targetX, job.targetY, TileType.Fortification);
   }
@@ -6138,6 +6183,50 @@ function gateSystem(sim: SimWorld): void {
       );
       break;
     }
+  }
+}
+
+/** Spring armed traps on hostiles in the kill zone. Dwarves are never
+ * harmed — the colony's own folk know the triggers. A trap that fires
+ * deals a burst of damage to every hostile on its tile, then enters
+ * its recharge window. This is the militia-independent damage source
+ * that makes the funnel actually lethal. */
+function trapSystem(sim: SimWorld): void {
+  if (sim.traps.length === 0) return;
+  // Snapshot hostile occupancy by tile (a tile can stack more than one
+  // attacker as the warband bunches at the breach).
+  const occupants = new Map<number, EntityId[]>();
+  for (const id of sim.hostile.entities) {
+    const p = sim.position.get(id);
+    if (!p) continue;
+    const key = (p.y << 16) | p.x;
+    const list = occupants.get(key);
+    if (list) list.push(id);
+    else occupants.set(key, [id]);
+  }
+  for (const trap of sim.traps) {
+    if (!trapPrimed(trap, sim.tick)) continue;
+    const ids = occupants.get((trap.y << 16) | trap.x);
+    if (!ids || ids.length === 0) continue;
+    trap.lastSprungTick = sim.tick;
+    let killed = 0;
+    for (const id of ids) {
+      const hp = sim.health.get(id);
+      if (!hp) continue;
+      hp.hp -= TRAP_DAMAGE;
+      if (hp.hp <= 0) {
+        sim.ecs.destroy(id, [sim.position, sim.hostile, sim.health]);
+        killed++;
+      }
+    }
+    sim.events.add(
+      sim.tick,
+      "crisis",
+      killed > 0
+        ? `A trap springs in the entrance — ${killed > 1 ? `${killed} attackers are` : "an attacker is"} cut down in the kill zone.`
+        : `A trap springs in the entrance, mauling the warband as it funnels through.`,
+      { x: trap.x, y: trap.y },
+    );
   }
 }
 

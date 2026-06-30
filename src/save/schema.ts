@@ -388,6 +388,12 @@ export interface SaveV1 {
   gatePlanTile?: number | null;
   /** The built entrance gate's state, or absent if no gate stands. */
   gate?: { x: number; y: number; closed: boolean; integrity: number };
+  /** Pending weapon-trap plan tiles (packed y<<16|x), built segments
+   * excluded. Optional for back-compat. */
+  trapPlanTiles?: number[];
+  /** Built weapon traps + their last-sprung tick. Optional for
+   * back-compat. */
+  traps?: Array<{ x: number; y: number; lastSprungTick: number }>;
   /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
    * count rises with each spat. Round-trips so a feud survives a
    * reload (or a worker catch-up) instead of resetting to peace.

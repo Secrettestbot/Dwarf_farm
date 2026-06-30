@@ -4,6 +4,7 @@ import { TileType } from "../sim/world/tiles";
 import { getDwarfSprite, getHostileSprite, getPetSprite, getTileSpriteAtLayer, layerOf, SPRITE_TILE_SIZE } from "./sprites";
 import { BlueprintKind } from "../sim/planner/blueprint";
 import { seasonOf } from "../sim/time";
+import { trapPrimed, GATE_MAX_INTEGRITY } from "../sim/sim";
 
 /** Per-season RGBA overlay applied to surface tiles (Grass, Tree).
  * Spring is baseline (no overlay); summer adds a warm gold cast;
@@ -158,6 +159,54 @@ export function renderWorld(
           ctx.fillRect(sx, sy, pt, pt);
         }
       }
+    }
+  }
+
+  // Defensive-structure state overlays, drawn on top of the base
+  // tiles so the player can read them at a glance:
+  //  - Traps: a filled spike-triangle, hot red + bright outline when
+  //    primed, dim and hollow while recharging.
+  //  - Gate: when raised (closed), portcullis bars plus a colour-coded
+  //    integrity bar along the bottom edge so a battered gate reads as
+  //    about-to-breach.
+  // Only the handful of defensive tiles are touched — negligible cost.
+  if (sim.traps.length > 0 || sim.gate) {
+    const inView = (tx: number, ty: number) =>
+      tx >= x0 && tx < x1 && ty >= y0 && ty < y1 && grid.isSeen(tx, ty);
+    for (const trap of sim.traps) {
+      if (!inView(trap.x, trap.y)) continue;
+      const sx = (trap.x - camera.x) * pt + viewW / 2;
+      const sy = (trap.y - camera.y) * pt + viewH / 2;
+      const primed = trapPrimed(trap, sim.tick);
+      ctx.beginPath();
+      ctx.moveTo(sx + pt * 0.5, sy + pt * 0.18);
+      ctx.lineTo(sx + pt * 0.82, sy + pt * 0.82);
+      ctx.lineTo(sx + pt * 0.18, sy + pt * 0.82);
+      ctx.closePath();
+      if (primed) {
+        ctx.fillStyle = "#ff4030";
+        ctx.fill();
+        ctx.strokeStyle = "#ffd0c0";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else {
+        // Spent: hollow, muted — clearly "not armed right now".
+        ctx.strokeStyle = "#6a5a55";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+    if (sim.gate && sim.gate.closed && inView(sim.gate.x, sim.gate.y)) {
+      const gx = (sim.gate.x - camera.x) * pt + viewW / 2;
+      const gy = (sim.gate.y - camera.y) * pt + viewH / 2;
+      ctx.fillStyle = "#2e2616";
+      const barW = Math.max(1, pt * 0.12);
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(gx + pt * (0.22 + i * 0.28), gy + 1, barW, pt - 2);
+      }
+      const frac = Math.max(0, Math.min(1, sim.gate.integrity / GATE_MAX_INTEGRITY));
+      ctx.fillStyle = frac > 0.5 ? "#9ad3a3" : frac > 0.25 ? "#e0c080" : "#ff7060";
+      ctx.fillRect(gx + 1, gy + pt - 2, (pt - 2) * frac, 2);
     }
   }
 

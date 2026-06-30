@@ -272,6 +272,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     fortificationPlan: sim.fortificationPlan.length > 0 ? [...sim.fortificationPlan] : undefined,
     gatePlanTile: sim.gatePlanTile ?? undefined,
     gate: sim.gate ? { ...sim.gate } : undefined,
+    trapPlanTiles: sim.trapPlanTiles.length > 0 ? [...sim.trapPlanTiles] : undefined,
+    traps: sim.traps.length > 0 ? sim.traps.map((t) => ({ ...t })) : undefined,
     cumulative: Object.keys(sim.cumulative).length > 0 ? { ...sim.cumulative } : undefined,
     discoveries: sim.discoveries.size > 0 ? Array.from(sim.discoveries.values()).sort((a, b) => a - b) : undefined,
   };
@@ -630,6 +632,12 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.gate) {
     sim.gate = { ...save.gate };
+  }
+  if (save.trapPlanTiles) {
+    sim.trapPlanTiles = [...save.trapPlanTiles];
+  }
+  if (save.traps) {
+    sim.traps = save.traps.map((t) => ({ ...t }));
   }
   if (save.discoveries) {
     for (const t of save.discoveries) sim.discoveries.add(t);

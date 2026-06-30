@@ -354,6 +354,15 @@ export class SimWorld {
    * save. */
   gate: { x: number; y: number; closed: boolean; integrity: number } | null = null;
 
+  /** Which pending plan tiles (packed y<<16|x) are weapon traps rather
+   * than plain wall segments. Drained as the masons build them. */
+  trapPlanTiles: number[] = [];
+
+  /** Built weapon traps in the entrance kill zone. `lastSprungTick` is
+   * when the trap last fired; it's primed again once TRAP_RECHARGE
+   * ticks have passed. Round-trips through save. */
+  traps: Array<{ x: number; y: number; lastSprungTick: number }> = [];
+
   /** Cemetery registry — every dwarf interred in a Headstone tile,
    * with the details a survivor would speak at the grave. Round-trips
    * through save so a reload restores the colony's full memorial roll

@@ -191,6 +191,14 @@ export const enum TileType {
    * granting immunity. Open/closed + integrity live on sim.gate; the
    * tile id is constant. */
   Gate = 57,
+  /** Weapon trap — a stonefall/blade trap laid in the entrance
+   * corridor behind the gate, in the funnel's kill zone. Walkable by
+   * all (the colony's own folk know to step around the trigger); it
+   * springs only on hostiles, dealing a burst of militia-independent
+   * damage, then recharges. Primed/recharging state lives on
+   * sim.traps and is drawn distinctly so the player can read at a
+   * glance which traps are armed. */
+  Trap = 58,
 }
 
 export interface TileInfo {
@@ -204,6 +212,7 @@ export interface TileInfo {
 export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.Fortification]: { name: "fortification", walkable: true, solid: false, color: 0x6e6a5a },
   [TileType.Gate]: { name: "gate", walkable: true, solid: false, color: 0x8a7a4a },
+  [TileType.Trap]: { name: "trap", walkable: true, solid: false, color: 0x7a3a30 },
   [TileType.Air]: { name: "air", walkable: false, solid: false, color: 0x000000 },
   [TileType.Dirt]: { name: "dirt", walkable: false, solid: true, color: 0x6b4a2b },
   [TileType.Sand]: { name: "sand", walkable: false, solid: true, color: 0xb89868 },

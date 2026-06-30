@@ -30,11 +30,16 @@ describe("fortification ramparts", () => {
     const gatePacked = (sim.surfaceY[w.spawn.x] << 16) | w.spawn.x;
     expect(sim.gatePlanTile).toBe(gatePacked);
     expect(sim.fortificationPlan.includes(gatePacked)).toBe(true);
-    // Planned tiles all sit on the surface row.
+    // Wall + gate tiles sit on the surface row; trap tiles (planned
+    // in the kill zone behind the gate) sit below it.
     for (const p of sim.fortificationPlan) {
       const x = p & 0xffff;
       const y = (p >>> 16) & 0xffff;
-      expect(y).toBe(sim.surfaceY[x]);
+      if (sim.trapPlanTiles.includes(p)) {
+        expect(y).toBeGreaterThan(sim.surfaceY[x]);
+      } else {
+        expect(y).toBe(sim.surfaceY[x]);
+      }
     }
   });
 
