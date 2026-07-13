@@ -19,10 +19,17 @@ describe("migration", () => {
   it("a young colony gains immigrants within a few seasons", () => {
     // pop 7 → 60% chance per season; 4 seasons gives ~97% probability.
     const sim = buildSim(11, 7);
-    const initial = sim.dwarf.size();
     // Run 4 seasons.
     for (let i = 0; i < SEASON_TICKS * 4 + 5; i++) tick(sim);
-    expect(sim.dwarf.size()).toBeGreaterThan(initial);
+    // Net population is a bad signal here — founders can die of thirst
+    // or in combat over 24 unprovisioned in-game days, masking real
+    // arrivals. Count the immigration events themselves (phrasings from
+    // narrateArrival; trade caravans use different wording).
+    const arrivals = sim.events.events.filter((e) =>
+      e.category === "social" &&
+      /joined the fortress|has arrived at the gate|seeking work|seeking refuge|asks to stay|brings \d+ new dwarves/i.test(e.text),
+    );
+    expect(arrivals.length).toBeGreaterThanOrEqual(1);
   });
 
   it("an arrival event lands in the chronicle within ~2 in-game years", () => {

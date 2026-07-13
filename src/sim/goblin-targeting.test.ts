@@ -14,6 +14,16 @@ function carveArena(sim: SimWorld, cx: number, cy: number, r: number) {
   }
 }
 
+/** Pin a dwarf in place with an in-progress sleep-on-the-spot job so
+ * idle wandering can't move the bait around mid-test. Sleep is a
+ * survival job — the interrupt pass never cancels it, and at 60-80
+ * test ticks it neither completes nor refills past the 95 cutoff. */
+function pinDwarf(sim: SimWorld, id: number) {
+  const pos = sim.position.get(id)!;
+  sim.needs.get(id)!.sleep = 0;
+  sim.job.set(id, { kind: "sleep", targetX: pos.x, targetY: pos.y, progress: 0 });
+}
+
 describe("goblin target priority", () => {
   it("a goblin scout prefers the mayor over an equally-distant non-mayor", () => {
     const w = generateWorld({ seed: 1101, width: 200, height: 500 });
@@ -22,8 +32,10 @@ describe("goblin target priority", () => {
     // Mayor on the left of the goblin, regular on the right —
     // both 4 tiles away. The mayor priority should pull the
     // goblin left.
-    sim.spawnDwarf({ name: "TheMayor", x: w.spawn.x - 4, y: w.spawn.y, age: 30 });
-    sim.spawnDwarf({ name: "Regular", x: w.spawn.x + 4, y: w.spawn.y, age: 30 });
+    const mayor = sim.spawnDwarf({ name: "TheMayor", x: w.spawn.x - 4, y: w.spawn.y, age: 30 });
+    const regular = sim.spawnDwarf({ name: "Regular", x: w.spawn.x + 4, y: w.spawn.y, age: 30 });
+    pinDwarf(sim, mayor);
+    pinDwarf(sim, regular);
     sim.mayorName = "TheMayor";
     const gobId = sim.spawnHostile({ kind: "goblin_scout", x: w.spawn.x, y: w.spawn.y });
     // Step the sim for a few ticks. Goblin moveCooldown is 22, so
@@ -43,8 +55,10 @@ describe("goblin target priority", () => {
     // on softness + the closer distance — even if both dwarves
     // wander a few tiles in the test window, the warlord should
     // still chase the child.
-    sim.spawnDwarf({ name: "Adult", x: w.spawn.x + 8, y: w.spawn.y, age: 30 });
-    sim.spawnDwarf({ name: "Tot", x: w.spawn.x - 2, y: w.spawn.y, age: 6 });
+    const adult = sim.spawnDwarf({ name: "Adult", x: w.spawn.x + 8, y: w.spawn.y, age: 30 });
+    const tot = sim.spawnDwarf({ name: "Tot", x: w.spawn.x - 2, y: w.spawn.y, age: 6 });
+    pinDwarf(sim, adult);
+    pinDwarf(sim, tot);
     const gobId = sim.spawnHostile({ kind: "goblin_warlord", x: w.spawn.x, y: w.spawn.y });
     for (let i = 0; i < 60; i++) tick(sim);
     const pos = sim.position.get(gobId);
@@ -60,8 +74,10 @@ describe("goblin target priority", () => {
     // Mayor 5 tiles east, regular 3 tiles west. Mayor priority
     // would pull a goblin east; the cave rat ignores priority and
     // goes for the closer regular.
-    sim.spawnDwarf({ name: "TheMayor", x: w.spawn.x + 5, y: w.spawn.y, age: 30 });
-    sim.spawnDwarf({ name: "Closer", x: w.spawn.x - 3, y: w.spawn.y, age: 30 });
+    const mayor = sim.spawnDwarf({ name: "TheMayor", x: w.spawn.x + 5, y: w.spawn.y, age: 30 });
+    const closer = sim.spawnDwarf({ name: "Closer", x: w.spawn.x - 3, y: w.spawn.y, age: 30 });
+    pinDwarf(sim, mayor);
+    pinDwarf(sim, closer);
     sim.mayorName = "TheMayor";
     const ratId = sim.spawnHostile({ kind: "cave_rat", x: w.spawn.x, y: w.spawn.y });
     for (let i = 0; i < 80; i++) tick(sim);
