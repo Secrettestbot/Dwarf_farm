@@ -1490,15 +1490,41 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
   // around the food counters between meals. A wider random scatter
   // makes idle behavior actually wander.
   const R = 20;
-  // Collect candidates in a fixed scan order, then sample one via aiRng.
+  if (!grid.isWalkable(sx, sy)) return null;
+  // Flood-fill the R-box from the dwarf's tile (8-connected with the same
+  // corner-cut rule as A*) so every candidate is genuinely *reachable*,
+  // not merely walkable. A walkable ledge across a chasm used to get
+  // picked, fail pathfinding in jobAssignmentSystem, and leave the dwarf
+  // standing idle until its AI bucket came round again.
+  const side = 2 * R + 1;
+  const seen = new Uint8Array(side * side);
+  const queue = new Int32Array(side * side);
+  let head = 0;
+  let tail = 0;
+  seen[R * side + R] = 1;
+  queue[tail++] = (sy << 16) | sx;
   const candidates: number[] = [];
-  for (let dy = -R; dy <= R; dy++) {
-    for (let dx = -R; dx <= R; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      const x = sx + dx;
-      const y = sy + dy;
-      if (!grid.isWalkable(x, y)) continue;
-      candidates.push((y << 16) | x);
+  while (head < tail) {
+    const c = queue[head++];
+    const cx = c & 0xffff;
+    const cy = (c >>> 16) & 0xffff;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < sx - R || x > sx + R || y < sy - R || y > sy + R) continue;
+        const li = (y - sy + R) * side + (x - sx + R);
+        if (seen[li]) continue;
+        if (!grid.isWalkable(x, y)) continue;
+        // Match A*'s diagonal rule: no squeezing through solid corners.
+        if (dx !== 0 && dy !== 0 && (!grid.isWalkable(cx + dx, cy) || !grid.isWalkable(cx, cy + dy))) {
+          continue;
+        }
+        seen[li] = 1;
+        queue[tail++] = (y << 16) | x;
+        candidates.push((y << 16) | x);
+      }
     }
   }
   if (candidates.length === 0) return null;

@@ -1482,7 +1482,7 @@ export class ColonyPlanner {
     return n;
   }
 
-  private activeByKind(): Record<string, number> {
+  activeByKind(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const b of this.blueprints) {
       // A blueprint waiting on furniture (needs_furnishing) is
