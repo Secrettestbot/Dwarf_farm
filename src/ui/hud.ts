@@ -242,6 +242,11 @@ export class Hud {
   private openDisplayPopover(anchor: HTMLElement): void {
     // If a popover is already open, close it (click-to-toggle).
     if (this.displayPopover) {
+      // Fire popoverclose so the subscriptions registered inside the
+      // popover (panel visibility, minimap sliders) unsubscribe — the
+      // outside-click path already does this; without it here every
+      // button-toggle leaked a set of listeners.
+      this.displayPopover.dispatchEvent(new CustomEvent("popoverclose"));
       this.displayPopover.remove();
       this.displayPopover = null;
       return;
@@ -355,7 +360,12 @@ export class Hud {
     // immediately close it.
     setTimeout(() => {
       const onDocClick = (ev: MouseEvent) => {
-        if (!this.displayPopover) return;
+        if (!this.displayPopover) {
+          // Popover was closed via the button toggle — this listener's
+          // work is done; drop it instead of lingering forever.
+          document.removeEventListener("mousedown", onDocClick);
+          return;
+        }
         if (this.displayPopover.contains(ev.target as Node)) return;
         if (anchor.contains(ev.target as Node)) return;
         this.displayPopover.dispatchEvent(new CustomEvent("popoverclose"));
