@@ -3921,7 +3921,11 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   // Negotiation finished — apply the deal we cached at arrival.
   // Multi-good baskets credit both the primary and secondary import.
   const stockpile = sim.stockpile as unknown as Record<string, number>;
-  stockpile[sim.caravanDealResource] = (stockpile[sim.caravanDealResource] ?? 0) - sim.caravanDealCost;
+  // The colony may have spent some of the offered goods between the
+  // caravan's arrival and the broker closing the deal — clamp the
+  // payment to what's actually on hand so the counter can't go negative.
+  const paid = Math.min(sim.caravanDealCost, Math.max(0, stockpile[sim.caravanDealResource] ?? 0));
+  stockpile[sim.caravanDealResource] = (stockpile[sim.caravanDealResource] ?? 0) - paid;
   stockpile[sim.caravanDealImport] = (stockpile[sim.caravanDealImport] ?? 0) + sim.caravanDealGain;
   if (sim.caravanDealImport2 && sim.caravanDealGain2 > 0) {
     stockpile[sim.caravanDealImport2] = (stockpile[sim.caravanDealImport2] ?? 0) + sim.caravanDealGain2;
@@ -3945,7 +3949,7 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   sim.events.add(
     sim.tick,
     "social",
-    `${brokerName} closes the deal at the Trade Depot — ${basketStr} for ${sim.caravanDealCost} ${sim.caravanDealResource}.`,
+    `${brokerName} closes the deal at the Trade Depot — ${basketStr} for ${paid} ${sim.caravanDealResource}.`,
     { x: sim.caravanX, y: sim.caravanY },
   );
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
