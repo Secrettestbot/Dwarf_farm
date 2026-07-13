@@ -804,7 +804,10 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     const it = sim.item.get(ents[i]);
     const p = sim.position.get(ents[i]);
     if (!it || !p) continue;
-    if (it.claimedBy !== -1 && sim.ecs.isAlive(it.claimedBy)) continue;
+    // A claim by *this* hauler doesn't disqualify — an interrupted haul
+    // leaves the claim in place, and the claimant must be able to come
+    // back for the item rather than orphan it for as long as they live.
+    if (it.claimedBy !== -1 && it.claimedBy !== hauler && sim.ecs.isAlive(it.claimedBy)) continue;
     // Skip items already sitting on a workshop station that wants
     // them — those are "delivered", waiting for the crafter to consume.
     // Without this, a hauler picks up the item it just dropped at the

@@ -678,6 +678,7 @@ export class SimWorld {
     tamedAtTick?: number;
     hp?: number;
     maxHp?: number;
+    lastAttackTick?: number;
   }): EntityId {
     const e = this.ecs.create();
     if (e === -1) return -1;
@@ -688,7 +689,7 @@ export class SimWorld {
       ownerName: spec.ownerName,
       tameProgress: spec.tameProgress ?? 0,
       tamedAtTick: spec.tamedAtTick ?? -1,
-      lastAttackTick: 0,
+      lastAttackTick: spec.lastAttackTick ?? 0,
     });
     const maxHp = spec.maxHp ?? 35;
     this.health.set(e, {

@@ -664,6 +664,7 @@ export function restore(save: SaveV1): SimWorld {
         ownerName: p.ownerName,
         tameProgress: p.tameProgress,
         tamedAtTick: p.tamedAtTick,
+        lastAttackTick: p.lastAttackTick,
       });
     }
   }

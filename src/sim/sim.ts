@@ -3641,6 +3641,7 @@ function jobAssignmentSystem(sim: SimWorld): void {
       }
       if (interrupt) {
         if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
+        if (job.kind === "haul") releaseItemClaims(sim, e);
         sim.job.remove(e);
         sim.pathing.remove(e);
       }
@@ -3674,7 +3675,13 @@ function jobAssignmentSystem(sim: SimWorld): void {
         path = sim.astar.findPathToNeighbor(sim.grid, pos.x, pos.y, proposal.targetX, proposal.targetY, 6000);
       }
     }
-    if (!path) continue;
+    if (!path) {
+      // A haul proposal already claimed its pickup item inside
+      // findHaulTarget — release it so an unreachable target doesn't
+      // orphan the item behind a claim nobody will ever cash in.
+      if (proposal.kind === "haul") releaseItemClaims(sim, e);
+      continue;
+    }
 
     const pathing: Pathing = { path, pathIndex: 0, goalX: proposal.targetX, goalY: proposal.targetY };
     sim.job.set(e, proposal);
@@ -3700,6 +3707,7 @@ function movementSystem(sim: SimWorld): void {
     if (!sim.grid.isWalkable(nextCell.x, nextCell.y)) {
       const job = sim.job.get(e);
       if (job?.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
+      if (job?.kind === "haul") releaseItemClaims(sim, e);
       sim.pathing.remove(e);
       sim.job.remove(e);
       continue;
@@ -4676,6 +4684,18 @@ export const QUALITY_LABELS = ["basic", "Fine", "Superior", "Exceptional", "Mast
  * scattered handful of stones in one trip without being absurd. */
 const WHEELBARROW_PICKUP_RADIUS = 2;
 
+/** Clear any floor-item claims held by this dwarf. Must run whenever a
+ * pickup-leg haul job is dropped before the item was collected —
+ * a dangling claim makes the item invisible to every other hauler for
+ * as long as the claimant lives. */
+function releaseItemClaims(sim: SimWorld, e: EntityId): void {
+  const ents = sim.item.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const it = sim.item.get(ents[i]);
+    if (it && it.claimedBy === e) it.claimedBy = -1;
+  }
+}
+
 function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   if (job.progress === 0) {
     // Pickup leg. If the colony has any wheelbarrows on hand and the
@@ -4686,6 +4706,7 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     // (size 1 × 4 = 4 of 8 units) goes in one trip; a single bed
     // (size 4) is one trip whether a wheelbarrow's around or not.
     if (pos.x !== job.targetX || pos.y !== job.targetY) {
+      releaseItemClaims(sim, e);
       sim.job.remove(e);
       sim.pathing.remove(e);
       return;
