@@ -11,6 +11,32 @@ function buildSim(seed: number): SimWorld {
   return sim;
 }
 
+const SAVE_META = {
+  slotId: "slot0",
+  fortressName: "Test Hold",
+  mode: "legacy",
+  cameraX: 0,
+  cameraY: 0,
+  zoomIndex: 1,
+} as const;
+
+// Serialize a sim with fixed metadata.
+function serialize(sim: SimWorld) {
+  return snapshot({ sim, ...SAVE_META });
+}
+
+// A deterministic view of a save for deep-equality. This is deliberately
+// exhaustive: unlike hashSim (which only samples dwarf positions, tiles, and
+// blueprints), comparing the entire payload fails loudly if snapshot/restore
+// ever drops or garbles ANY component or top-level field — the exact blind
+// spot a positions-only hash cannot see. `realTimestampMs` is stamped from
+// the wall clock at snapshot time, so it is excluded as the one legitimately
+// non-deterministic field.
+function comparable(sim: SimWorld) {
+  const { realTimestampMs: _ignored, ...rest } = serialize(sim);
+  return rest;
+}
+
 function hashSim(sim: SimWorld): number {
   let h = 2166136261 >>> 0;
   sim.forEachDwarf((_id, pos) => {
@@ -43,9 +69,13 @@ function hashSim(sim: SimWorld): number {
 describe("snapshot/restore", () => {
   it("round-trips an unmodified sim", () => {
     const a = buildSim(99);
-    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const save = serialize(a);
     const b = restore(save);
     expect(hashSim(b)).toBe(hashSim(a));
+    // A field written by snapshot but dropped by restore (or vice versa)
+    // would survive the positions-only hash above but not this: re-snapshotting
+    // the restored sim must reproduce the original save field-for-field.
+    expect(comparable(b)).toEqual(comparable(a));
   });
 
   it("survives a serialize → run → assert match against a continued source", () => {
@@ -53,21 +83,26 @@ describe("snapshot/restore", () => {
     // Final state must match.
     const a = buildSim(123);
     for (let i = 0; i < 500; i++) tick(a);
-    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const save = serialize(a);
     const b = restore(save);
     expect(hashSim(b)).toBe(hashSim(a));
+    expect(comparable(b)).toEqual(comparable(a));
     for (let i = 0; i < 500; i++) {
       tick(a);
       tick(b);
     }
     expect(hashSim(b)).toBe(hashSim(a));
+    // Full-state equality after independent continuation: any field that
+    // restore silently dropped would diverge here even if it never moved a
+    // dwarf, catching drift the position hash misses.
+    expect(comparable(b)).toEqual(comparable(a));
   });
 
   it("preserves blueprints across save/restore", () => {
     const a = buildSim(42);
     for (let i = 0; i < 200; i++) tick(a);
     expect(a.planner.blueprints.length).toBeGreaterThan(0);
-    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const save = serialize(a);
     const b = restore(save);
     expect(b.planner.blueprints.length).toBe(a.planner.blueprints.length);
     expect(b.planner.blueprints[0].originX).toBe(a.planner.blueprints[0].originX);

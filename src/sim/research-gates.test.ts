@@ -86,7 +86,6 @@ describe("stairwells", () => {
       }
     }
     // After enough rooms, at least one stairwell should have landed.
-    expect((planner.completedByKind["stairwell"] ?? 0) +
-           (planner.activeByKind()["stairwell"] ?? 0)).toBeGreaterThan(0);
+    expect(planner.totalOfKind("stairwell")).toBeGreaterThan(0);
   });
 });

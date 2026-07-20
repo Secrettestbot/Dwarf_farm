@@ -1496,7 +1496,9 @@ export class ColonyPlanner {
     return out;
   }
 
-  private totalOfKind(kind: BlueprintKind): number {
+  /** How many rooms of this kind exist, counting both completed and
+   *  in-flight (digging / awaiting-furnishing) blueprints. */
+  totalOfKind(kind: BlueprintKind): number {
     return (this.completedByKind[kind] ?? 0) + (this.activeByKind()[kind] ?? 0);
   }
 

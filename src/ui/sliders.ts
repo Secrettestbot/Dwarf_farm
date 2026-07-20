@@ -19,7 +19,7 @@ export class SliderPanel {
   private inputs: Map<keyof SliderState, HTMLInputElement> = new Map();
   private unsubscribeVisibility: () => void = () => {};
 
-  constructor(host: HTMLElement, private sim: SimWorld) {
+  constructor(host: HTMLElement, sim: SimWorld) {
     const root = document.createElement("div");
     root.className = "panel";
     root.style.cssText =
@@ -75,7 +75,6 @@ export class SliderPanel {
 
   /** Re-read sim state — used after save/load swaps the SimWorld instance. */
   refresh(sim: SimWorld): void {
-    this.sim = sim;
     for (const key of SLIDER_KEYS) {
       const input = this.inputs.get(key);
       const label = this.valueLabels.get(key);
