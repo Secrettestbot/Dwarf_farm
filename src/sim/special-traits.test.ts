@@ -77,18 +77,22 @@ describe("special traits (GDD §6.5)", () => {
   it("The Fury triggers when a bonded dwarf is slain in combat", () => {
     const w = generateWorld({ seed: 917, width: 200, height: 500 });
     const sim = new SimWorld(917, w.grid, w.surfaceY, w.spawn);
+    // Spawn the partner FIRST so it is entities[0]: combatSystem targets the
+    // first-adjacent dwarf in spawn order, and both end up adjacent to the
+    // troll once movement runs. Spawning Bonded first makes the troll's blow
+    // land on the partner (as the test intends) rather than on the avenger.
+    const b = sim.spawnDwarf({
+      name: "Bonded",
+      x: w.spawn.x + 1,
+      y: w.spawn.y,
+      age: 30,
+    });
     const a = sim.spawnDwarf({
       name: "Avenger",
       x: w.spawn.x,
       y: w.spawn.y,
       age: 30,
       traitIds: ["the_fury"],
-    });
-    const b = sim.spawnDwarf({
-      name: "Bonded",
-      x: w.spawn.x + 1,
-      y: w.spawn.y,
-      age: 30,
     });
     sim.dwarf.get(a)!.partnerId = b;
     sim.dwarf.get(b)!.partnerId = a;
@@ -113,6 +117,10 @@ describe("special traits (GDD §6.5)", () => {
       // partner's HP runs out.
       const hp = sim.health.get(hEnt);
       if (hp && hp.hp < 100) hp.hp = 200;
+      // Keep the partner one hit from death so the troll's next landed
+      // blow is fatal regardless of when it lands within the window.
+      const bh = sim.health.get(b);
+      if (bh) bh.hp = 1;
       tick(sim);
     }
     expect(sim.fury.has(a)).toBe(true);
