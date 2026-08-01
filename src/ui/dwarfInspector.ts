@@ -66,6 +66,11 @@ export class DwarfInspector {
    * Re-render with current sim state. Cheap enough to call every frame
    * because the panel is small. If the dwarf is gone (e.g. died), close.
    */
+  /** Render key of the last frame — the panel is a pure function of
+   * (dwarf, tick, expanded-state, name), so identical frames skip the
+   * full innerHTML rebuild that used to run at 60fps. */
+  private lastRenderKey = "";
+
   update(sim: SimWorld): void {
     if (this.targetId === null) return;
     const dw = sim.dwarf.get(this.targetId);
@@ -74,6 +79,9 @@ export class DwarfInspector {
       this.close();
       return;
     }
+    const renderKey = `${this.targetId}:${sim.tick}:${this.skillsExpanded}:${dw.name}`;
+    if (renderKey === this.lastRenderKey) return;
+    this.lastRenderKey = renderKey;
     const age = sim.ageOf(this.targetId);
     const job = sim.job.get(this.targetId);
     const path = sim.pathing.get(this.targetId);

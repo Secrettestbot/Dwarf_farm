@@ -378,7 +378,18 @@ export class Hud {
   }
 
 
+  /** Last rendered (tick, name) — the HUD's contents are pure
+   * functions of sim state, which only changes when the tick does
+   * (plus the rename flow). Skipping identical frames avoids
+   * re-parsing the stockpile innerHTML at 60fps for a 6-tick/sec sim. */
+  private lastRenderedTick = -1;
+  private lastRenderedName = "";
+
   update(clock: Clock, sim: SimWorld): void {
+    const name = this.handlers.fortressName();
+    if (clock.tick === this.lastRenderedTick && name === this.lastRenderedName) return;
+    this.lastRenderedTick = clock.tick;
+    this.lastRenderedName = name;
     const tick = clock.tick;
     const day = Math.floor(tick / TICKS_PER_DAY) + 1;
     const hour = Math.floor((tick % TICKS_PER_DAY) / TICKS_PER_HOUR);
