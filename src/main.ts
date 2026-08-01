@@ -429,7 +429,10 @@ function runGame(active: ActiveFortress, camera: Camera) {
   // motif for the new entries. We also rate-limit to one sound per
   // category per frame so a single tick that produces a milestone +
   // a crisis + four constructions doesn't sound like a slot machine.
-  let lastEventCount = sim.events.size();
+  // Diff the monotonic add-counter, not the array length — once the
+  // chronicle hits its cap, eviction keeps the length flat while new
+  // entries keep landing at the tail.
+  let lastEventSeq = sim.events.seq;
   let lastFrame = performance.now();
   // A persistent sim error would otherwise retry (and log) every frame
   // forever; after a few consecutive failures we pause the clock so the
@@ -477,16 +480,16 @@ function runGame(active: ActiveFortress, camera: Camera) {
 
     // Play sounds for any chronicle entries added this frame, deduped
     // by category so a busy tick doesn't overflow the audio bus.
-    const evCount = sim.events.size();
-    if (evCount > lastEventCount) {
+    const seq = sim.events.seq;
+    if (seq > lastEventSeq) {
+      const fresh = sim.events.events.slice(-(seq - lastEventSeq));
       const played = new Set<string>();
-      for (let i = lastEventCount; i < evCount; i++) {
-        const cat = sim.events.events[i].category;
-        if (played.has(cat)) continue;
-        played.add(cat);
-        playEventSound(cat);
+      for (const ev of fresh) {
+        if (played.has(ev.category)) continue;
+        played.add(ev.category);
+        playEventSound(ev.category);
       }
-      lastEventCount = evCount;
+      lastEventSeq = seq;
     }
 
     minimap.refresh(sim, now);
