@@ -1481,28 +1481,41 @@ const AQUIFER_SURVIVED_TICKS = 24 * 60 * 7; // a week of in-game time
 const FLOOD_DX = [1, -1, 0, 0];
 const FLOOD_DY = [0, 0, 1, -1];
 
+/** Incrementally-maintained set of packed water-tile coords per sim.
+ * Built lazily with one full-grid scan (covers worldgen lakes and
+ * restored saves), then kept current by the only three water mutation
+ * sites: aquifer breach (add), flood spread (add), pump drain (remove).
+ * Saves floodSystem a full 400×2000 sweep every 30 ticks. */
+const waterIndexCache = new WeakMap<SimWorld, Set<number>>();
+
+function waterIndex(sim: SimWorld): Set<number> {
+  let s = waterIndexCache.get(sim);
+  if (!s) {
+    s = new Set<number>();
+    const grid = sim.grid;
+    for (let y = 0; y < grid.height; y++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (grid.getTile(x, y) === TileType.Water) s.add((y << 16) | x);
+      }
+    }
+    waterIndexCache.set(sim, s);
+  }
+  return s;
+}
+
 function floodSystem(sim: SimWorld): void {
   if (sim.aquiferBreachTick < 0) return;
   if (sim.tick % FLOOD_TICK_INTERVAL !== 0) return;
   const grid = sim.grid;
-  // Count current water and pick a random water tile to spread from.
-  // For determinism we pick by aiRng over the candidate list.
-  let waterCount = 0;
+  // Current water tiles from the incremental index; pick a random
+  // source to spread from via aiRng for determinism.
+  const water = waterIndex(sim);
+  const waterCount = water.size;
   type Cell = { x: number; y: number };
   const sources: Cell[] = [];
-  // Sample only the visible viewport — at full world size scanning
-  // every tile is wasteful. The flood started at the breach tile; we
-  // walk outward along seen tiles.
-  // Cheaper: scan the full grid once but cap the work.
-  const w = grid.width;
-  const h = grid.height;
-  for (let y = 0; y < h && waterCount <= FLOOD_MAX_TILES; y++) {
-    for (let x = 0; x < w && waterCount <= FLOOD_MAX_TILES; x++) {
-      if (grid.getTile(x, y) === TileType.Water) {
-        waterCount++;
-        sources.push({ x, y });
-      }
-    }
+  for (const c of water) {
+    sources.push({ x: c & 0xffff, y: (c >>> 16) & 0xffff });
+    if (sources.length > FLOOD_MAX_TILES) break;
   }
   if (waterCount >= FLOOD_MAX_TILES) {
     // Saturation reached. Flood holds at this footprint until the
@@ -1528,6 +1541,7 @@ function floodSystem(sim: SimWorld): void {
     if (!grid.inBounds(nx, ny)) continue;
     if (!grid.isWalkable(nx, ny)) continue;
     grid.setTile(nx, ny, TileType.Water);
+    waterIndex(sim).add((ny << 16) | nx);
     sim.regions.invalidate();
     return;
   }
@@ -3575,7 +3589,35 @@ const ACTIVE_RADIUS_SQ = ACTIVE_RADIUS * ACTIVE_RADIUS;
  * hostile movement and combat to early-skip work for entities outside
  * the colony's active footprint. Cheap: at-most O(dwarves) but exits on
  * the first hit, so a hostile near a busy hall returns fast. */
+const ACTIVE_COARSE = 64;
+const ACTIVE_COARSE_REACH = Math.ceil(ACTIVE_RADIUS / ACTIVE_COARSE);
+const activeZoneCache = new WeakMap<SimWorld, { tick: number; coarse: Set<number> }>();
+
 function isInActiveZone(sim: SimWorld, x: number, y: number): boolean {
+  // Coarse fast-reject: mark every 64-tile cell within reach of a
+  // dwarf once per tick. A query cell not in the set is provably out
+  // of range (|d| <= 100 implies coarse delta <= 2), so far hostiles
+  // — the common case — skip the per-dwarf scan entirely. Cells in
+  // the set fall through to the exact check, keeping the semantics
+  // identical to the uncached version.
+  let cache = activeZoneCache.get(sim);
+  if (!cache || cache.tick !== sim.tick) {
+    const coarse = new Set<number>();
+    sim.forEachDwarf((_id, p) => {
+      const cx = (p.x / ACTIVE_COARSE) | 0;
+      const cy = (p.y / ACTIVE_COARSE) | 0;
+      for (let dy = -ACTIVE_COARSE_REACH; dy <= ACTIVE_COARSE_REACH; dy++) {
+        for (let dx = -ACTIVE_COARSE_REACH; dx <= ACTIVE_COARSE_REACH; dx++) {
+          coarse.add((cy + dy) * 4096 + (cx + dx));
+        }
+      }
+    });
+    cache = { tick: sim.tick, coarse };
+    activeZoneCache.set(sim, cache);
+  }
+  if (!cache.coarse.has(((y / ACTIVE_COARSE) | 0) * 4096 + ((x / ACTIVE_COARSE) | 0))) {
+    return false;
+  }
   let active = false;
   sim.forEachDwarf((_id, p) => {
     if (active) return;
@@ -3970,6 +4012,7 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   }
   if (best) {
     sim.grid.setTile(best.x, best.y, TileType.CorridorFloor);
+    waterIndex(sim).delete((best.y << 16) | best.x);
     sim.regions.invalidate();
     // Note the drain in the chronicle so the player can see the
     // pump actually doing work — the visual change is small and
@@ -4577,7 +4620,11 @@ function effectiveWorkSpeed(sim: SimWorld, dwarfId: EntityId): number {
  * Falls back to 0 (a stone pick) when no metal tools have been
  * forged yet. Mid-tick scan is fast: typical fortresses carry only
  * a handful of tool items at once. */
+const toolQualityCache = new WeakMap<SimWorld, { tick: number; value: number }>();
+
 function colonyToolQuality(sim: SimWorld): number {
+  const cached = toolQualityCache.get(sim);
+  if (cached && cached.tick === sim.tick) return cached.value;
   let best = 0;
   // Scan tool items in the world (on the floor, on armoury racks,
   // or being carried mid-haul).
@@ -4604,6 +4651,10 @@ function colonyToolQuality(sim: SimWorld): number {
     const q = eq.weaponQuality ?? 0;
     if (q > best) best = q;
   }
+  // Per-tick cache: a tool forged mid-tick shows up next tick — a
+  // one-tick lag on pickaxe quality in exchange for one scan per tick
+  // instead of one per mining dwarf per tick.
+  toolQualityCache.set(sim, { tick: sim.tick, value: best });
   return best;
 }
 
@@ -5013,6 +5064,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     // into adjacent walkable cells over the next several days.
     if (tileType === TileType.Aquifer) {
       sim.grid.setTile(job.targetX, job.targetY, TileType.Water);
+      waterIndex(sim).add((job.targetY << 16) | job.targetX);
       sim.grid.setDesignation(job.targetX, job.targetY, 0);
       sim.releaseMineTarget(job.targetX, job.targetY);
       const dw = sim.dwarf.get(e)!;

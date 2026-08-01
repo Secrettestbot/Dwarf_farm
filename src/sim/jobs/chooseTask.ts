@@ -786,6 +786,63 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
   return best ? { x: best.x, y: best.y } : null;
 }
 
+
+/** Per-tick index over blueprint state consulted by findHaulTarget for
+ * EVERY loose item per idle dwarf. Blueprint statuses, station tiles,
+ * and furnishing requirements never change during jobAssignmentSystem
+ * (the only caller), so one scan per tick replaces an
+ * O(items x blueprints) explosion as the colony grows.
+ * - stationInput: packed station cell -> the recipe input it accepts
+ * - stockpileRects: complete-stockpile bounding boxes
+ * - furnishingNeeds: item kinds some needs_furnishing room still wants
+ * - workshopInputs: recipe input kinds across complete workshops */
+interface HaulScanIndex {
+  tick: number;
+  stationInput: Map<number, string>;
+  stockpileRects: Array<{ x0: number; y0: number; x1: number; y1: number }>;
+  furnishingNeeds: Set<string>;
+  workshopInputs: Set<string>;
+}
+
+const haulIndexCache = new WeakMap<SimWorld, HaulScanIndex>();
+
+function haulIndex(sim: SimWorld): HaulScanIndex {
+  const cached = haulIndexCache.get(sim);
+  if (cached && cached.tick === sim.tick) return cached;
+  const idx: HaulScanIndex = {
+    tick: sim.tick,
+    stationInput: new Map(),
+    stockpileRects: [],
+    furnishingNeeds: new Set(),
+    workshopInputs: new Set(),
+  };
+  for (const b of sim.planner.blueprints) {
+    if (b.status === "complete") {
+      if (b.kind === "stockpile") {
+        idx.stockpileRects.push({ x0: b.originX, y0: b.originY, x1: b.originX + b.width, y1: b.originY + b.height });
+      }
+      const recipe = recipeFor(b.kind);
+      if (recipe) {
+        idx.workshopInputs.add(recipe.inputKind);
+        for (let i = 0; i < b.cavity.length; i++) {
+          const c = b.cavity[i];
+          if (sim.grid.getTile(c & 0xffff, (c >>> 16) & 0xffff) === recipe.station) {
+            idx.stationInput.set(c, recipe.inputKind);
+          }
+        }
+      }
+    } else if (b.status === "needs_furnishing") {
+      const reqs = FURNITURE_REQUIREMENTS[b.kind];
+      if (!reqs) continue;
+      for (const r of reqs) {
+        if ((b.furniturePlaced?.[r.item] ?? 0) < r.count) idx.furnishingNeeds.add(r.item);
+      }
+    }
+  }
+  haulIndexCache.set(sim, idx);
+  return idx;
+}
+
 /** Find an unclaimed item on the floor for this dwarf to pick up and
  * mark it claimed in the same call so two haulers running chooseTask in
  * the same tick don't both target it. Returns the item's tile (the dwarf
@@ -873,16 +930,7 @@ function isFurnitureKind(kind: string): boolean {
  * kind. Used to tier furniture hauls above bulk hauls — only the
  * "room-is-waiting" case earns the higher tier. */
 function hasNeedsFurnishingFor(sim: SimWorld, kind: string): boolean {
-  for (const b of sim.planner.blueprints) {
-    if (b.status !== "needs_furnishing") continue;
-    const reqs = FURNITURE_REQUIREMENTS[b.kind];
-    if (!reqs) continue;
-    const placed = b.furniturePlaced?.[kind] ?? 0;
-    let need = 0;
-    for (const r of reqs) if (r.item === kind) need = r.count;
-    if (placed < need) return true;
-  }
-  return false;
+  return haulIndex(sim).furnishingNeeds.has(kind);
 }
 
 /** Cap on the number of dwarves committed to a haul job at once.
@@ -956,18 +1004,7 @@ function findEmptyArmouryRack(sim: SimWorld, sx: number, sy: number): { x: numbe
  * resource. Used to mark items as "delivered" — they're not available
  * for re-pickup. */
 function isItemAtWorkshopDestination(sim: SimWorld, x: number, y: number, kind: string): boolean {
-  const tile = sim.grid.getTile(x, y);
-  for (const b of sim.planner.blueprints) {
-    if (b.status !== "complete") continue;
-    const recipe = recipeFor(b.kind);
-    if (!recipe) continue;
-    if (recipe.station !== tile) continue;
-    if (recipe.inputKind !== kind) continue;
-    if (x < b.originX || x >= b.originX + b.width) continue;
-    if (y < b.originY || y >= b.originY + b.height) continue;
-    return true;
-  }
-  return false;
+  return haulIndex(sim).stationInput.get((y << 16) | x) === kind;
 }
 
 /** True iff (x, y) is inside the cavity of any complete stockpile
@@ -975,11 +1012,8 @@ function isItemAtWorkshopDestination(sim: SimWorld, x: number, y: number, kind: 
  * stored — picking up a bed from a stockpile when no bedroom needs
  * it just respawns the bed at the dwarf's feet next tick. */
 function isItemStoredAtStockpile(sim: SimWorld, x: number, y: number): boolean {
-  for (const b of sim.planner.blueprints) {
-    if (b.kind !== "stockpile" || b.status !== "complete") continue;
-    if (x < b.originX || x >= b.originX + b.width) continue;
-    if (y < b.originY || y >= b.originY + b.height) continue;
-    return true;
+  for (const r of haulIndex(sim).stockpileRects) {
+    if (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return true;
   }
   return false;
 }
@@ -999,20 +1033,8 @@ function itemHasOpenDemand(sim: SimWorld, kind: string): boolean {
     case "meal": case "wood": case "hide": case "wheelbarrow":
       return true;
   }
-  for (const b of sim.planner.blueprints) {
-    if (b.status === "needs_furnishing") {
-      const reqs = FURNITURE_REQUIREMENTS[b.kind];
-      if (!reqs) continue;
-      const placed = b.furniturePlaced?.[kind] ?? 0;
-      let need = 0;
-      for (const r of reqs) if (r.item === kind) need = r.count;
-      if (placed < need) return true;
-    } else if (b.status === "complete") {
-      const recipe = recipeFor(b.kind);
-      if (recipe && recipe.inputKind === kind) return true;
-    }
-  }
-  return false;
+  const idx = haulIndex(sim);
+  return idx.furnishingNeeds.has(kind) || idx.workshopInputs.has(kind);
 }
 
 /** Find a workshop that wants this resource as its recipe input and
