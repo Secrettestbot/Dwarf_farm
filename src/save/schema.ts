@@ -110,6 +110,8 @@ export interface SavedHostile {
    * performs — the legacy top-level hostileNames list was keyed by
    * raw entity ids and silently detached on load. */
   name?: string;
+  /** True for members of the currently-active siege warband. */
+  siegeMember?: boolean;
 }
 
 /** Saved pet entity — wild or tame. ownerIndex is an index into

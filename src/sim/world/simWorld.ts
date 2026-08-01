@@ -657,6 +657,7 @@ export class SimWorld {
     hp?: number;
     lastAttackTick?: number;
     lastMoveTick?: number;
+    siegeMember?: boolean;
   }): EntityId {
     const def = HOSTILE_DEFS[spec.kind];
     const e = this.ecs.create();
@@ -666,6 +667,7 @@ export class SimWorld {
       kind: spec.kind,
       lastAttackTick: spec.lastAttackTick ?? 0,
       lastMoveTick: spec.lastMoveTick ?? 0,
+      siegeMember: spec.siegeMember,
     });
     this.health.set(e, {
       hp: spec.hp ?? def.maxHp,

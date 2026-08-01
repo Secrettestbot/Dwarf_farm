@@ -240,6 +240,10 @@ export interface Hostile {
   kind: HostileKind;
   lastAttackTick: number;
   lastMoveTick: number;
+  /** True for members of the current siege warband. The siege-broken
+   * check counts only flagged hostiles, so an unrelated goblin scout
+   * wandering a far tunnel can't keep "the siege" alive forever. */
+  siegeMember?: boolean;
 }
 
 /** HP carried by anything that can be hit — dwarves and hostiles alike. */

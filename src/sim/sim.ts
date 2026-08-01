@@ -5261,6 +5261,12 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     } else if (sim.stockpile.food > 0) {
       sim.stockpile.food -= 1;
       needs.hunger = Math.min(100, needs.hunger + 60);
+    } else {
+      // The larder emptied while we walked over. Bail now instead of
+      // pantomiming a 30-tick meal that restores nothing — chooseTask
+      // re-evaluates immediately and can route to real food elsewhere.
+      dropJob(sim, e);
+      return;
     }
   }
   job.progress++;
@@ -5630,7 +5636,7 @@ function siegeSystem(sim: SimWorld): void {
     let liveAttackers = 0;
     for (const id of sim.hostile.entities) {
       const h = sim.hostile.get(id);
-      if (h && (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord")) liveAttackers++;
+      if (h && h.siegeMember) liveAttackers++;
     }
     if (liveAttackers === 0) {
       sim.siegeActive = false;
@@ -5731,15 +5737,15 @@ function spawnSiegeWarband(sim: SimWorld): void {
 
   for (let i = 0; i < goblinCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
-    sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y });
+    sim.spawnHostile({ kind: "goblin_scout", x: c.x, y: c.y, siegeMember: true });
   }
   for (let i = 0; i < trollCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
-    sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y });
+    sim.spawnHostile({ kind: "cave_troll", x: c.x, y: c.y, siegeMember: true });
   }
   for (let i = 0; i < warlordCount; i++) {
     const c = candidates[sim.aiRng.nextRange(0, candidates.length)];
-    const wid = sim.spawnHostile({ kind: "goblin_warlord", x: c.x, y: c.y });
+    const wid = sim.spawnHostile({ kind: "goblin_warlord", x: c.x, y: c.y, siegeMember: true });
     if (wid !== -1) sim.hostileNames.set(wid, warlordName);
   }
 

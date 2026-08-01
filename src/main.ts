@@ -306,11 +306,17 @@ function runGame(active: ActiveFortress, camera: Camera) {
 
   let panStart: { mx: number; my: number; cx: number; cy: number } | null = null;
   let isPanning = false;
+  // Last non-zero speed, so unpausing returns to where the player was
+  // (space at 16x shouldn't drop the game back to 1x).
+  let lastRunSpeed: SpeedLevel = 1;
 
   const hud = new Hud(uiHost, {
     fortressName: () => active.fortressName,
     mode: active.mode,
-    onSpeedChange(s: SpeedLevel) { clock.setSpeed(s); },
+    onSpeedChange(s: SpeedLevel) {
+      if (s !== 0) lastRunSpeed = s;
+      clock.setSpeed(s);
+    },
     async onSave() {
       await persist(active, camera);
       flashSave();
@@ -396,10 +402,15 @@ function runGame(active: ActiveFortress, camera: Camera) {
   document.addEventListener("keydown", (e) => {
     if (e.code === "Space") {
       e.preventDefault();
-      clock.setSpeed(clock.speed === 0 ? 1 : 0);
-    } else if (e.key === "1") clock.setSpeed(1);
-    else if (e.key === "2") clock.setSpeed(4);
-    else if (e.key === "3") clock.setSpeed(16);
+      if (clock.speed === 0) {
+        clock.setSpeed(lastRunSpeed);
+      } else {
+        lastRunSpeed = clock.speed;
+        clock.setSpeed(0);
+      }
+    } else if (e.key === "1") { lastRunSpeed = 1; clock.setSpeed(1); }
+    else if (e.key === "2") { lastRunSpeed = 4; clock.setSpeed(4); }
+    else if (e.key === "3") { lastRunSpeed = 16; clock.setSpeed(16); }
   });
 
   // ---- Auto-save lifecycle ----
@@ -420,6 +431,10 @@ function runGame(active: ActiveFortress, camera: Camera) {
   // a crisis + four constructions doesn't sound like a slot machine.
   let lastEventCount = sim.events.size();
   let lastFrame = performance.now();
+  // A persistent sim error would otherwise retry (and log) every frame
+  // forever; after a few consecutive failures we pause the clock so the
+  // player can read the chronicle and save.
+  let consecutiveTickErrors = 0;
   function frame(now: number) {
     const dt = Math.min(100, now - lastFrame);
     lastFrame = now;
@@ -428,6 +443,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
     for (let i = 0; i < ticks; i++) {
       try {
         tick(sim);
+        consecutiveTickErrors = 0;
       } catch (err) {
         // Last-resort net so a sim regression doesn't black-screen
         // the game. The sim's own paths handle entity-cap overflow
@@ -440,6 +456,15 @@ function runGame(active: ActiveFortress, camera: Camera) {
           "crisis",
           `A sim error skipped a tick: ${err instanceof Error ? err.message : String(err)}`,
         );
+        consecutiveTickErrors++;
+        if (consecutiveTickErrors >= 3) {
+          clock.setSpeed(0);
+          sim.events.add(
+            sim.tick,
+            "crisis",
+            "Repeated sim errors — the game is paused. Save your fortress and reload.",
+          );
+        }
         break;
       }
     }
@@ -536,8 +561,15 @@ function findDwarfNear(sim: SimWorld, x: number, y: number): number | null {
 }
 
 let saveInFlight: Promise<void> | null = null;
+let saveQueued: { active: ActiveFortress; camera: Camera } | null = null;
 async function persist(active: ActiveFortress, camera: Camera): Promise<void> {
-  if (saveInFlight) return saveInFlight;
+  if (saveInFlight) {
+    // A save is mid-write. Queue exactly one trailing save with the
+    // freshest state — returning the stale in-flight promise used to
+    // silently drop the newest snapshot on tab-hide / unload.
+    saveQueued = { active, camera };
+    return saveInFlight;
+  }
   const save = snapshot({
     sim: active.sim,
     slotId: active.slotId,
@@ -549,6 +581,11 @@ async function persist(active: ActiveFortress, camera: Camera): Promise<void> {
   });
   saveInFlight = saveGame(save).finally(() => {
     saveInFlight = null;
+    if (saveQueued) {
+      const next = saveQueued;
+      saveQueued = null;
+      void persist(next.active, next.camera);
+    }
   });
   return saveInFlight;
 }

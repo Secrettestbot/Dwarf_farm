@@ -352,6 +352,7 @@ function collectHostiles(sim: SimWorld): SavedHostile[] {
       lastAttackTick: h.lastAttackTick,
       lastMoveTick: h.lastMoveTick,
       name: sim.hostileNames.get(e),
+      siegeMember: h.siegeMember || undefined,
     });
   }
   return out;
@@ -687,6 +688,13 @@ export function restore(save: SaveV1): SimWorld {
   // Restore hostiles.
   if (save.hostiles) {
     for (const h of save.hostiles) {
+      // Legacy saves predate the siegeMember flag: if a siege is
+      // active, treat warband-kind hostiles as members so the
+      // siege-broken check still has something to count.
+      const legacySiege =
+        h.siegeMember === undefined &&
+        save.siege?.active === true &&
+        (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord");
       const id = sim.spawnHostile({
         kind: h.kind as import("../sim/hostiles/types").HostileKind,
         x: h.x,
@@ -694,6 +702,7 @@ export function restore(save: SaveV1): SimWorld {
         hp: h.hp,
         lastAttackTick: h.lastAttackTick,
         lastMoveTick: h.lastMoveTick,
+        siegeMember: h.siegeMember || legacySiege || undefined,
       });
       if (id !== -1 && h.name) sim.hostileNames.set(id, h.name);
     }
