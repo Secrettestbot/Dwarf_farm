@@ -5964,11 +5964,16 @@ function pickHostileKind(sim: SimWorld, deepestY: number): HostileKind {
   return eligible[sim.aiRng.nextRange(0, eligible.length)];
 }
 
+/** Node budget for goblin pursuit pathfinding. Small on purpose: the
+ * pursue radius caps useful path length, and an unreachable target
+ * fast-fails via the region map before burning the budget. */
+const GOBLIN_PATH_BUDGET = 600;
+
 /**
- * Greedy pursuit: each tick, each hostile (rate-limited per kind) takes
- * a single step toward the nearest dwarf within pursueRange — no A*, just
- * a sign-of-delta step, fenced by walkability. Cheap and good enough for
- * cave-rat-scale threats; smarter creatures get proper pathing later.
+ * Pursuit movement. Goblins (scouts + warlords) run budgeted A* toward
+ * their chosen target so walls and concave rooms don't stop them;
+ * everything else takes a greedy sign-of-delta step, fenced by
+ * walkability — cheap and good enough for cave-rat-scale threats.
  */
 function hostileMovementSystem(sim: SimWorld): void {
   const ents = sim.hostile.entities;
@@ -6025,6 +6030,24 @@ function hostileMovementSystem(sim: SimWorld): void {
     if (!bestPos) continue;
     h.lastMoveTick = sim.tick;
     const target: { x: number; y: number } = bestPos;
+    // Goblins path properly (budgeted A*) so a concave wall doesn't
+    // pin the warband against the fortress forever — that made sieges
+    // trivial to wall off. The budget keeps a big warband cheap: each
+    // goblin paths at most once per moveCooldown, and the region map
+    // fast-fails unreachable targets. Everything else (rats, bats,
+    // trolls) keeps the greedy sign-step — pest-tier creatures
+    // bumbling into walls is fine flavor.
+    if (isGoblin) {
+      const path = sim.astar.findPath(sim.grid, pos.x, pos.y, target.x, target.y, GOBLIN_PATH_BUDGET);
+      if (path && path.length >= 2) {
+        const next = unpackCell(path[1]);
+        pos.x = next.x;
+        pos.y = next.y;
+        continue;
+      }
+      // No route within budget — fall through to the greedy step so
+      // the goblin still paces at the wall instead of freezing.
+    }
     const dx = Math.sign(target.x - pos.x);
     const dy = Math.sign(target.y - pos.y);
     // Try the diagonal first, then horizontal-only, then vertical-only.
