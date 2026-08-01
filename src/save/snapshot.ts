@@ -218,7 +218,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           y: sim.caravanY,
           leavesTick: sim.caravanLeavesTick,
           origin: sim.caravanOrigin,
-          brokerId: sim.caravanBrokerId,
+          brokerIndex: sim.caravanBrokerId !== -1 ? entityToIndex.get(sim.caravanBrokerId) : undefined,
           dealResource: sim.caravanDealResource,
           dealCost: sim.caravanDealCost,
           dealImport: sim.caravanDealImport,
@@ -247,9 +247,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           warlordName: sim.siegeWarlordName || undefined,
         }
       : undefined,
-    hostileNames: sim.hostileNames.size > 0
-      ? Array.from(sim.hostileNames.entries()).map(([id, name]) => ({ id, name }))
-      : undefined,
+    // Named hostiles are stored on their SavedHostile entries (the
+    // legacy top-level hostileNames list was keyed by raw entity ids,
+    // which don't survive a restore).
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
     artifactsNextId: sim.artifactsNextId,
@@ -266,8 +266,16 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       : undefined,
     mandatesSatisfied: sim.mandatesSatisfied || undefined,
     mandatesFailed: sim.mandatesFailed || undefined,
-    grudges: sim.grudges.size > 0
-      ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick }))
+    grudgeEntries: sim.grudges.size > 0
+      ? Array.from(sim.grudges.entries(), ([key, v]) => {
+          const [idA, idB] = key.split(":").map(Number);
+          const a = entityToIndex.get(idA);
+          const b = entityToIndex.get(idB);
+          // Entries referencing a dead party are pruned by killDwarf,
+          // but guard anyway — an unmappable pair can't be restored.
+          if (a === undefined || b === undefined) return null;
+          return { a, b, count: v.count, lastIncidentTick: v.lastIncidentTick };
+        }).filter((g): g is NonNullable<typeof g> => g !== null)
       : undefined,
     cumulative: Object.keys(sim.cumulative).length > 0 ? { ...sim.cumulative } : undefined,
     discoveries: sim.discoveries.size > 0 ? Array.from(sim.discoveries.values()).sort((a, b) => a - b) : undefined,
@@ -330,6 +338,7 @@ function collectHostiles(sim: SimWorld): SavedHostile[] {
       maxHp: hp.maxHp,
       lastAttackTick: h.lastAttackTick,
       lastMoveTick: h.lastMoveTick,
+      name: sim.hostileNames.get(e),
     });
   }
   return out;
@@ -557,7 +566,13 @@ export function restore(save: SaveV1): SimWorld {
     sim.caravanY = save.caravan.y;
     sim.caravanLeavesTick = save.caravan.leavesTick;
     sim.caravanOrigin = save.caravan.origin;
-    if (save.caravan.brokerId !== undefined) sim.caravanBrokerId = save.caravan.brokerId;
+    if (save.caravan.brokerIndex !== undefined) {
+      sim.caravanBrokerId = spawnedEntities[save.caravan.brokerIndex] ?? -1;
+    } else if (save.caravan.brokerId !== undefined) {
+      // Legacy saves stored a raw entity id — it can't be mapped onto
+      // the restored entities, so at best it's the pre-fix behavior.
+      sim.caravanBrokerId = save.caravan.brokerId;
+    }
     if (save.caravan.dealResource !== undefined) sim.caravanDealResource = save.caravan.dealResource;
     if (save.caravan.dealCost !== undefined) sim.caravanDealCost = save.caravan.dealCost;
     if (save.caravan.dealImport !== undefined) sim.caravanDealImport = save.caravan.dealImport;
@@ -602,7 +617,16 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.mandatesSatisfied !== undefined) sim.mandatesSatisfied = save.mandatesSatisfied;
   if (save.mandatesFailed !== undefined) sim.mandatesFailed = save.mandatesFailed;
-  if (save.grudges) {
+  if (save.grudgeEntries) {
+    for (const g of save.grudgeEntries) {
+      const idA = spawnedEntities[g.a];
+      const idB = spawnedEntities[g.b];
+      if (idA === undefined || idB === undefined) continue;
+      const key = idA < idB ? `${idA}:${idB}` : `${idB}:${idA}`;
+      sim.grudges.set(key, { count: g.count, lastIncidentTick: g.lastIncidentTick });
+    }
+  } else if (save.grudges) {
+    // Legacy raw-id keys — best effort, may attach to the wrong pair.
     for (const g of save.grudges) {
       sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick });
     }
@@ -638,7 +662,7 @@ export function restore(save: SaveV1): SimWorld {
   // Restore hostiles.
   if (save.hostiles) {
     for (const h of save.hostiles) {
-      sim.spawnHostile({
+      const id = sim.spawnHostile({
         kind: h.kind as import("../sim/hostiles/types").HostileKind,
         x: h.x,
         y: h.y,
@@ -646,6 +670,7 @@ export function restore(save: SaveV1): SimWorld {
         lastAttackTick: h.lastAttackTick,
         lastMoveTick: h.lastMoveTick,
       });
+      if (id !== -1 && h.name) sim.hostileNames.set(id, h.name);
     }
   }
   // Restore pets — wild and tame both. ownerIndex maps back through

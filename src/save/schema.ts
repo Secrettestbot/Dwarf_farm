@@ -105,6 +105,11 @@ export interface SavedHostile {
   maxHp: number;
   lastAttackTick: number;
   lastMoveTick: number;
+  /** Display name for named foes (the goblin warlord). Stored on the
+   * hostile itself so it survives the entity-id reshuffle a restore
+   * performs — the legacy top-level hostileNames list was keyed by
+   * raw entity ids and silently detached on load. */
+  name?: string;
 }
 
 /** Saved pet entity — wild or tame. ownerIndex is an index into
@@ -278,7 +283,12 @@ export interface SaveV1 {
     /** Pending-trade fields — set when the caravan arrives, applied
      * when the broker walks to the depot. Optional for back-compat
      * with saves from before the deferred-trade refactor. */
+    /** Legacy raw entity id of the broker — kept for reading old
+     * saves only; entity ids do not survive a restore. */
     brokerId?: number;
+    /** Broker as an index into dwarves[] (same encoding partnerIndex
+     * uses) so the reference survives the restore id reshuffle. */
+    brokerIndex?: number;
     dealResource?: string;
     dealCost?: number;
     dealImport?: string;
@@ -365,10 +375,14 @@ export interface SaveV1 {
   mandatesFailed?: number;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
-  /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
-   * count rises with each spat. Round-trips so a feud survives a
-   * reload (or a worker catch-up) instead of resetting to peace. */
+  /** Legacy pairwise grudges keyed by `${minId}:${maxId}` raw entity
+   * ids — kept for reading old saves only; ids do not survive a
+   * restore, so these entries can attach to the wrong pair. */
   grudges?: Array<{ key: string; count: number; lastIncidentTick: number }>;
+  /** Pairwise grudges with both parties as indexes into dwarves[]
+   * (same encoding partnerIndex uses) so feuds reattach to the right
+   * dwarves after the restore id reshuffle. */
+  grudgeEntries?: Array<{ a: number; b: number; count: number; lastIncidentTick: number }>;
   /** Cumulative haul totals — drives material-gated research. Once
    * a counter has crossed a topic's threshold the gate stays open
    * even if the stockpile is later spent, so we round-trip the
