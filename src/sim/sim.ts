@@ -1966,14 +1966,19 @@ function arriveCaravan(sim: SimWorld, originName: string): void {
   // reputation levels.
   const rep = sim.tradeReputation[kingdom.name] ?? 0;
   const repBonus = reputationPriceMultiplier(rep);
+  // Pick the best-VALUE deal among goods the colony can spare, not the
+  // first sellable one in list order — a colony sitting on fifty cut
+  // gems shouldn't sell stone because stone cleared its threshold
+  // first. Gross value = basket size × unit price × the kingdom's
+  // per-resource multiplier; ties keep earlier (preference) order.
   let offer: TradeOffer | null = null;
   let offerKingdomPrice = 0;
   for (const o of TRADE_OFFERS) {
-    if ((sim.stockpile[o.resource] ?? 0) >= o.min) {
-      const kingdomMult = kingdom.buys[o.resource] ?? 1.0;
+    if ((sim.stockpile[o.resource] ?? 0) < o.min) continue;
+    const unitPrice = o.price * (kingdom.buys[o.resource] ?? 1.0) * repBonus;
+    if (!offer || unitPrice * o.min > offerKingdomPrice * offer.min) {
       offer = o;
-      offerKingdomPrice = o.price * kingdomMult * repBonus;
-      break;
+      offerKingdomPrice = unitPrice;
     }
   }
   if (!offer) {
