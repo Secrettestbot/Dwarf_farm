@@ -19,13 +19,24 @@ export interface SnapshotInput {
   zoomIndex: number;
 }
 
+/** Cached clean-regen baseline for the RLE tile delta. Worldgen over a
+ * full 400×2000 map is by far the most expensive part of a snapshot,
+ * and the game autosaves every few real seconds — regenerating the
+ * same immutable baseline each time made every autosave hitch. One
+ * entry suffices: a session only ever snapshots one world. */
+let baselineCache: { key: string; grid: import("../sim/world/grid").TileGrid } | null = null;
+
+function baselineGridFor(seed: number, width: number, height: number): import("../sim/world/grid").TileGrid {
+  const key = `${seed}:${width}:${height}`;
+  if (baselineCache?.key !== key) {
+    baselineCache = { key, grid: generateWorld({ seed, width, height }).grid };
+  }
+  return baselineCache.grid;
+}
+
 export function snapshot(input: SnapshotInput): SaveV1 {
-  const baseline = generateWorld({
-    seed: input.sim.seed,
-    width: input.sim.grid.width,
-    height: input.sim.grid.height,
-  });
-  const overrides = encodeOverrides(input.sim.grid, baseline.grid);
+  const baseline = baselineGridFor(input.sim.seed, input.sim.grid.width, input.sim.grid.height);
+  const overrides = encodeOverrides(input.sim.grid, baseline);
 
   // Build an entity → dwarves[index] map first so we can encode partnerIndex
   // on socialise jobs without holding entity references in the save.

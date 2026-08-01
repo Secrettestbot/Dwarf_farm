@@ -3083,9 +3083,8 @@ function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
     }
   }
   const age = sim.ageOf(e);
-  // Free any mining claim before removing the job component.
-  const job = sim.job.get(e);
-  if (job?.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
+  // Free any reservations (mine claim, item claims) with the job.
+  dropJob(sim, e);
   // Memorial on the death tile if it's walkable space (a dwarf in transit
   // through a tunnel; not a solid tile that another dwarf is mining).
   if (sim.grid.isWalkable(pos.x, pos.y)) {
@@ -3640,10 +3639,7 @@ function jobAssignmentSystem(sim: SimWorld): void {
         interrupt = true;
       }
       if (interrupt) {
-        if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
-        if (job.kind === "haul") releaseItemClaims(sim, e);
-        sim.job.remove(e);
-        sim.pathing.remove(e);
+        dropJob(sim, e);
       }
     }
     if (sim.job.has(e)) continue;
@@ -3705,11 +3701,7 @@ function movementSystem(sim: SimWorld): void {
     // Replan if the next step became unwalkable since the path was planned.
     const nextCell = unpackCell(path.path[path.pathIndex + 1]);
     if (!sim.grid.isWalkable(nextCell.x, nextCell.y)) {
-      const job = sim.job.get(e);
-      if (job?.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
-      if (job?.kind === "haul") releaseItemClaims(sim, e);
-      sim.pathing.remove(e);
-      sim.job.remove(e);
+      dropJob(sim, e);
       continue;
     }
 
@@ -3818,8 +3810,7 @@ function progressVisitGrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos:
   const tile = sim.grid.getTile(job.targetX, job.targetY);
   if (tile !== TileType.Headstone) {
     // Grave got dug up or the cemetery was destroyed somehow. Bail.
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   if (job.progress === 0) {
@@ -3851,8 +3842,7 @@ function progressVisitGrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos:
     const dw = sim.dwarf.get(e);
     if (dw) dw.lastGraveVisitTick = sim.tick;
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -3870,14 +3860,12 @@ function progressTreat(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   // Bail if the patient was lost in any way the disease system would
   // also bail on — death, removal of disease, no longer on the cot.
   if (patient === undefined || !sim.ecs.isAlive(patient) || !sim.disease.has(patient)) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   const ppos = sim.position.get(patient);
   if (!ppos || sim.grid.getTile(ppos.x, ppos.y) !== TileType.HospitalBed) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   // Medic must be adjacent — otherwise we're still walking up and
@@ -3908,8 +3896,7 @@ const NEGOTIATE_TICKS = 60; // one in-game hour at the table
 function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   // Caravan packed up while we were walking — no deal.
   if (sim.caravanLeavesTick <= 0 || sim.caravanDealComplete) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   const dx = Math.abs(pos.x - sim.caravanX);
@@ -3953,8 +3940,7 @@ function progressTrade(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     { x: sim.caravanX, y: sim.caravanY },
   );
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
-  sim.job.remove(e);
-  sim.pathing.remove(e);
+  dropJob(sim, e);
 }
 
 /** Tick a pump cycle while the dwarf stands on a pump-station tile.
@@ -3966,8 +3952,7 @@ const PUMP_TICKS = 60;
 const PUMP_DRAIN_RADIUS = 12;
 function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   if (sim.grid.getTile(pos.x, pos.y) !== TileType.PumpStation) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   job.progress++;
@@ -4012,8 +3997,7 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   // mechanisms (drawbridges, traps) wire in here too.
   awardSkillXp(sim, e, "engineering", 1);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
-  sim.job.remove(e);
-  sim.pathing.remove(e);
+  dropJob(sim, e);
 }
 
 /** Tick research progress while the scholar sits at a Library desk.
@@ -4023,13 +4007,11 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
 function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: { x: number; y: number }): void {
   const tile = sim.grid.getTile(pos.x, pos.y);
   if (tile !== TileType.LibraryDesk) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   if (!sim.research.current) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   const dw = sim.dwarf.get(e);
@@ -4070,8 +4052,7 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
       );
     }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -4132,8 +4113,7 @@ function progressEngage(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x
     }
   }
   if (!hostilePos) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   // If we lost adjacency (hostile fled, we got knocked back), update the
@@ -4161,8 +4141,7 @@ function progressEngage(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x
  * Skill speeds the work and grants XP per craft. */
 function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   if (pos.x !== job.targetX || pos.y !== job.targetY) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   const tile = sim.grid.getTile(pos.x, pos.y);
@@ -4285,8 +4264,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     }
   }
   if (!recipe) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   // Reserve the input on the first tick. Two paths:
@@ -4313,8 +4291,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     }
     if (!consumedItem) {
       if ((sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] < recipe.inputQty) {
-        sim.job.remove(e);
-        sim.pathing.remove(e);
+        dropJob(sim, e);
         return;
       }
       (sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] -= recipe.inputQty;
@@ -4330,8 +4307,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     if (recipe.inputKind2 && recipe.inputQty2) {
       const sp = sim.stockpile as unknown as Record<string, number>;
       if ((sp[recipe.inputKind2] ?? 0) < recipe.inputQty2) {
-        sim.job.remove(e);
-        sim.pathing.remove(e);
+        dropJob(sim, e);
         return;
       }
       sp[recipe.inputKind2] -= recipe.inputQty2;
@@ -4416,8 +4392,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       );
     }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -4700,6 +4675,22 @@ function releaseItemClaims(sim: SimWorld, e: EntityId): void {
   }
 }
 
+/** Single exit point for abandoning or completing a job: releases every
+ * reservation the job holds (mine-target claims, floor-item claims),
+ * then strips the job + pathing components. All release calls are
+ * idempotent, so completion paths that already consumed their claim can
+ * still route through here. New reservation types wire their release in
+ * once, instead of at every one of the ~40 job-removal sites. */
+function dropJob(sim: SimWorld, e: EntityId): void {
+  const job = sim.job.get(e);
+  if (job) {
+    if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
+    if (job.kind === "haul") releaseItemClaims(sim, e);
+  }
+  sim.job.remove(e);
+  sim.pathing.remove(e);
+}
+
 function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   if (job.progress === 0) {
     // Pickup leg. If the colony has any wheelbarrows on hand and the
@@ -4710,9 +4701,7 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     // (size 1 × 4 = 4 of 8 units) goes in one trip; a single bed
     // (size 4) is one trip whether a wheelbarrow's around or not.
     if (pos.x !== job.targetX || pos.y !== job.targetY) {
-      releaseItemClaims(sim, e);
-      sim.job.remove(e);
-      sim.pathing.remove(e);
+      dropJob(sim, e);
       return;
     }
     // Pick the kind the hauler was sent to fetch. findHaulTarget
@@ -4824,15 +4813,13 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         sim.stockpile.wheelbarrows++;
       }
     }
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   // Delivery leg.
   const carrying = sim.carrying.get(e);
   if (!carrying) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   const kind = carrying.kind;
@@ -4896,8 +4883,7 @@ function progressHaul(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   sim.carrying.remove(e);
   if (moved) awardSkillXp(sim, e, "hauling", 1);
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
-  sim.job.remove(e);
-  sim.pathing.remove(e);
+  dropJob(sim, e);
 }
 
 /** Single-unit deposit for the haul-delivery's leftover items. Counter
@@ -4978,8 +4964,7 @@ export function creditOrDrop(
 function progressShelter(sim: SimWorld, e: EntityId, _job: JobAssignment, _pos: { x: number; y: number }): void {
   if (sim.emergency.mode !== "alarm" && sim.emergency.mode !== "evacuate") {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
   // While sheltering, the job sticks. The dwarf has already pathed to the
   // spawn (or as close as they can reach); they stand idle there.
@@ -4990,15 +4975,11 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   const dx = Math.abs(pos.x - job.targetX);
   const dy = Math.abs(pos.y - job.targetY);
   if (dx > 1 || dy > 1) {
-    sim.releaseMineTarget(job.targetX, job.targetY);
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   if (!sim.grid.isSolid(job.targetX, job.targetY)) {
-    sim.releaseMineTarget(job.targetX, job.targetY);
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   // Trait-driven work pace — Diligent / Lazy / Efficient / Perfectionist
@@ -5041,8 +5022,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       );
       if (sim.aquiferBreachTick < 0) sim.aquiferBreachTick = sim.tick;
       sim.dwarf.get(e)!.lastJobTick = sim.tick;
-      sim.job.remove(e);
-      sim.pathing.remove(e);
+      dropJob(sim, e);
       return;
     }
     // Trees leave Grass behind (the surface stays surface), every other
@@ -5174,16 +5154,14 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     }
 
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
 function progressSleep(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   const needs = sim.needs.get(e);
   if (!needs) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   job.progress++;
@@ -5211,8 +5189,7 @@ function progressSleep(sim: SimWorld, e: EntityId, job: JobAssignment): void {
       }
     }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -5233,8 +5210,7 @@ function roomQualityAt(sim: SimWorld, x: number, y: number, kind: string): numbe
 function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   const myNeeds = sim.needs.get(e);
   if (!myNeeds) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   job.progress++;
@@ -5262,16 +5238,14 @@ function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void
   }
   if (job.progress >= SOCIALISE_TICKS) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
 function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   const needs = sim.needs.get(e);
   if (!needs) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   // The dwarf consumes one unit of food on the first tick of the meal so
@@ -5304,8 +5278,7 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
       }
     }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -5371,8 +5344,7 @@ function progressTend(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
         break;
       }
     }
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -5418,8 +5390,7 @@ function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: {
     // tidying joinery.
     awardSkillXp(sim, e, "masonry", 1);
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -5450,15 +5421,13 @@ function progressEngrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { 
     if (inside) { room = b; break; }
   }
   if (!room) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   const placed = room.decorationsCount ?? 0;
   const cap = maxDecorationsFor(room);
   if (placed >= cap) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   // Prefer cut_gems (more dramatic quality jump). Fall back to a
@@ -5468,8 +5437,7 @@ function progressEngrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { 
   if (sim.stockpile.cut_gems > 0) { material = "cut_gems"; bump = ENGRAVE_QUALITY_PER_GEM; }
   else if (sim.stockpile.blocks > 0) { material = "blocks"; bump = ENGRAVE_QUALITY_PER_BLOCK; }
   if (!material) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   (sim.stockpile as unknown as Record<string, number>)[material] -= 1;
@@ -5492,15 +5460,13 @@ function progressEngrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { 
     { x: pos.x, y: pos.y },
   );
   sim.dwarf.get(e)!.lastJobTick = sim.tick;
-  sim.job.remove(e);
-  sim.pathing.remove(e);
+  dropJob(sim, e);
 }
 
 function progressDrink(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   const needs = sim.needs.get(e);
   if (!needs) {
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
     return;
   }
   if (job.progress === 0 && sim.stockpile.drink > 0) {
@@ -5510,8 +5476,7 @@ function progressDrink(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   job.progress++;
   if (job.progress >= DRINK_TICKS) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
@@ -5521,8 +5486,7 @@ function progressWander(sim: SimWorld, e: EntityId, job: JobAssignment): void {
   job.progress++;
   if (job.progress >= WANDER_LINGER_TICKS) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
-    sim.job.remove(e);
-    sim.pathing.remove(e);
+    dropJob(sim, e);
   }
 }
 
