@@ -74,24 +74,23 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     the alarm path. Engagement supersedes most needs except critical
   //     thirst / hunger / wounds (those branches sit just below).
   if (sim.squad.has(e)) {
-    const target = findHostileTarget(sim, pos.x, pos.y);
-    if (target) {
-      return {
-        kind: "engage" as JobKind,
-        targetX: target.x,
-        targetY: target.y,
-        progress: 0,
-      };
+    // A soldier below the retreat threshold doesn't take new fights
+    // (The Fury overrides) — they fall through to the wounded branch,
+    // which routes them to a hospital cot / bed to recover.
+    const hp = sim.health.get(e);
+    const retreating =
+      hp !== undefined && hp.hp < hp.maxHp * SOLDIER_RETREAT_RATIO && !sim.fury.has(e);
+    if (!retreating) {
+      const target = findHostileTarget(sim, pos.x, pos.y);
+      if (target) {
+        return {
+          kind: "engage" as JobKind,
+          targetX: target.x,
+          targetY: target.y,
+          progress: 0,
+        };
+      }
     }
-  }
-
-  // 0.7 Flee (GDD §6.2 danger response): a civilian with a hostile
-  //     closing inside FLEE_RADIUS abandons whatever they were about
-  //     to do and runs for the colony's safe zone. Soldiers engage
-  //     instead (branch above); a dwarf in The Fury doesn't run from
-  //     anything.
-  if (!sim.squad.has(e) && !sim.fury.has(e) && hasHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS)) {
-    return { kind: "flee" as JobKind, targetX: sim.spawn.x, targetY: sim.spawn.y, progress: 0 };
   }
 
   // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours. The
@@ -111,6 +110,17 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     if (target) {
       return { kind: "eat" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };
     }
+  }
+
+  // 2.5 Flee (GDD §6.2 danger response): a civilian with a menacing
+  //     hostile inside FLEE_RADIUS runs for the colony's safe zone
+  //     instead of working. Sits BELOW thirst/hunger — a dwarf who's
+  //     about to die of dehydration still darts for the drink counter,
+  //     scared or not — and pest-tier vermin (rats, bats, small
+  //     spiders) don't send grown dwarves running at all. Soldiers
+  //     engage (branch 0.5); The Fury doesn't run from anything.
+  if (!sim.squad.has(e) && !sim.fury.has(e) && hasMenacingHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS)) {
+    return { kind: "flee" as JobKind, targetX: sim.spawn.x, targetY: sim.spawn.y, progress: 0 };
   }
 
   // 3. Critical sleep, or a serious wound — bedroom anywhere in the colony
@@ -1289,10 +1299,22 @@ const SOLDIER_ENGAGE_RANGE = 30;
  * reads as a reaction, not clairvoyance. */
 export const FLEE_RADIUS = 8;
 
-/** True if any hostile is within `r` tiles of (x, y). */
-export function hasHostileWithin(sim: SimWorld, x: number, y: number, r: number): boolean {
+/** HP fraction below which a drafted soldier breaks off an engagement
+ * and seeks a bed instead of fighting to the death. Below the wounded
+ * threshold (0.5) so soldiers fight on through moderate wounds. */
+export const SOLDIER_RETREAT_RATIO = 0.3;
+
+/** Pest-tier hostiles a civilian does NOT flee from — the colony's
+ * pets and idle boots handle these. Everything else (goblins, bears,
+ * trolls, the deep horrors) sends civilians running. */
+const PEST_KINDS: ReadonlySet<string> = new Set(["cave_rat", "cave_bat", "cave_spider"]);
+
+/** True if any non-pest hostile is within `r` tiles of (x, y). */
+export function hasMenacingHostileWithin(sim: SimWorld, x: number, y: number, r: number): boolean {
   const ents = sim.hostile.entities;
   for (let i = 0; i < ents.length; i++) {
+    const h = sim.hostile.get(ents[i]);
+    if (!h || PEST_KINDS.has(h.kind)) continue;
     const p = sim.position.get(ents[i]);
     if (!p) continue;
     const dx = p.x - x;

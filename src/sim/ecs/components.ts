@@ -337,4 +337,9 @@ export interface JobAssignment {
    * resolved together with craftRecipe (drives output bonuses like the
    * smelter's steel doubling and per-workshop quality biases). */
   craftBlueprintKind?: string;
+  /** For craft jobs: what the reservation tick actually consumed, so an
+   * interrupted craft can refund it (asItem: a routed item entity was
+   * destroyed; otherwise stockpile counters were debited). Cleared on
+   * completion. Transient like craftRecipe — not serialized. */
+  craftPaid?: { kind: string; qty: number; asItem: boolean; kind2?: string; qty2?: number };
 }

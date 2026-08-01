@@ -1,5 +1,5 @@
 import { SimWorld } from "./world/simWorld";
-import { chooseTask, hasHostileWithin, FLEE_RADIUS } from "./jobs/chooseTask";
+import { chooseTask, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO } from "./jobs/chooseTask";
 import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
@@ -3652,7 +3652,7 @@ function jobAssignmentSystem(sim: SimWorld): void {
       const tHi = INTERRUPT_THIRST * scale;
       const hHi = INTERRUPT_HUNGER * scale;
       const survivalKind =
-        job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter" || job.kind === "flee";
+        job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter";
       let interrupt = false;
       if (
         needs &&
@@ -3662,12 +3662,14 @@ function jobAssignmentSystem(sim: SimWorld): void {
       ) {
         interrupt = true;
       }
-      // Danger interrupt: a civilian mid-job with a hostile closing in
-      // drops the work and lets chooseTask route them to the flee
-      // branch this same tick. Soldiers stand; The Fury doesn't run.
-      if (!interrupt && !survivalKind && !sim.squad.has(e) && !sim.fury.has(e)) {
+      // Danger interrupt: a civilian mid-job with a menacing hostile
+      // closing in drops the work and lets chooseTask route them to
+      // the flee branch this same tick. Soldiers stand; The Fury
+      // doesn't run; an existing flee job isn't re-dropped (it would
+      // thrash every tick while the danger persists).
+      if (!interrupt && !survivalKind && job.kind !== "flee" && !sim.squad.has(e) && !sim.fury.has(e)) {
         const pos = sim.position.get(e);
-        if (pos && hasHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS)) {
+        if (pos && hasMenacingHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS)) {
           interrupt = true;
         }
       }
@@ -4130,6 +4132,14 @@ function coinBookTitle(sim: SimWorld, topicName: string): string {
  * hostile is dead, has moved out of range, or the soldier himself is
  * out of HP. */
 function progressEngage(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  // Retreat: a soldier worn down past the retreat threshold breaks
+  // off (unless in The Fury) — chooseTask routes them to a hospital
+  // cot / bed via the wounded branch instead of fighting to the death.
+  const myHp = sim.health.get(e);
+  if (myHp && myHp.hp < myHp.maxHp * SOLDIER_RETREAT_RATIO && !sim.fury.has(e)) {
+    dropJob(sim, e);
+    return;
+  }
   // Has the hostile moved? Re-target each tick: scan all hostiles, pick
   // the one at job.targetX/Y (still there), or fall back to the nearest
   // adjacent one.
@@ -4352,6 +4362,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       }
       (sim.stockpile as unknown as Record<string, number>)[recipe.inputKind] -= recipe.inputQty;
     }
+    job.craftPaid = { kind: recipe.inputKind, qty: recipe.inputQty, asItem: consumedItem };
     // Multi-ingredient recipes (kitchen stew / feast) consume a
     // second resource alongside the primary. Both come from the
     // stockpile counter — recipe.inputKind2 isn't an entity kind,
@@ -4363,10 +4374,14 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     if (recipe.inputKind2 && recipe.inputQty2) {
       const sp = sim.stockpile as unknown as Record<string, number>;
       if ((sp[recipe.inputKind2] ?? 0) < recipe.inputQty2) {
+        // Primary was already consumed — dropJob refunds it via
+        // craftPaid, so the race no longer eats the ingredient.
         dropJob(sim, e);
         return;
       }
       sp[recipe.inputKind2] -= recipe.inputQty2;
+      job.craftPaid.kind2 = recipe.inputKind2;
+      job.craftPaid.qty2 = recipe.inputQty2;
     }
   }
   const dw = sim.dwarf.get(e);
@@ -4447,6 +4462,9 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
         "The First Hearth. The kitchen has cooked its first meal.",
       );
     }
+    // The craft settled — the inputs became the output, nothing to
+    // refund if the job is now dropped.
+    job.craftPaid = undefined;
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     dropJob(sim, e);
   }
@@ -4750,6 +4768,23 @@ function dropJob(sim: SimWorld, e: EntityId): void {
   if (job) {
     if (job.kind === "mine") sim.releaseMineTarget(job.targetX, job.targetY);
     if (job.kind === "haul") releaseItemClaims(sim, e);
+    if (job.kind === "craft" && job.craftPaid) {
+      // Craft abandoned after the reservation tick — hand the inputs
+      // back. A consumed routed item respawns on the station tile
+      // (quality is lost — the half-worked material is what it is);
+      // counter debits are re-credited.
+      const paid = job.craftPaid;
+      const sp = sim.stockpile as unknown as Record<string, number>;
+      if (paid.asItem) {
+        sim.spawnItem({ kind: paid.kind as import("./ecs/components").ItemKind, x: job.targetX, y: job.targetY });
+      } else {
+        sp[paid.kind] = (sp[paid.kind] ?? 0) + paid.qty;
+      }
+      if (paid.kind2 && paid.qty2 !== undefined) {
+        sp[paid.kind2] = (sp[paid.kind2] ?? 0) + paid.qty2;
+      }
+      job.craftPaid = undefined;
+    }
   }
   sim.job.remove(e);
   sim.pathing.remove(e);
@@ -5029,7 +5064,7 @@ export function creditOrDrop(
  * danger persists, the job re-checks every in-game hour. */
 const FLEE_CALM_MARGIN = 4;
 function progressFlee(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
-  if (!hasHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS + FLEE_CALM_MARGIN)) {
+  if (!hasMenacingHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS + FLEE_CALM_MARGIN)) {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     dropJob(sim, e);
     return;
