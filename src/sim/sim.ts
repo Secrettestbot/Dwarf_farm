@@ -5747,6 +5747,11 @@ const DWARF_ATTACK_COOLDOWN = 60;
 const SIEGE_INTERVAL_TICKS = TICKS_PER_YEAR; // once per in-game year
 const SIEGE_PREANNOUNCE_LEAD = TICKS_PER_DAY * 5;
 const SIEGE_MIN_POPULATION = 10; // sieges start when the colony is worth raiding
+/** A warband that hasn't broken the fortress after this long packs up
+ * and leaves. Without it, a walled-off colony faced an eternal siege —
+ * goblins path well now, but they can't dig, so an unreachable
+ * fortress stalled the siege state forever. */
+const SIEGE_WITHDRAW_TICKS = TICKS_PER_DAY * 6;
 
 function siegeSystem(sim: SimWorld): void {
   // Mid-siege check: if the warband is wiped, fire a victory event.
@@ -5758,11 +5763,32 @@ function siegeSystem(sim: SimWorld): void {
     }
     if (liveAttackers === 0) {
       sim.siegeActive = false;
+      sim.siegeStartedAtTick = -1;
       sim.siegesSurvived++;
       sim.events.add(
         sim.tick,
         "milestone",
         `The siege is broken. The fortress holds — count it the ${ordinal(sim.siegesSurvived)} the colony has survived.`,
+      );
+    } else if (
+      sim.siegeStartedAtTick >= 0 &&
+      sim.tick - sim.siegeStartedAtTick >= SIEGE_WITHDRAW_TICKS
+    ) {
+      // Withdrawal: the warband gives up. Outlasting a siege counts
+      // as surviving it — the fortress held, whether by axe or wall.
+      for (const id of sim.hostile.entities.slice()) {
+        const h = sim.hostile.get(id);
+        if (!h || !h.siegeMember) continue;
+        sim.hostileNames.delete(id);
+        sim.ecs.destroy(id, [sim.position, sim.hostile, sim.health]);
+      }
+      sim.siegeActive = false;
+      sim.siegeStartedAtTick = -1;
+      sim.siegesSurvived++;
+      sim.events.add(
+        sim.tick,
+        "milestone",
+        `The warband breaks camp and withdraws — six days at the gate bought them nothing. Count it the ${ordinal(sim.siegesSurvived)} siege the colony has survived.`,
       );
     }
   }
@@ -5868,6 +5894,7 @@ function spawnSiegeWarband(sim: SimWorld): void {
   }
 
   sim.siegeActive = true;
+  sim.siegeStartedAtTick = sim.tick;
   sim.siegeKilledSinceStart = 0;
   sim.siegeWarlordName = warlordName;
   const leaderClause = warlordCount > 0

@@ -323,6 +323,9 @@ export interface SaveV1 {
     announced: boolean;
     active: boolean;
     survived: number;
+    /** Tick the active siege began — drives the withdrawal clock.
+     * Optional: legacy saves restart the clock at load time. */
+    startedAtTick?: number;
     /** Name of the warlord currently leading the active siege, if
      * any. Empty when no warlord is in play. */
     warlordName?: string;

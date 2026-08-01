@@ -326,6 +326,9 @@ export class SimWorld {
    * being scheduled mid-siege, and to keep the chronicle line
    * about the siege ending clean. */
   siegeActive: boolean = false;
+  /** Tick the active siege began — drives the withdrawal clock. -1
+   * when no siege is active. */
+  siegeStartedAtTick = -1;
   /** Snapshot of siegesSurvived at the moment a siege starts, so
    * the end-of-siege event knows whether to bump the counter. */
   siegeKilledSinceStart: number = 0;

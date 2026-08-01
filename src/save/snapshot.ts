@@ -255,6 +255,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           announced: sim.siegeAnnounced,
           active: sim.siegeActive,
           survived: sim.siegesSurvived,
+          startedAtTick: sim.siegeStartedAtTick >= 0 ? sim.siegeStartedAtTick : undefined,
           warlordName: sim.siegeWarlordName || undefined,
         }
       : undefined,
@@ -606,6 +607,8 @@ export function restore(save: SaveV1): SimWorld {
     sim.siegeAnnounced = save.siege.announced;
     sim.siegeActive = save.siege.active;
     sim.siegesSurvived = save.siege.survived;
+    sim.siegeStartedAtTick = save.siege.startedAtTick
+      ?? (save.siege.active ? save.tick : -1);
     sim.siegeWarlordName = save.siege.warlordName ?? "";
   }
   if (save.hostileNames) {
