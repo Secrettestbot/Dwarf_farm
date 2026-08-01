@@ -77,9 +77,12 @@ describe("special traits (GDD §6.5)", () => {
   it("The Fury triggers when a bonded dwarf is slain in combat", () => {
     const w = generateWorld({ seed: 917, width: 200, height: 500 });
     const sim = new SimWorld(917, w.grid, w.surfaceY, w.spawn);
+    // The avenger stands clear of the troll's reach — combat targets
+    // the first adjacent dwarf in iteration order, and the test needs
+    // the blow to land on the bonded partner.
     const a = sim.spawnDwarf({
       name: "Avenger",
-      x: w.spawn.x,
+      x: w.spawn.x - 3,
       y: w.spawn.y,
       age: 30,
       traitIds: ["the_fury"],
@@ -109,6 +112,11 @@ describe("special traits (GDD §6.5)", () => {
         const n = sim.needs.get(id);
         if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
       }
+      // Pin both dwarves with in-place sleep jobs so the flee behavior
+      // doesn't carry the partner out of the troll's reach — the test
+      // is about The Fury, not about escaping.
+      sim.job.set(a, { kind: "sleep", targetX: w.spawn.x - 3, targetY: w.spawn.y, progress: 0 });
+      sim.job.set(b, { kind: "sleep", targetX: w.spawn.x + 1, targetY: w.spawn.y, progress: 0 });
       // Keep hostile HP high so combat keeps grinding until the
       // partner's HP runs out.
       const hp = sim.health.get(hEnt);

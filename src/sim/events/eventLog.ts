@@ -30,8 +30,15 @@ export interface LogEvent {
 
 export class EventLog {
   events: LogEvent[] = [];
-  /** Cap to bound save size. Per GDD §12.4 the save stores the last 10k. */
-  private readonly maxEvents = 10000;
+  /** Cap to bound save size, memory, and per-frame panel cost. Old
+   * routine entries are evicted; milestone entries are never evicted —
+   * they ARE the fortress's history and there are only ever dozens. */
+  private readonly maxEvents = 2000;
+  /** Monotonic count of every event ever added this session. Eviction
+   * shrinks `events`, so consumers that react to NEW entries (the
+   * per-frame sound trigger) must diff this counter, not the array
+   * length. Not serialized — deltas only matter within a session. */
+  seq = 0;
 
   add(tick: number, category: EventCategory, text: string, pos?: { x: number; y: number }): void {
     const event: LogEvent = { tick, category, text };
@@ -40,9 +47,12 @@ export class EventLog {
       event.y = pos.y;
     }
     this.events.push(event);
+    this.seq++;
     if (this.events.length > this.maxEvents) {
-      // Drop the oldest entries when the cap is exceeded.
-      this.events.splice(0, this.events.length - this.maxEvents);
+      // Evict the oldest non-milestone entry. The scan is O(leading
+      // milestones), which stays tiny — milestones are rare one-shots.
+      const idx = this.events.findIndex((e) => e.category !== "milestone");
+      this.events.splice(idx === -1 ? 0 : idx, 1);
     }
   }
 

@@ -2,6 +2,7 @@ import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
 import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
+import { migrateSave } from "./migrations";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
 // Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
@@ -19,13 +20,24 @@ export interface SnapshotInput {
   zoomIndex: number;
 }
 
+/** Cached clean-regen baseline for the RLE tile delta. Worldgen over a
+ * full 400×2000 map is by far the most expensive part of a snapshot,
+ * and the game autosaves every few real seconds — regenerating the
+ * same immutable baseline each time made every autosave hitch. One
+ * entry suffices: a session only ever snapshots one world. */
+let baselineCache: { key: string; grid: import("../sim/world/grid").TileGrid } | null = null;
+
+function baselineGridFor(seed: number, width: number, height: number): import("../sim/world/grid").TileGrid {
+  const key = `${seed}:${width}:${height}`;
+  if (baselineCache?.key !== key) {
+    baselineCache = { key, grid: generateWorld({ seed, width, height }).grid };
+  }
+  return baselineCache.grid;
+}
+
 export function snapshot(input: SnapshotInput): SaveV1 {
-  const baseline = generateWorld({
-    seed: input.sim.seed,
-    width: input.sim.grid.width,
-    height: input.sim.grid.height,
-  });
-  const overrides = encodeOverrides(input.sim.grid, baseline.grid);
+  const baseline = baselineGridFor(input.sim.seed, input.sim.grid.width, input.sim.grid.height);
+  const overrides = encodeOverrides(input.sim.grid, baseline);
 
   // Build an entity → dwarves[index] map first so we can encode partnerIndex
   // on socialise jobs without holding entity references in the save.
@@ -218,7 +230,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           y: sim.caravanY,
           leavesTick: sim.caravanLeavesTick,
           origin: sim.caravanOrigin,
-          brokerId: sim.caravanBrokerId,
+          brokerIndex: sim.caravanBrokerId !== -1 ? entityToIndex.get(sim.caravanBrokerId) : undefined,
           dealResource: sim.caravanDealResource,
           dealCost: sim.caravanDealCost,
           dealImport: sim.caravanDealImport,
@@ -244,18 +256,21 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           announced: sim.siegeAnnounced,
           active: sim.siegeActive,
           survived: sim.siegesSurvived,
+          startedAtTick: sim.siegeStartedAtTick >= 0 ? sim.siegeStartedAtTick : undefined,
           warlordName: sim.siegeWarlordName || undefined,
         }
       : undefined,
-    hostileNames: sim.hostileNames.size > 0
-      ? Array.from(sim.hostileNames.entries()).map(([id, name]) => ({ id, name }))
-      : undefined,
+    // Named hostiles are stored on their SavedHostile entries (the
+    // legacy top-level hostileNames list was keyed by raw entity ids,
+    // which don't survive a restore).
     graves: sim.graves.length > 0 ? sim.graves.map((g) => ({ ...g })) : undefined,
     artifacts: sim.artifacts.length > 0 ? sim.artifacts.map((a) => ({ ...a })) : undefined,
     artifactsNextId: sim.artifactsNextId,
     books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
     mayorName: sim.mayorName || undefined,
+    mayorIndex: sim.mayorId !== -1 ? entityToIndex.get(sim.mayorId) : undefined,
     kingName: sim.kingName || undefined,
+    kingIndex: sim.kingId !== -1 ? entityToIndex.get(sim.kingId) : undefined,
     mandate: sim.mandateResource
       ? {
           resource: sim.mandateResource,
@@ -266,8 +281,16 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       : undefined,
     mandatesSatisfied: sim.mandatesSatisfied || undefined,
     mandatesFailed: sim.mandatesFailed || undefined,
-    grudges: sim.grudges.size > 0
-      ? Array.from(sim.grudges.entries(), ([key, v]) => ({ key, count: v.count, lastIncidentTick: v.lastIncidentTick }))
+    grudgeEntries: sim.grudges.size > 0
+      ? Array.from(sim.grudges.entries(), ([key, v]) => {
+          const [idA, idB] = key.split(":").map(Number);
+          const a = entityToIndex.get(idA);
+          const b = entityToIndex.get(idB);
+          // Entries referencing a dead party are pruned by killDwarf,
+          // but guard anyway — an unmappable pair can't be restored.
+          if (a === undefined || b === undefined) return null;
+          return { a, b, count: v.count, lastIncidentTick: v.lastIncidentTick };
+        }).filter((g): g is NonNullable<typeof g> => g !== null)
       : undefined,
     cumulative: Object.keys(sim.cumulative).length > 0 ? { ...sim.cumulative } : undefined,
     discoveries: sim.discoveries.size > 0 ? Array.from(sim.discoveries.values()).sort((a, b) => a - b) : undefined,
@@ -330,12 +353,15 @@ function collectHostiles(sim: SimWorld): SavedHostile[] {
       maxHp: hp.maxHp,
       lastAttackTick: h.lastAttackTick,
       lastMoveTick: h.lastMoveTick,
+      name: sim.hostileNames.get(e),
+      siegeMember: h.siegeMember || undefined,
     });
   }
   return out;
 }
 
 export function restore(save: SaveV1): SimWorld {
+  save = migrateSave(save);
   const w = generateWorld({ seed: save.seed, width: save.width, height: save.height });
   const decoded = decodeOverrides(save.tileOverrides);
   decoded.apply(w.grid);
@@ -557,7 +583,13 @@ export function restore(save: SaveV1): SimWorld {
     sim.caravanY = save.caravan.y;
     sim.caravanLeavesTick = save.caravan.leavesTick;
     sim.caravanOrigin = save.caravan.origin;
-    if (save.caravan.brokerId !== undefined) sim.caravanBrokerId = save.caravan.brokerId;
+    if (save.caravan.brokerIndex !== undefined) {
+      sim.caravanBrokerId = spawnedEntities[save.caravan.brokerIndex] ?? -1;
+    } else if (save.caravan.brokerId !== undefined) {
+      // Legacy saves stored a raw entity id — it can't be mapped onto
+      // the restored entities, so at best it's the pre-fix behavior.
+      sim.caravanBrokerId = save.caravan.brokerId;
+    }
     if (save.caravan.dealResource !== undefined) sim.caravanDealResource = save.caravan.dealResource;
     if (save.caravan.dealCost !== undefined) sim.caravanDealCost = save.caravan.dealCost;
     if (save.caravan.dealImport !== undefined) sim.caravanDealImport = save.caravan.dealImport;
@@ -577,6 +609,8 @@ export function restore(save: SaveV1): SimWorld {
     sim.siegeAnnounced = save.siege.announced;
     sim.siegeActive = save.siege.active;
     sim.siegesSurvived = save.siege.survived;
+    sim.siegeStartedAtTick = save.siege.startedAtTick
+      ?? (save.siege.active ? save.tick : -1);
     sim.siegeWarlordName = save.siege.warlordName ?? "";
   }
   if (save.hostileNames) {
@@ -593,7 +627,19 @@ export function restore(save: SaveV1): SimWorld {
     for (const b of save.books) sim.books.push({ ...b });
   }
   if (save.mayorName) sim.mayorName = save.mayorName;
+  if (save.mayorIndex !== undefined) {
+    sim.mayorId = spawnedEntities[save.mayorIndex] ?? -1;
+  } else if (save.mayorName) {
+    // Legacy saves carried only the name — resolve to the first
+    // matching dwarf so the aura / targeting keep working.
+    sim.mayorId = spawnedEntities.find((id) => sim.dwarf.get(id)?.name === save.mayorName) ?? -1;
+  }
   if (save.kingName) sim.kingName = save.kingName;
+  if (save.kingIndex !== undefined) {
+    sim.kingId = spawnedEntities[save.kingIndex] ?? -1;
+  } else if (save.kingName) {
+    sim.kingId = spawnedEntities.find((id) => sim.dwarf.get(id)?.name === save.kingName) ?? -1;
+  }
   if (save.mandate) {
     sim.mandateResource = save.mandate.resource;
     sim.mandateTarget = save.mandate.target;
@@ -602,7 +648,16 @@ export function restore(save: SaveV1): SimWorld {
   }
   if (save.mandatesSatisfied !== undefined) sim.mandatesSatisfied = save.mandatesSatisfied;
   if (save.mandatesFailed !== undefined) sim.mandatesFailed = save.mandatesFailed;
-  if (save.grudges) {
+  if (save.grudgeEntries) {
+    for (const g of save.grudgeEntries) {
+      const idA = spawnedEntities[g.a];
+      const idB = spawnedEntities[g.b];
+      if (idA === undefined || idB === undefined) continue;
+      const key = idA < idB ? `${idA}:${idB}` : `${idB}:${idA}`;
+      sim.grudges.set(key, { count: g.count, lastIncidentTick: g.lastIncidentTick });
+    }
+  } else if (save.grudges) {
+    // Legacy raw-id keys — best effort, may attach to the wrong pair.
     for (const g of save.grudges) {
       sim.grudges.set(g.key, { count: g.count, lastIncidentTick: g.lastIncidentTick });
     }
@@ -638,14 +693,23 @@ export function restore(save: SaveV1): SimWorld {
   // Restore hostiles.
   if (save.hostiles) {
     for (const h of save.hostiles) {
-      sim.spawnHostile({
+      // Legacy saves predate the siegeMember flag: if a siege is
+      // active, treat warband-kind hostiles as members so the
+      // siege-broken check still has something to count.
+      const legacySiege =
+        h.siegeMember === undefined &&
+        save.siege?.active === true &&
+        (h.kind === "goblin_scout" || h.kind === "cave_troll" || h.kind === "goblin_warlord");
+      const id = sim.spawnHostile({
         kind: h.kind as import("../sim/hostiles/types").HostileKind,
         x: h.x,
         y: h.y,
         hp: h.hp,
         lastAttackTick: h.lastAttackTick,
         lastMoveTick: h.lastMoveTick,
+        siegeMember: h.siegeMember || legacySiege || undefined,
       });
+      if (id !== -1 && h.name) sim.hostileNames.set(id, h.name);
     }
   }
   // Restore pets — wild and tame both. ownerIndex maps back through
@@ -664,6 +728,7 @@ export function restore(save: SaveV1): SimWorld {
         ownerName: p.ownerName,
         tameProgress: p.tameProgress,
         tamedAtTick: p.tamedAtTick,
+        lastAttackTick: p.lastAttackTick,
       });
     }
   }

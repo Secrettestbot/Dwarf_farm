@@ -242,6 +242,11 @@ export class Hud {
   private openDisplayPopover(anchor: HTMLElement): void {
     // If a popover is already open, close it (click-to-toggle).
     if (this.displayPopover) {
+      // Fire popoverclose so the subscriptions registered inside the
+      // popover (panel visibility, minimap sliders) unsubscribe — the
+      // outside-click path already does this; without it here every
+      // button-toggle leaked a set of listeners.
+      this.displayPopover.dispatchEvent(new CustomEvent("popoverclose"));
       this.displayPopover.remove();
       this.displayPopover = null;
       return;
@@ -355,7 +360,12 @@ export class Hud {
     // immediately close it.
     setTimeout(() => {
       const onDocClick = (ev: MouseEvent) => {
-        if (!this.displayPopover) return;
+        if (!this.displayPopover) {
+          // Popover was closed via the button toggle — this listener's
+          // work is done; drop it instead of lingering forever.
+          document.removeEventListener("mousedown", onDocClick);
+          return;
+        }
         if (this.displayPopover.contains(ev.target as Node)) return;
         if (anchor.contains(ev.target as Node)) return;
         this.displayPopover.dispatchEvent(new CustomEvent("popoverclose"));
@@ -368,7 +378,18 @@ export class Hud {
   }
 
 
+  /** Last rendered (tick, name) — the HUD's contents are pure
+   * functions of sim state, which only changes when the tick does
+   * (plus the rename flow). Skipping identical frames avoids
+   * re-parsing the stockpile innerHTML at 60fps for a 6-tick/sec sim. */
+  private lastRenderedTick = -1;
+  private lastRenderedName = "";
+
   update(clock: Clock, sim: SimWorld): void {
+    const name = this.handlers.fortressName();
+    if (clock.tick === this.lastRenderedTick && name === this.lastRenderedName) return;
+    this.lastRenderedTick = clock.tick;
+    this.lastRenderedName = name;
     const tick = clock.tick;
     const day = Math.floor(tick / TICKS_PER_DAY) + 1;
     const hour = Math.floor((tick % TICKS_PER_DAY) / TICKS_PER_HOUR);

@@ -11,6 +11,16 @@ function buildSim(seed: number): SimWorld {
   return sim;
 }
 
+function advanceYears(sim: SimWorld, years: number): void {
+  // Jump to one tick before each year boundary, then tick across it —
+  // boundary-gated systems still fire; the dead ticks between are
+  // skipped (needs don't decay across a jump, so no pinning needed).
+  for (let y = 0; y < years; y++) {
+    sim.tick = (Math.floor(sim.tick / TICKS_PER_YEAR) + 1) * TICKS_PER_YEAR - 1;
+    tick(sim);
+  }
+}
+
 describe("dwarf aging", () => {
   it("reports the spawn age immediately after spawn", () => {
     const sim = buildSim(1);
@@ -27,11 +37,8 @@ describe("dwarf aging", () => {
     // do with what the test is measuring (calendar-driven aging).
     // The need-pin is what every other long-running aging test does
     // for the same reason.
-    for (let i = 0; i < TICKS_PER_YEAR + 5; i++) {
-      const n = sim.needs.get(e);
-      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
-      tick(sim);
-    }
+    advanceYears(sim, 1);
+    for (let i = 0; i < 5; i++) tick(sim);
     expect(sim.ageOf(e)).toBe(26);
   });
 
@@ -42,30 +49,15 @@ describe("dwarf aging", () => {
     // of thirst long before the loop ends, the entity slot would be reused
     // by a migrant via the ECS free list, and `ageOf(e)` would report the
     // migrant's age. The test is about calendar-driven aging, not survival.
-    for (let i = 0; i < TICKS_PER_YEAR * 3 + 10; i++) {
-      const n = sim.needs.get(e);
-      if (n) {
-        n.hunger = 100;
-        n.thirst = 100;
-        n.sleep = 100;
-        n.social = 100;
-      }
-      // Also pin HP — over three years, RNG-driven hostile spawns can
-      // catch Borin in a fight regardless of needs. The test is about
-      // calendar-driven aging, not survival.
-      const hp = sim.health.get(e);
-      if (hp) {
-        hp.hp = hp.maxHp;
-        hp.lastAttackTick = 0;
-      }
-      tick(sim);
-    }
+    advanceYears(sim, 3);
+    for (let i = 0; i < 10; i++) tick(sim);
     expect(sim.ageOf(e)).toBe(28);
   });
 
   it("emits a milestone event each new in-game year", () => {
     const sim = buildSim(4);
-    for (let i = 0; i < TICKS_PER_YEAR * 2 + 5; i++) tick(sim);
+    advanceYears(sim, 2);
+    for (let i = 0; i < 5; i++) tick(sim);
     // Filter to year-rollover entries specifically — other milestone
     // categories (skill tier crossings, population thresholds) may also
     // fire during this run.

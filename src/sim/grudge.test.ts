@@ -13,6 +13,11 @@ describe("grudges", () => {
     const sy = w.spawn.y;
     const a = sim.spawnDwarf({ name: "Argo", x: sx, y: sy, age: 30, traitIds: ["antagonistic"] });
     const b = sim.spawnDwarf({ name: "Bron", x: sx + 1, y: sy, age: 30, traitIds: ["antagonistic"] });
+    // Lockdown blocks migration, keeping the population below the
+    // siege threshold — without it, a year-2 warband slaughters the
+    // pinned-in-place test subjects.
+    sim.emergency.mode = "lockdown";
+    sim.emergency.startedAtTick = 0;
     // Pin them adjacent and need-satisfied so chooseTask doesn't pull
     // them apart. Pinning has to happen TWICE — once before tick to
     // suppress the chooseTask reroute, once after to undo whatever
@@ -42,6 +47,8 @@ describe("grudges", () => {
     const sy = w.spawn.y;
     const a = sim.spawnDwarf({ name: "Cael", x: sx, y: sy, age: 30, traitIds: ["antagonistic"] });
     const b = sim.spawnDwarf({ name: "Drun", x: sx + 1, y: sy, age: 30, traitIds: ["antagonistic"] });
+    sim.emergency.mode = "lockdown";
+    sim.emergency.startedAtTick = 0;
     // Seed a deep grudge directly so we don't have to wait years for
     // the daily roll to climb. Simulating a brawl roll then becomes
     // a matter of running enough days.

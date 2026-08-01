@@ -101,8 +101,8 @@ function collectRoster(sim: SimWorld): RosterRow[] {
     const walking = path && path.pathIndex < path.path.length - 1;
     const activity = walking ? `walking → ${activityLabel(job?.kind)}` : activityLabel(job?.kind);
     const tags: Array<{ label: string; color: string }> = [];
-    if (sim.kingName && sim.kingName === dw.name) tags.push({ label: "King", color: "#e0c080" });
-    if (sim.mayorName && sim.mayorName === dw.name) tags.push({ label: "Mayor", color: "#e0c080" });
+    if (sim.kingId === id) tags.push({ label: "King", color: "#e0c080" });
+    if (sim.mayorId === id) tags.push({ label: "Mayor", color: "#e0c080" });
     if (sim.squad.has(id)) tags.push({ label: "soldier", color: "#c0a060" });
     const disease = sim.disease.get(id);
     if (disease) tags.push({ label: "ill", color: "#e07060" });
@@ -127,8 +127,8 @@ function collectRoster(sim: SimWorld): RosterRow[] {
 }
 
 function rankFor(row: RosterRow, sim: SimWorld): number {
-  if (sim.kingName && row.name === sim.kingName) return 0;
-  if (sim.mayorName && row.name === sim.mayorName) return 1;
+  if (sim.kingId === row.id) return 0;
+  if (sim.mayorId === row.id) return 1;
   if (row.tags.some((t) => t.label === "tantrum" || t.label === "fury")) return 2;
   if (row.tags.some((t) => t.label === "ill" || t.label === "wounded")) return 3;
   return 4;
@@ -169,6 +169,8 @@ function activityLabel(kind: string | undefined): string {
     case "visit_grave": return "at a grave";
     case "treat": return "treating a patient";
     case "trade": return "negotiating with a caravan";
+    case "flee": return "fleeing";
+    case "train": return "drilling";
     default: return kind;
   }
 }

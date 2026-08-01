@@ -74,14 +74,22 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     the alarm path. Engagement supersedes most needs except critical
   //     thirst / hunger / wounds (those branches sit just below).
   if (sim.squad.has(e)) {
-    const target = findHostileTarget(sim, pos.x, pos.y);
-    if (target) {
-      return {
-        kind: "engage" as JobKind,
-        targetX: target.x,
-        targetY: target.y,
-        progress: 0,
-      };
+    // A soldier below the retreat threshold doesn't take new fights
+    // (The Fury overrides) — they fall through to the wounded branch,
+    // which routes them to a hospital cot / bed to recover.
+    const hp = sim.health.get(e);
+    const retreating =
+      hp !== undefined && hp.hp < hp.maxHp * SOLDIER_RETREAT_RATIO && !sim.fury.has(e);
+    if (!retreating) {
+      const target = findHostileTarget(sim, pos.x, pos.y);
+      if (target) {
+        return {
+          kind: "engage" as JobKind,
+          targetX: target.x,
+          targetY: target.y,
+          progress: 0,
+        };
+      }
     }
   }
 
@@ -102,6 +110,17 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     if (target) {
       return { kind: "eat" as JobKind, targetX: target.x, targetY: target.y, progress: 0 };
     }
+  }
+
+  // 2.5 Flee (GDD §6.2 danger response): a civilian with a menacing
+  //     hostile inside FLEE_RADIUS runs for the colony's safe zone
+  //     instead of working. Sits BELOW thirst/hunger — a dwarf who's
+  //     about to die of dehydration still darts for the drink counter,
+  //     scared or not — and pest-tier vermin (rats, bats, small
+  //     spiders) don't send grown dwarves running at all. Soldiers
+  //     engage (branch 0.5); The Fury doesn't run from anything.
+  if (!sim.squad.has(e) && !sim.fury.has(e) && hasMenacingHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS)) {
+    return { kind: "flee" as JobKind, targetX: sim.spawn.x, targetY: sim.spawn.y, progress: 0 };
   }
 
   // 3. Critical sleep, or a serious wound — bedroom anywhere in the colony
@@ -339,6 +358,21 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     const engraveTarget = findEngraveTarget(sim, pos.x, pos.y);
     if (engraveTarget) {
       return { kind: "engrave" as JobKind, targetX: engraveTarget.x, targetY: engraveTarget.y, progress: 0 };
+    }
+  }
+
+  // 6.73 Drill at the armoury (GDD §9.3, Military slider). A drafted
+  //      soldier with no hostile to engage practises forms at a rack —
+  //      the only way to grow the military skill in peacetime. Drills
+  //      teach up to Expert (13); the tiers beyond come from real
+  //      combat. One trainee per rack.
+  if (age >= MIN_WORK_AGE && sim.squad.has(e) && sim.sliders.military > 0.05) {
+    const dw = sim.dwarf.get(e);
+    if (dw && (dw.skills.military ?? 1) < TRAIN_SKILL_CAP) {
+      const rack = findTrainingRack(sim, pos.x, pos.y);
+      if (rack) {
+        return { kind: "train" as JobKind, targetX: rack.x, targetY: rack.y, progress: 0 };
+      }
     }
   }
 
@@ -786,6 +820,63 @@ function findTendTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: 
   return best ? { x: best.x, y: best.y } : null;
 }
 
+
+/** Per-tick index over blueprint state consulted by findHaulTarget for
+ * EVERY loose item per idle dwarf. Blueprint statuses, station tiles,
+ * and furnishing requirements never change during jobAssignmentSystem
+ * (the only caller), so one scan per tick replaces an
+ * O(items x blueprints) explosion as the colony grows.
+ * - stationInput: packed station cell -> the recipe input it accepts
+ * - stockpileRects: complete-stockpile bounding boxes
+ * - furnishingNeeds: item kinds some needs_furnishing room still wants
+ * - workshopInputs: recipe input kinds across complete workshops */
+interface HaulScanIndex {
+  tick: number;
+  stationInput: Map<number, string>;
+  stockpileRects: Array<{ x0: number; y0: number; x1: number; y1: number }>;
+  furnishingNeeds: Set<string>;
+  workshopInputs: Set<string>;
+}
+
+const haulIndexCache = new WeakMap<SimWorld, HaulScanIndex>();
+
+function haulIndex(sim: SimWorld): HaulScanIndex {
+  const cached = haulIndexCache.get(sim);
+  if (cached && cached.tick === sim.tick) return cached;
+  const idx: HaulScanIndex = {
+    tick: sim.tick,
+    stationInput: new Map(),
+    stockpileRects: [],
+    furnishingNeeds: new Set(),
+    workshopInputs: new Set(),
+  };
+  for (const b of sim.planner.blueprints) {
+    if (b.status === "complete") {
+      if (b.kind === "stockpile") {
+        idx.stockpileRects.push({ x0: b.originX, y0: b.originY, x1: b.originX + b.width, y1: b.originY + b.height });
+      }
+      const recipe = recipeFor(b.kind);
+      if (recipe) {
+        idx.workshopInputs.add(recipe.inputKind);
+        for (let i = 0; i < b.cavity.length; i++) {
+          const c = b.cavity[i];
+          if (sim.grid.getTile(c & 0xffff, (c >>> 16) & 0xffff) === recipe.station) {
+            idx.stationInput.set(c, recipe.inputKind);
+          }
+        }
+      }
+    } else if (b.status === "needs_furnishing") {
+      const reqs = FURNITURE_REQUIREMENTS[b.kind];
+      if (!reqs) continue;
+      for (const r of reqs) {
+        if ((b.furniturePlaced?.[r.item] ?? 0) < r.count) idx.furnishingNeeds.add(r.item);
+      }
+    }
+  }
+  haulIndexCache.set(sim, idx);
+  return idx;
+}
+
 /** Find an unclaimed item on the floor for this dwarf to pick up and
  * mark it claimed in the same call so two haulers running chooseTask in
  * the same tick don't both target it. Returns the item's tile (the dwarf
@@ -804,7 +895,10 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     const it = sim.item.get(ents[i]);
     const p = sim.position.get(ents[i]);
     if (!it || !p) continue;
-    if (it.claimedBy !== -1 && sim.ecs.isAlive(it.claimedBy)) continue;
+    // A claim by *this* hauler doesn't disqualify — an interrupted haul
+    // leaves the claim in place, and the claimant must be able to come
+    // back for the item rather than orphan it for as long as they live.
+    if (it.claimedBy !== -1 && it.claimedBy !== hauler && sim.ecs.isAlive(it.claimedBy)) continue;
     // Skip items already sitting on a workshop station that wants
     // them — those are "delivered", waiting for the crafter to consume.
     // Without this, a hauler picks up the item it just dropped at the
@@ -870,16 +964,7 @@ function isFurnitureKind(kind: string): boolean {
  * kind. Used to tier furniture hauls above bulk hauls — only the
  * "room-is-waiting" case earns the higher tier. */
 function hasNeedsFurnishingFor(sim: SimWorld, kind: string): boolean {
-  for (const b of sim.planner.blueprints) {
-    if (b.status !== "needs_furnishing") continue;
-    const reqs = FURNITURE_REQUIREMENTS[b.kind];
-    if (!reqs) continue;
-    const placed = b.furniturePlaced?.[kind] ?? 0;
-    let need = 0;
-    for (const r of reqs) if (r.item === kind) need = r.count;
-    if (placed < need) return true;
-  }
-  return false;
+  return haulIndex(sim).furnishingNeeds.has(kind);
 }
 
 /** Cap on the number of dwarves committed to a haul job at once.
@@ -953,18 +1038,7 @@ function findEmptyArmouryRack(sim: SimWorld, sx: number, sy: number): { x: numbe
  * resource. Used to mark items as "delivered" — they're not available
  * for re-pickup. */
 function isItemAtWorkshopDestination(sim: SimWorld, x: number, y: number, kind: string): boolean {
-  const tile = sim.grid.getTile(x, y);
-  for (const b of sim.planner.blueprints) {
-    if (b.status !== "complete") continue;
-    const recipe = recipeFor(b.kind);
-    if (!recipe) continue;
-    if (recipe.station !== tile) continue;
-    if (recipe.inputKind !== kind) continue;
-    if (x < b.originX || x >= b.originX + b.width) continue;
-    if (y < b.originY || y >= b.originY + b.height) continue;
-    return true;
-  }
-  return false;
+  return haulIndex(sim).stationInput.get((y << 16) | x) === kind;
 }
 
 /** True iff (x, y) is inside the cavity of any complete stockpile
@@ -972,11 +1046,8 @@ function isItemAtWorkshopDestination(sim: SimWorld, x: number, y: number, kind: 
  * stored — picking up a bed from a stockpile when no bedroom needs
  * it just respawns the bed at the dwarf's feet next tick. */
 function isItemStoredAtStockpile(sim: SimWorld, x: number, y: number): boolean {
-  for (const b of sim.planner.blueprints) {
-    if (b.kind !== "stockpile" || b.status !== "complete") continue;
-    if (x < b.originX || x >= b.originX + b.width) continue;
-    if (y < b.originY || y >= b.originY + b.height) continue;
-    return true;
+  for (const r of haulIndex(sim).stockpileRects) {
+    if (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) return true;
   }
   return false;
 }
@@ -996,20 +1067,8 @@ function itemHasOpenDemand(sim: SimWorld, kind: string): boolean {
     case "meal": case "wood": case "hide": case "wheelbarrow":
       return true;
   }
-  for (const b of sim.planner.blueprints) {
-    if (b.status === "needs_furnishing") {
-      const reqs = FURNITURE_REQUIREMENTS[b.kind];
-      if (!reqs) continue;
-      const placed = b.furniturePlaced?.[kind] ?? 0;
-      let need = 0;
-      for (const r of reqs) if (r.item === kind) need = r.count;
-      if (placed < need) return true;
-    } else if (b.status === "complete") {
-      const recipe = recipeFor(b.kind);
-      if (recipe && recipe.inputKind === kind) return true;
-    }
-  }
-  return false;
+  const idx = haulIndex(sim);
+  return idx.furnishingNeeds.has(kind) || idx.workshopInputs.has(kind);
 }
 
 /** Find a workshop that wants this resource as its recipe input and
@@ -1213,6 +1272,39 @@ function hasWaterInRange(sim: SimWorld, sx: number, sy: number, radius: number):
   return false;
 }
 
+/** Drills stop teaching at Expert — the last tiers of the military
+ * skill only come from real combat (GDD §9.3). */
+export const TRAIN_SKILL_CAP = 13;
+
+/** Find the nearest Armoury rack not already claimed by another
+ * trainee. Racks with a stored weapon still work for drills — the
+ * soldier trains beside it, they don't consume it. */
+function findTrainingRack(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "train");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "armoury" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.ArmouryRack) continue;
+      if (claimed.has((y << 16) | x)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
 /** Find the nearest unclaimed Library desk for a research job. Skips
  * desks already occupied by another scholar so two dwarves don't pile
  * onto the same chair. */
@@ -1249,6 +1341,36 @@ function findResearchDesk(sim: SimWorld, sx: number, sy: number): { x: number; y
  * for a single rat — hostiles deeper than this end up handled when a
  * soldier wanders into their pursue radius. */
 const SOLDIER_ENGAGE_RANGE = 30;
+
+/** Radius at which a civilian notices a hostile and breaks for the
+ * safe zone. Slightly smaller than most pursue ranges so fleeing
+ * reads as a reaction, not clairvoyance. */
+export const FLEE_RADIUS = 8;
+
+/** HP fraction below which a drafted soldier breaks off an engagement
+ * and seeks a bed instead of fighting to the death. Below the wounded
+ * threshold (0.5) so soldiers fight on through moderate wounds. */
+export const SOLDIER_RETREAT_RATIO = 0.3;
+
+/** Pest-tier hostiles a civilian does NOT flee from — the colony's
+ * pets and idle boots handle these. Everything else (goblins, bears,
+ * trolls, the deep horrors) sends civilians running. */
+const PEST_KINDS: ReadonlySet<string> = new Set(["cave_rat", "cave_bat", "cave_spider"]);
+
+/** True if any non-pest hostile is within `r` tiles of (x, y). */
+export function hasMenacingHostileWithin(sim: SimWorld, x: number, y: number, r: number): boolean {
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const h = sim.hostile.get(ents[i]);
+    if (!h || PEST_KINDS.has(h.kind)) continue;
+    const p = sim.position.get(ents[i]);
+    if (!p) continue;
+    const dx = p.x - x;
+    const dy = p.y - y;
+    if (dx * dx + dy * dy <= r * r) return true;
+  }
+  return false;
+}
 function findHostileTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
   let best: { x: number; y: number; d: number } | null = null;
   const ents = sim.hostile.entities;
@@ -1490,15 +1612,41 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
   // around the food counters between meals. A wider random scatter
   // makes idle behavior actually wander.
   const R = 20;
-  // Collect candidates in a fixed scan order, then sample one via aiRng.
+  if (!grid.isWalkable(sx, sy)) return null;
+  // Flood-fill the R-box from the dwarf's tile (8-connected with the same
+  // corner-cut rule as A*) so every candidate is genuinely *reachable*,
+  // not merely walkable. A walkable ledge across a chasm used to get
+  // picked, fail pathfinding in jobAssignmentSystem, and leave the dwarf
+  // standing idle until its AI bucket came round again.
+  const side = 2 * R + 1;
+  const seen = new Uint8Array(side * side);
+  const queue = new Int32Array(side * side);
+  let head = 0;
+  let tail = 0;
+  seen[R * side + R] = 1;
+  queue[tail++] = (sy << 16) | sx;
   const candidates: number[] = [];
-  for (let dy = -R; dy <= R; dy++) {
-    for (let dx = -R; dx <= R; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      const x = sx + dx;
-      const y = sy + dy;
-      if (!grid.isWalkable(x, y)) continue;
-      candidates.push((y << 16) | x);
+  while (head < tail) {
+    const c = queue[head++];
+    const cx = c & 0xffff;
+    const cy = (c >>> 16) & 0xffff;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < sx - R || x > sx + R || y < sy - R || y > sy + R) continue;
+        const li = (y - sy + R) * side + (x - sx + R);
+        if (seen[li]) continue;
+        if (!grid.isWalkable(x, y)) continue;
+        // Match A*'s diagonal rule: no squeezing through solid corners.
+        if (dx !== 0 && dy !== 0 && (!grid.isWalkable(cx + dx, cy) || !grid.isWalkable(cx, cy + dy))) {
+          continue;
+        }
+        seen[li] = 1;
+        queue[tail++] = (y << 16) | x;
+        candidates.push((y << 16) | x);
+      }
     }
   }
   if (candidates.length === 0) return null;

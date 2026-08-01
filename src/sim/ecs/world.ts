@@ -29,13 +29,20 @@ export class ComponentStore<T> {
     this.sparse.fill(-1);
   }
 
+  // All lookups verify the stored handle's generation, not just its
+  // index: a stale id whose index was recycled to a new entity must
+  // read as absent, not resolve to the recycled entity's component.
+  // (EcsWorld.isAlive already catches stale handles, but not every
+  // call site goes through it — this closes the hole structurally.)
+
   has(e: EntityId): boolean {
-    return this.sparse[entityIndex(e)] !== -1;
+    const idx = this.sparse[entityIndex(e)];
+    return idx !== -1 && this.entities[idx] === e;
   }
 
   get(e: EntityId): T | undefined {
     const idx = this.sparse[entityIndex(e)];
-    return idx === -1 ? undefined : this.data[idx];
+    return idx !== -1 && this.entities[idx] === e ? this.data[idx] : undefined;
   }
 
   set(e: EntityId, value: T): void {
@@ -46,6 +53,9 @@ export class ComponentStore<T> {
       this.entities.push(e);
       this.data.push(value);
     } else {
+      // Slot may still hold a stale generation's handle if a destroy
+      // missed this store — claim it for the new entity.
+      this.entities[slot] = e;
       this.data[slot] = value;
     }
   }
@@ -53,7 +63,7 @@ export class ComponentStore<T> {
   remove(e: EntityId): void {
     const i = entityIndex(e);
     const slot = this.sparse[i];
-    if (slot === -1) return;
+    if (slot === -1 || this.entities[slot] !== e) return;
     const lastSlot = this.entities.length - 1;
     if (slot !== lastSlot) {
       const swapped = this.entities[lastSlot];

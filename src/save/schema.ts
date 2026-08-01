@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave" | "flee" | "train";
     targetX: number;
     targetY: number;
     progress: number;
@@ -105,6 +105,13 @@ export interface SavedHostile {
   maxHp: number;
   lastAttackTick: number;
   lastMoveTick: number;
+  /** Display name for named foes (the goblin warlord). Stored on the
+   * hostile itself so it survives the entity-id reshuffle a restore
+   * performs — the legacy top-level hostileNames list was keyed by
+   * raw entity ids and silently detached on load. */
+  name?: string;
+  /** True for members of the currently-active siege warband. */
+  siegeMember?: boolean;
 }
 
 /** Saved pet entity — wild or tame. ownerIndex is an index into
@@ -189,7 +196,7 @@ export interface SavedStockpile {
 }
 
 export interface SaveV1 {
-  version: 3;
+  version: number;
   slotId: string;
   /** Friendly fortress name shown on the title screen — set when the founders begin. */
   fortressName: string;
@@ -278,7 +285,12 @@ export interface SaveV1 {
     /** Pending-trade fields — set when the caravan arrives, applied
      * when the broker walks to the depot. Optional for back-compat
      * with saves from before the deferred-trade refactor. */
+    /** Legacy raw entity id of the broker — kept for reading old
+     * saves only; entity ids do not survive a restore. */
     brokerId?: number;
+    /** Broker as an index into dwarves[] (same encoding partnerIndex
+     * uses) so the reference survives the restore id reshuffle. */
+    brokerIndex?: number;
     dealResource?: string;
     dealCost?: number;
     dealImport?: string;
@@ -311,6 +323,9 @@ export interface SaveV1 {
     announced: boolean;
     active: boolean;
     survived: number;
+    /** Tick the active siege began — drives the withdrawal clock.
+     * Optional: legacy saves restart the clock at load time. */
+    startedAtTick?: number;
     /** Name of the warlord currently leading the active siege, if
      * any. Empty when no warlord is in play. */
     warlordName?: string;
@@ -351,6 +366,9 @@ export interface SaveV1 {
   }>;
   /** Currently-recognised Mayor's name. */
   mayorName?: string;
+  /** Mayor as an index into dwarves[] — identity that survives the
+   * restore id reshuffle. mayorName stays display-only. */
+  mayorIndex?: number;
   /** Active mayoral mandate. Empty `resource` means no mandate.
    * Round-trips so a save mid-season doesn't lose the deadline. */
   mandate?: {
@@ -365,10 +383,16 @@ export interface SaveV1 {
   mandatesFailed?: number;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
-  /** Pairwise grudges between dwarves — keyed by `${minId}:${maxId}`,
-   * count rises with each spat. Round-trips so a feud survives a
-   * reload (or a worker catch-up) instead of resetting to peace. */
+  /** King as an index into dwarves[] — same encoding as mayorIndex. */
+  kingIndex?: number;
+  /** Legacy pairwise grudges keyed by `${minId}:${maxId}` raw entity
+   * ids — kept for reading old saves only; ids do not survive a
+   * restore, so these entries can attach to the wrong pair. */
   grudges?: Array<{ key: string; count: number; lastIncidentTick: number }>;
+  /** Pairwise grudges with both parties as indexes into dwarves[]
+   * (same encoding partnerIndex uses) so feuds reattach to the right
+   * dwarves after the restore id reshuffle. */
+  grudgeEntries?: Array<{ a: number; b: number; count: number; lastIncidentTick: number }>;
   /** Cumulative haul totals — drives material-gated research. Once
    * a counter has crossed a topic's threshold the gate stays open
    * even if the stockpile is later spent, so we round-trip the
@@ -385,7 +409,10 @@ export interface SaveV1 {
 // gained "bed", carpenter recipes split into planks vs bed. Old
 // saves are dropped rather than migrated — the room state on a
 // loaded colony wouldn't match the new gates.
-export const CURRENT_SAVE_VERSION = 3 as const;
+/** v4: index-encoded entity references (mayor/king/broker/grudges,
+ * per-hostile names, siege member flags + start tick). See
+ * migrations.ts for the vN -> vN+1 chain. */
+export const CURRENT_SAVE_VERSION = 4 as const;
 
 /** A lightweight summary of a save slot, shown on the title screen. */
 export interface SlotSummary {

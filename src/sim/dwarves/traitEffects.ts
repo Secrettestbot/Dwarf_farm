@@ -99,9 +99,22 @@ export function defaultEffects(): TraitEffects {
 
 /** Fold every trait id into the effect bundle. Unknown trait ids no-op
  * silently so the registry can grow without tripping callers. */
+/** Memo cache keyed by the joined trait list. Trait lists are fixed at
+ * spawn and the combination space is small, so the cache stays tiny
+ * while saving an allocation + switch cascade on every hot-path call
+ * (needs decay, movement, and work systems all consult effectsFor per
+ * dwarf per tick). Returned objects are shared — callers treat them
+ * as read-only, which every current caller already does. */
+const effectsCache = new Map<string, TraitEffects>();
+
 export function effectsFor(traitIds: ReadonlyArray<string>): TraitEffects {
-  const e = defaultEffects();
-  for (const id of traitIds) applyTraitEffects(e, id);
+  const key = traitIds.join("|");
+  let e = effectsCache.get(key);
+  if (!e) {
+    e = defaultEffects();
+    for (const id of traitIds) applyTraitEffects(e, id);
+    effectsCache.set(key, e);
+  }
   return e;
 }
 

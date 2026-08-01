@@ -326,6 +326,9 @@ export class SimWorld {
    * being scheduled mid-siege, and to keep the chronicle line
    * about the siege ending clean. */
   siegeActive: boolean = false;
+  /** Tick the active siege began — drives the withdrawal clock. -1
+   * when no siege is active. */
+  siegeStartedAtTick = -1;
   /** Snapshot of siegesSurvived at the moment a siege starts, so
    * the end-of-siege event knows whether to bump the counter. */
   siegeKilledSinceStart: number = 0;
@@ -367,6 +370,10 @@ export class SimWorld {
    * highest leadership skill ≥ 5; their presence anywhere on the
    * map gives a small fortress-wide morale aura. */
   mayorName = "";
+  /** Entity id of the current Mayor, -1 when the seat is empty.
+   * Identity checks use this id — mayorName is display-only, and
+   * duplicate names must not crown the wrong dwarf. */
+  mayorId = -1;
 
   /** Mayor's current quarterly mandate — a production target the
    * colony has the season to meet. Empty `resource` means there's
@@ -390,6 +397,9 @@ export class SimWorld {
    * gives the entire fortress a stronger morale aura than the
    * Mayor and the chronicle marks each succession. */
   kingName = "";
+  /** Entity id of the current King, -1 when the throne is empty.
+   * Same id-vs-display split as mayorId / mayorName. */
+  kingId = -1;
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */
@@ -650,6 +660,7 @@ export class SimWorld {
     hp?: number;
     lastAttackTick?: number;
     lastMoveTick?: number;
+    siegeMember?: boolean;
   }): EntityId {
     const def = HOSTILE_DEFS[spec.kind];
     const e = this.ecs.create();
@@ -659,6 +670,7 @@ export class SimWorld {
       kind: spec.kind,
       lastAttackTick: spec.lastAttackTick ?? 0,
       lastMoveTick: spec.lastMoveTick ?? 0,
+      siegeMember: spec.siegeMember,
     });
     this.health.set(e, {
       hp: spec.hp ?? def.maxHp,
@@ -678,6 +690,7 @@ export class SimWorld {
     tamedAtTick?: number;
     hp?: number;
     maxHp?: number;
+    lastAttackTick?: number;
   }): EntityId {
     const e = this.ecs.create();
     if (e === -1) return -1;
@@ -688,7 +701,7 @@ export class SimWorld {
       ownerName: spec.ownerName,
       tameProgress: spec.tameProgress ?? 0,
       tamedAtTick: spec.tamedAtTick ?? -1,
-      lastAttackTick: 0,
+      lastAttackTick: spec.lastAttackTick ?? 0,
     });
     const maxHp = spec.maxHp ?? 35;
     this.health.set(e, {

@@ -133,6 +133,13 @@ export class AStar {
   /**
    * Pathfind to any walkable neighbor of a (typically solid) target tile.
    * Returns the path including the chosen approach tile as its last cell.
+   *
+   * One multi-goal search instead of the previous up-to-8 independent
+   * A* runs: every walkable neighbor of (tx, ty) is a goal, and the
+   * search ends when the first one is settled. The heuristic is the
+   * octile distance to the target itself minus one diagonal step —
+   * admissible for every goal, since each goal is at most one diagonal
+   * from the target — so the settled goal yields a shortest path.
    */
   findPathToNeighbor(
     grid: TileGrid,
@@ -142,19 +149,83 @@ export class AStar {
     ty: number,
     maxNodes = 6000,
   ): Int32Array | null {
-    let best: Int32Array | null = null;
-    let bestLen = Infinity;
+    if (!grid.isWalkable(sx, sy)) return null;
+    const w = this.width;
+    const goals = new Set<number>();
     for (let i = 0; i < 8; i++) {
       const nx = tx + NEIGHBORS_DX[i];
       const ny = ty + NEIGHBORS_DY[i];
+      if (nx < 0 || ny < 0 || nx >= w || ny >= this.height) continue;
       if (!grid.isWalkable(nx, ny)) continue;
-      const path = this.findPath(grid, sx, sy, nx, ny, maxNodes);
-      if (path && path.length < bestLen) {
-        best = path;
-        bestLen = path.length;
-      }
+      goals.add(ny * w + nx);
     }
-    return best;
+    if (goals.size === 0) return null;
+    const startIdx = sy * w + sx;
+    if (goals.has(startIdx)) {
+      const out = new Int32Array(1);
+      out[0] = (sy << 16) | sx;
+      return out;
+    }
+    // Hierarchical fast-fail: reachable only if SOME goal shares a
+    // connected region with the start.
+    if (this.regions) {
+      let anyConnected = false;
+      for (const g of goals) {
+        if (this.regions.connected(grid, sx, sy, g % w, (g / w) | 0)) {
+          anyConnected = true;
+          break;
+        }
+      }
+      if (!anyConnected) return null;
+    }
+
+    this.generation = (this.generation + 1) | 0;
+    if (this.generation === 0) this.generation = 1;
+    this.heapSize = 0;
+
+    const h = (x: number, y: number) => Math.max(0, octile(x, y, tx, ty) - DIAGONAL_COST);
+    this.gScore[startIdx] = 0;
+    this.fScore[startIdx] = h(sx, sy);
+    this.visitedGen[startIdx] = this.generation;
+    this.heapPush(startIdx);
+
+    let visited = 0;
+    while (this.heapSize > 0) {
+      const current = this.heapPop();
+      if (this.closedGen[current] === this.generation) continue;
+      if (goals.has(current)) {
+        return this.reconstruct(current, startIdx);
+      }
+      this.closedGen[current] = this.generation;
+      const cx = current % w;
+      const cy = (current / w) | 0;
+      const baseG = this.gScore[current];
+
+      for (let i = 0; i < 8; i++) {
+        const nx = cx + NEIGHBORS_DX[i];
+        const ny = cy + NEIGHBORS_DY[i];
+        if (nx < 0 || ny < 0 || nx >= w || ny >= this.height) continue;
+        if (!grid.isWalkable(nx, ny)) continue;
+        if (i >= 4) {
+          if (!grid.isWalkable(cx + NEIGHBORS_DX[i], cy)) continue;
+          if (!grid.isWalkable(cx, cy + NEIGHBORS_DY[i])) continue;
+        }
+        const nIdx = ny * w + nx;
+        if (this.closedGen[nIdx] === this.generation) continue;
+        const tentativeG = baseG + NEIGHBORS_COST[i];
+        if (this.visitedGen[nIdx] !== this.generation || tentativeG < this.gScore[nIdx]) {
+          this.cameFrom[nIdx] = current;
+          this.gScore[nIdx] = tentativeG;
+          this.fScore[nIdx] = tentativeG + h(nx, ny);
+          this.visitedGen[nIdx] = this.generation;
+          this.heapPush(nIdx);
+        }
+      }
+
+      visited++;
+      if (visited > maxNodes) return null;
+    }
+    return null;
   }
 
   private reconstruct(end: number, start: number): Int32Array {

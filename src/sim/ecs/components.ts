@@ -316,7 +316,7 @@ export type DiseaseKind =
    * drain; the colony's most lethal disease without medicine. */
   | "wound_sickness";
 
-export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave";
+export type JobKind = "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave" | "flee" | "train";
 
 export interface JobAssignment {
   kind: JobKind;
@@ -327,4 +327,19 @@ export interface JobAssignment {
   progress: number;
   /** For socialise + treat jobs, the partner / patient dwarf entity id. */
   partnerId?: number;
+  /** For craft jobs: the recipe resolved (with demand swaps applied) on
+   * the first progress tick. Pinned here so the product can't mutate
+   * mid-craft when room demand shifts — inputs were already consumed
+   * for THIS recipe. Transient: not serialized; a mid-craft save/load
+   * re-resolves once on the next tick. */
+  craftRecipe?: import("../planner/recipes").Recipe;
+  /** For craft jobs: the workshop blueprint kind that owns the station,
+   * resolved together with craftRecipe (drives output bonuses like the
+   * smelter's steel doubling and per-workshop quality biases). */
+  craftBlueprintKind?: string;
+  /** For craft jobs: what the reservation tick actually consumed, so an
+   * interrupted craft can refund it (asItem: a routed item entity was
+   * destroyed; otherwise stockpile counters were debited). Cleared on
+   * completion. Transient like craftRecipe — not serialized. */
+  craftPaid?: { kind: string; qty: number; asItem: boolean; kind2?: string; qty2?: number };
 }

@@ -1,4 +1,5 @@
-import { listSlotSummaries, deleteSave } from "../save/db";
+import { listSlotSummaries, deleteSave, loadGame, saveGame } from "../save/db";
+import { exportSaveToJson, importSaveFromJson } from "../save/transfer";
 import { GameMode, SAVE_SLOT_IDS, SaveSlotId, SlotSummary } from "../save/schema";
 import { BUNNY_BUTTON_ROWS, paintSpriteAtScale, SpriteSet } from "../render/sprites";
 import { loadSpriteSet, saveSpriteSet } from "../render/spriteSetPref";
@@ -86,13 +87,30 @@ async function chooseSlot(host: HTMLElement, byId: Record<string, SlotSummary>):
           for (const s of summaries) map[s.slotId] = s;
           const next = await chooseSlot(host, map);
           resolve(next);
+        } else if (action === "export" && summary) {
+          const save = await loadGame(slotId);
+          if (save) downloadSaveFile(save.fortressName, exportSaveToJson(save));
+        } else if (action === "import") {
+          const imported = await pickSaveFile();
+          if (imported === null) return;
+          if (typeof imported === "string") {
+            alert(imported); // readable error from the parser
+            return;
+          }
+          imported.slotId = slotId;
+          await saveGame(imported);
+          const summaries = await listSlotSummaries();
+          const map: Record<string, SlotSummary> = {};
+          for (const s of summaries) map[s.slotId] = s;
+          const next = await chooseSlot(host, map);
+          resolve(next);
         }
       }));
     }
   });
 }
 
-type SlotAction = "continue" | "new" | "delete";
+type SlotAction = "continue" | "new" | "delete" | "export" | "import";
 
 function buildSlotRow(
   slotId: SaveSlotId,
@@ -112,6 +130,14 @@ function buildSlotRow(
     btn.textContent = "+ New Fortress";
     btn.addEventListener("click", () => onAction("new"));
     wrap.appendChild(btn);
+    const imp = document.createElement("button");
+    imp.className = "btn";
+    imp.textContent = "Import…";
+    imp.title = "Load a fortress from an exported save file into this slot";
+    imp.style.opacity = "0.6";
+    imp.style.fontSize = "11px";
+    imp.addEventListener("click", () => onAction("import"));
+    wrap.appendChild(imp);
     return wrap;
   }
 
@@ -133,6 +159,15 @@ function buildSlotRow(
   cont.style.minWidth = "100px";
   cont.addEventListener("click", () => onAction("continue"));
   wrap.appendChild(cont);
+
+  const exp = document.createElement("button");
+  exp.className = "btn";
+  exp.textContent = "Export";
+  exp.title = "Download this fortress as a save file (backup / sharing)";
+  exp.style.opacity = "0.6";
+  exp.style.fontSize = "11px";
+  exp.addEventListener("click", () => onAction("export"));
+  wrap.appendChild(exp);
 
   const del = document.createElement("button");
   del.className = "btn";
@@ -338,4 +373,41 @@ function openSpriteSetPicker(host: HTMLElement): void {
   overlay.addEventListener("click", (ev) => { if (ev.target === overlay) overlay.remove(); });
   overlay.appendChild(card);
   host.appendChild(overlay);
+}
+
+/** Trigger a browser download of an exported save. */
+function downloadSaveFile(fortressName: string, json: string): void {
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const safeName = fortressName.replace(/[^a-z0-9-_]+/gi, "_").slice(0, 40) || "fortress";
+  a.href = url;
+  a.download = `${safeName}.dwarvendeep.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** File-picker + parse. Resolves to the parsed save, a string error
+ * message for the user, or null if the picker was cancelled. */
+function pickSaveFile(): Promise<import("../save/schema").SaveV1 | string | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return resolve(null);
+      try {
+        resolve(importSaveFromJson(await file.text()));
+      } catch (err) {
+        resolve(err instanceof Error ? err.message : String(err));
+      }
+    });
+    // Cancel produces no event in most browsers; resolve null when the
+    // window regains focus without a selection.
+    window.addEventListener("focus", () => {
+      setTimeout(() => { if (!input.files?.length) resolve(null); }, 500);
+    }, { once: true });
+    input.click();
+  });
 }

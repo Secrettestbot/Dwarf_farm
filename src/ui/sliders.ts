@@ -53,7 +53,10 @@ export class SliderPanel {
       input.style.cssText = "width:100%;accent-color:#e0c080;";
       input.addEventListener("input", () => {
         const v = Math.max(0, Math.min(100, parseInt(input.value, 10) || 0)) / 100;
-        sim.sliders[key] = v;
+        // Write through this.sim, not the constructor argument — refresh()
+        // swaps the instance after save/load and the slider must keep
+        // steering the *live* world.
+        this.sim.sliders[key] = v;
         right.textContent = formatPercent(v);
       });
       row.appendChild(input);
