@@ -129,6 +129,8 @@ export function renderWorld(
   // pre-tinted per layer and cached, so render-time cost is just a
   // lookup.
   const surfaceRefY = sim.spawn.y - 3; // spawn cavern sits a few tiles below true surface
+  // One season lookup per frame, not one per grass tile.
+  const seasonTint = SEASON_TINTS[seasonOf(sim.tick)];
   for (let y = Math.max(0, y0); y < Math.min(grid.height, y1); y++) {
     const layer = layerOf(y, surfaceRefY);
     for (let x = Math.max(0, x0); x < Math.min(grid.width, x1); x++) {
@@ -151,12 +153,9 @@ export function renderWorld(
       // tiles stay constant — the deep mountain doesn't have
       // seasons. Overlay alpha is small for spring/summer, large for
       // winter so snow reads at a glance.
-      if (t === TileType.Grass || t === TileType.Tree) {
-        const tint = SEASON_TINTS[seasonOf(sim.tick)];
-        if (tint) {
-          ctx.fillStyle = tint;
-          ctx.fillRect(sx, sy, pt, pt);
-        }
+      if ((t === TileType.Grass || t === TileType.Tree) && seasonTint) {
+        ctx.fillStyle = seasonTint;
+        ctx.fillRect(sx, sy, pt, pt);
       }
     }
   }
@@ -235,6 +234,9 @@ export function renderWorld(
     const p = sim.position.get(ie);
     const it = sim.item.get(ie);
     if (!p || !it) continue;
+    // Viewport cull — a late-game floor can hold hundreds of loose
+    // items; off-screen ones shouldn't cost fill calls.
+    if (p.x < x0 || p.x >= x1 || p.y < y0 || p.y >= y1) continue;
     if (!grid.isSeen(p.x, p.y)) continue;
     const sx = (p.x - camera.x) * pt + viewW / 2;
     const sy = (p.y - camera.y) * pt + viewH / 2;
@@ -320,6 +322,7 @@ export function renderWorld(
     const p = sim.position.get(id);
     const pet = sim.pet.get(id);
     if (!p || !pet) continue;
+    if (p.x < x0 || p.x >= x1 || p.y < y0 || p.y >= y1) continue;
     if (!grid.isSeen(p.x, p.y)) continue;
     const sprite = getPetSprite(pet.kind);
     const sx = (p.x - camera.x) * pt + viewW / 2;
@@ -349,6 +352,7 @@ export function renderWorld(
     const p = sim.position.get(e);
     const h = sim.hostile.get(e);
     if (!p || !h) continue;
+    if (p.x < x0 || p.x >= x1 || p.y < y0 || p.y >= y1) continue;
     const sprite = getHostileSprite(h.kind);
     const sx = (p.x - camera.x) * pt + viewW / 2;
     const sy = (p.y - camera.y) * pt + viewH / 2;
@@ -362,6 +366,7 @@ export function renderWorld(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   sim.forEachDwarf((id, pos) => {
+    if (pos.x < x0 || pos.x >= x1 || pos.y < y0 || pos.y >= y1) return;
     const dwarfSprite = getDwarfSprite(id);
     const sx = (pos.x - camera.x) * pt + viewW / 2;
     const sy = (pos.y - camera.y) * pt + viewH / 2;
