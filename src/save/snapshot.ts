@@ -2,6 +2,7 @@ import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
 import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
+import { migrateSave } from "./migrations";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
 // Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
@@ -360,6 +361,7 @@ function collectHostiles(sim: SimWorld): SavedHostile[] {
 }
 
 export function restore(save: SaveV1): SimWorld {
+  save = migrateSave(save);
   const w = generateWorld({ seed: save.seed, width: save.width, height: save.height });
   const decoded = decodeOverrides(save.tileOverrides);
   decoded.apply(w.grid);

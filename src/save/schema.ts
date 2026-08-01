@@ -196,7 +196,7 @@ export interface SavedStockpile {
 }
 
 export interface SaveV1 {
-  version: 3;
+  version: number;
   slotId: string;
   /** Friendly fortress name shown on the title screen — set when the founders begin. */
   fortressName: string;
@@ -409,7 +409,10 @@ export interface SaveV1 {
 // gained "bed", carpenter recipes split into planks vs bed. Old
 // saves are dropped rather than migrated — the room state on a
 // loaded colony wouldn't match the new gates.
-export const CURRENT_SAVE_VERSION = 3 as const;
+/** v4: index-encoded entity references (mayor/king/broker/grudges,
+ * per-hostile names, siege member flags + start tick). See
+ * migrations.ts for the vN -> vN+1 chain. */
+export const CURRENT_SAVE_VERSION = 4 as const;
 
 /** A lightweight summary of a save slot, shown on the title screen. */
 export interface SlotSummary {
