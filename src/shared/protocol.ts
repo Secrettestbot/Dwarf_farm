@@ -9,5 +9,5 @@ export type MainToWorker =
 export type WorkerToMain =
   | { type: "READY" }
   | { type: "PROGRESS"; ticksDone: number; ticksRemaining: number }
-  | { type: "DONE"; save: SaveV1 }
+  | { type: "DONE"; save: SaveV1; ticksDone: number; ticksRequested: number }
   | { type: "ERROR"; message: string };

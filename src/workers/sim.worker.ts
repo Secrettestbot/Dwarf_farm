@@ -7,6 +7,11 @@ import { MainToWorker, WorkerToMain } from "../shared/protocol";
 // responsive and so we can post progress updates.
 
 const BURST_MS = 500;
+/** Total wall-clock budget for one catch-up run. A three-day absence
+ * asks for ~1.5M ticks, which could grind for many minutes; past this
+ * budget we stop honestly and report how far we got — the fortress
+ * simply "slept" through the remainder. */
+const TOTAL_BUDGET_MS = 120_000;
 
 let cancelled = false;
 
@@ -31,7 +36,8 @@ async function runCatchup(saveData: import("../save/schema").SaveV1, ticksToRun:
     const sim = restore(saveData);
     let done = 0;
     post({ type: "READY" });
-    while (done < ticksToRun && !cancelled) {
+    const runStart = performance.now();
+    while (done < ticksToRun && !cancelled && performance.now() - runStart < TOTAL_BUDGET_MS) {
       const burstStart = performance.now();
       while (
         done < ticksToRun &&
@@ -57,7 +63,7 @@ async function runCatchup(saveData: import("../save/schema").SaveV1, ticksToRun:
       cameraY: saveData.cameraY,
       zoomIndex: saveData.zoomIndex,
     });
-    post({ type: "DONE", save: finalSave });
+    post({ type: "DONE", save: finalSave, ticksDone: done, ticksRequested: ticksToRun });
   } catch (err) {
     post({ type: "ERROR", message: err instanceof Error ? err.message : String(err) });
   }

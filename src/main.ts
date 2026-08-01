@@ -264,6 +264,16 @@ async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Pro
         const sim = restore(msg.save);
         const beforeTick = save.tick;
         const digestEvents = sim.events.events.filter((e) => e.tick > beforeTick);
+        // The worker stops at its wall-clock budget on very long
+        // absences. Say so honestly — the remaining time simply
+        // passed quietly rather than being simulated.
+        if (msg.ticksDone < msg.ticksRequested) {
+          digestEvents.push({
+            tick: sim.tick,
+            category: "milestone",
+            text: `The chronicle replayed ${Math.floor((msg.ticksDone / msg.ticksRequested) * 100)}% of your absence before the scribes tired — the rest of the time passed quietly.`,
+          });
+        }
         screen.showDigest(digestEvents, () => {
           screen.close();
           resolve(sim);
