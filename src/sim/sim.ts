@@ -1,5 +1,5 @@
 import { SimWorld } from "./world/simWorld";
-import { chooseTask } from "./jobs/chooseTask";
+import { chooseTask, hasHostileWithin, FLEE_RADIUS } from "./jobs/chooseTask";
 import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
@@ -3652,7 +3652,7 @@ function jobAssignmentSystem(sim: SimWorld): void {
       const tHi = INTERRUPT_THIRST * scale;
       const hHi = INTERRUPT_HUNGER * scale;
       const survivalKind =
-        job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter";
+        job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter" || job.kind === "flee";
       let interrupt = false;
       if (
         needs &&
@@ -3661,6 +3661,15 @@ function jobAssignmentSystem(sim: SimWorld): void {
           (needs.hunger <= hHi && (sim.stockpile.food > 0 || sim.stockpile.meals > 0)))
       ) {
         interrupt = true;
+      }
+      // Danger interrupt: a civilian mid-job with a hostile closing in
+      // drops the work and lets chooseTask route them to the flee
+      // branch this same tick. Soldiers stand; The Fury doesn't run.
+      if (!interrupt && !survivalKind && !sim.squad.has(e) && !sim.fury.has(e)) {
+        const pos = sim.position.get(e);
+        if (pos && hasHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS)) {
+          interrupt = true;
+        }
       }
       // Distractible: a small chance per tick to abandon a non-
       // survival job for no need-driven reason. Deterministic via aiRng.
@@ -3796,6 +3805,9 @@ function workSystem(sim: SimWorld): void {
         break;
       case "shelter":
         progressShelter(sim, e, job, pos);
+        break;
+      case "flee":
+        progressFlee(sim, e, job, pos);
         break;
       case "haul":
         progressHaul(sim, e, job, pos);
@@ -5008,6 +5020,25 @@ export function creditOrDrop(
     // the floor when no needs_furnishing room is ready for them —
     // a later emission picks them up via findFurnitureRoute.
     sim.spawnItem({ kind, x, y, quality });
+  }
+}
+
+/** Huddle at the safe zone while a hostile is still near. The dwarf
+ * calms down (job dropped, normal life resumes) once nothing hostile
+ * remains within the flee radius plus a small hysteresis margin; while
+ * danger persists, the job re-checks every in-game hour. */
+const FLEE_CALM_MARGIN = 4;
+function progressFlee(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  if (!hasHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS + FLEE_CALM_MARGIN)) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    dropJob(sim, e);
+    return;
+  }
+  job.progress++;
+  if (job.progress >= TICKS_PER_HOUR) {
+    // Re-evaluate: the hostile may have followed — chooseTask will
+    // re-issue the flee (or the dwarf may now be safe).
+    dropJob(sim, e);
   }
 }
 

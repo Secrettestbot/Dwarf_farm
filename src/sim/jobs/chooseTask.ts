@@ -85,6 +85,15 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 0.7 Flee (GDD §6.2 danger response): a civilian with a hostile
+  //     closing inside FLEE_RADIUS abandons whatever they were about
+  //     to do and runs for the colony's safe zone. Soldiers engage
+  //     instead (branch above); a dwarf in The Fury doesn't run from
+  //     anything.
+  if (!sim.squad.has(e) && !sim.fury.has(e) && hasHostileWithin(sim, pos.x, pos.y, FLEE_RADIUS)) {
+    return { kind: "flee" as JobKind, targetX: sim.spawn.x, targetY: sim.spawn.y, progress: 0 };
+  }
+
   // 1. Thirst — fastest-decaying need; can kill in ~24 in-game hours. The
   //    dwarf walks to the nearest stockpile (or dining hall) — they don't
   //    just drink wherever they happen to be standing.
@@ -1274,6 +1283,24 @@ function findResearchDesk(sim: SimWorld, sx: number, sy: number): { x: number; y
  * for a single rat — hostiles deeper than this end up handled when a
  * soldier wanders into their pursue radius. */
 const SOLDIER_ENGAGE_RANGE = 30;
+
+/** Radius at which a civilian notices a hostile and breaks for the
+ * safe zone. Slightly smaller than most pursue ranges so fleeing
+ * reads as a reaction, not clairvoyance. */
+export const FLEE_RADIUS = 8;
+
+/** True if any hostile is within `r` tiles of (x, y). */
+export function hasHostileWithin(sim: SimWorld, x: number, y: number, r: number): boolean {
+  const ents = sim.hostile.entities;
+  for (let i = 0; i < ents.length; i++) {
+    const p = sim.position.get(ents[i]);
+    if (!p) continue;
+    const dx = p.x - x;
+    const dy = p.y - y;
+    if (dx * dx + dy * dy <= r * r) return true;
+  }
+  return false;
+}
 function findHostileTarget(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
   let best: { x: number; y: number; d: number } | null = null;
   const ents = sim.hostile.entities;
