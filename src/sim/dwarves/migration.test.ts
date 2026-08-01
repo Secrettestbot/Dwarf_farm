@@ -15,12 +15,23 @@ function buildSim(seed: number, dwarves: number, age = 30): SimWorld {
   return sim;
 }
 
+function advanceSeasons(sim: SimWorld, seasons: number): void {
+  // Jump to one tick before each season boundary, then tick across it
+  // — migrationSystem's seasonal roll still fires; dead ticks between
+  // are skipped.
+  for (let s = 0; s < seasons; s++) {
+    sim.tick = (Math.floor(sim.tick / SEASON_TICKS) + 1) * SEASON_TICKS - 1;
+    tick(sim);
+  }
+}
+
 describe("migration", () => {
   it("a young colony gains immigrants within a few seasons", () => {
     // pop 7 → 60% chance per season; 4 seasons gives ~97% probability.
     const sim = buildSim(11, 7);
     // Run 4 seasons.
-    for (let i = 0; i < SEASON_TICKS * 4 + 5; i++) tick(sim);
+    advanceSeasons(sim, 4);
+    for (let i = 0; i < 5; i++) tick(sim);
     // Net population is a bad signal here — founders can die of thirst
     // or in combat over 24 unprovisioned in-game days, masking real
     // arrivals. Count the immigration events themselves (phrasings from
@@ -35,7 +46,8 @@ describe("migration", () => {
   it("an arrival event lands in the chronicle within ~2 in-game years", () => {
     // pop 7 → 60% per season; 8 seasons gives P(zero arrivals) ≈ 0.07%.
     const sim = buildSim(13, 7);
-    for (let i = 0; i < SEASON_TICKS * 8 + 5; i++) tick(sim);
+    advanceSeasons(sim, 8);
+    for (let i = 0; i < 5; i++) tick(sim);
     const arrivals = sim.events.events.filter((e) =>
       e.category === "social" && /arrived|joined|caravan/i.test(e.text),
     );
@@ -57,7 +69,7 @@ describe("migration", () => {
   it("immigrants are full adults and join the work loop", () => {
     const sim = buildSim(19, 5);
     // Run a couple of seasons; some migrants likely arrived.
-    for (let i = 0; i < SEASON_TICKS * 4; i++) tick(sim);
+    advanceSeasons(sim, 4);
     let nonFounderAdult = false;
     sim.forEachDwarf((id, _pos, dw) => {
       // Founders are named D0..D4. Anything else is an immigrant.

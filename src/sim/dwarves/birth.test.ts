@@ -19,25 +19,44 @@ function buildSim(seed: number, ages: number[]): SimWorld {
   return sim;
 }
 
+
+/** Fast-forward: jump to one tick before each of the next `years` year
+ * boundaries and tick once across each. The yearly systems (pairing,
+ * reproduction, death, draft) fire exactly as they would have; the
+ * dead time between boundaries — where these tests just burn wall
+ * clock — is skipped. Needs don't decay across a jump, which suits
+ * these tests fine (they're about lifecycle rolls, not survival). */
+function advanceYears(sim: SimWorld, years: number, onYear?: () => boolean | void): void {
+  for (let y = 0; y < years; y++) {
+    sim.tick = (Math.floor(sim.tick / TICKS_PER_YEAR) + 1) * TICKS_PER_YEAR - 1;
+    tick(sim);
+    if (onYear && onYear() === true) return;
+  }
+}
+
 describe("partnerships + births", () => {
   it("eligible adults eventually pair off", () => {
     const sim = buildSim(31, [25, 28, 32, 24, 30, 27, 26]);
     let pairedAt = -1;
-    for (let y = 1; y <= 6 && pairedAt === -1; y++) {
-      for (let i = 0; i < TICKS_PER_YEAR; i++) tick(sim);
+    let y = 0;
+    advanceYears(sim, 6, () => {
+      y++;
       let pairs = 0;
       sim.forEachDwarf((_id, _pos, dw) => {
         if (dw.partnerId !== null) pairs++;
       });
-      if (pairs >= 2) pairedAt = y;
-    }
+      if (pairs >= 2 && pairedAt === -1) {
+        pairedAt = y;
+        return true;
+      }
+    });
     expect(pairedAt).toBeGreaterThan(0);
     expect(pairedAt).toBeLessThanOrEqual(6);
   });
 
   it("partner references are mutual", () => {
     const sim = buildSim(33, [26, 29, 31, 25, 28, 30, 27]);
-    for (let i = 0; i < TICKS_PER_YEAR * 5; i++) tick(sim);
+    advanceYears(sim, 5);
     sim.forEachDwarf((id, _pos, dw) => {
       if (dw.partnerId === null) return;
       const partner = sim.dwarf.get(dw.partnerId);
@@ -57,19 +76,19 @@ describe("partnerships + births", () => {
     // is small but non-zero. 16 years gives a comfortable buffer
     // without blowing test runtime up.
     let babyArrived = false;
-    for (let y = 1; y <= 16 && !babyArrived; y++) {
-      for (let i = 0; i < TICKS_PER_YEAR; i++) tick(sim);
+    advanceYears(sim, 16, () => {
       sim.forEachDwarf((id) => {
         if (sim.ageOf(id) === 0) babyArrived = true;
       });
-    }
+      return babyArrived;
+    });
     expect(babyArrived).toBe(true);
     expect(sim.dwarf.size()).toBeGreaterThan(initialCount);
   });
 
   it("births appear in the event log as a 'social' entry", () => {
     const sim = buildSim(41, [25, 26]);
-    for (let i = 0; i < TICKS_PER_YEAR * 12; i++) tick(sim);
+    advanceYears(sim, 12);
     const births = sim.events.events.filter((e) =>
       e.category === "social" && /born/i.test(e.text),
     );
@@ -79,9 +98,7 @@ describe("partnerships + births", () => {
   it("children skip mining work — they wander instead", () => {
     const sim = buildSim(43, [25, 26]);
     // Run long enough for at least one child.
-    for (let y = 0; y < 15; y++) {
-      for (let i = 0; i < TICKS_PER_YEAR; i++) tick(sim);
-    }
+    advanceYears(sim, 15);
     // Find a child (age < 18) and observe their next 200 ticks worth of jobs.
     let childId = -1;
     sim.forEachDwarf((id) => {
@@ -109,7 +126,7 @@ describe("partnerships + births", () => {
   it("partner reference is cleared and bereavement is logged on death", () => {
     const sim = buildSim(47, [148, 150]);
     // Force-pair them via several in-game years (one will die at threshold).
-    for (let i = 0; i < TICKS_PER_YEAR; i++) tick(sim);
+    advanceYears(sim, 1);
     // After the first year tick the death system runs; the elder dies,
     // bereavement is logged. The survivor's partnerId must be null.
     const bereavements = sim.events.events.filter((e) =>
