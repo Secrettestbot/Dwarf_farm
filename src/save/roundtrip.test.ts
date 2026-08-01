@@ -84,6 +84,8 @@ describe("save round-trip", () => {
     sim.caravanDealCost = 5;
     sim.caravanDealImport = "food";
     sim.caravanDealGain = 10;
+    sim.mayorId = a;
+    sim.mayorName = aName;
 
     const sim2 = restore(takeSnapshot(sim));
     const find = (name: string) =>
@@ -94,5 +96,7 @@ describe("save round-trip", () => {
     const gob2 = sim2.hostile.entities.find((id) => sim2.hostile.get(id)!.kind === "goblin_warlord")!;
     expect(sim2.hostileNames.get(gob2)).toBe("Drogmar Black-Tongue");
     expect(sim2.caravanBrokerId).toBe(b2);
+    expect(sim2.mayorId).toBe(a2);
+    expect(sim2.mayorName).toBe(aName);
   });
 });

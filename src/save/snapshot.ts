@@ -266,7 +266,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     artifactsNextId: sim.artifactsNextId,
     books: sim.books.length > 0 ? sim.books.map((b) => ({ ...b })) : undefined,
     mayorName: sim.mayorName || undefined,
+    mayorIndex: sim.mayorId !== -1 ? entityToIndex.get(sim.mayorId) : undefined,
     kingName: sim.kingName || undefined,
+    kingIndex: sim.kingId !== -1 ? entityToIndex.get(sim.kingId) : undefined,
     mandate: sim.mandateResource
       ? {
           resource: sim.mandateResource,
@@ -619,7 +621,19 @@ export function restore(save: SaveV1): SimWorld {
     for (const b of save.books) sim.books.push({ ...b });
   }
   if (save.mayorName) sim.mayorName = save.mayorName;
+  if (save.mayorIndex !== undefined) {
+    sim.mayorId = spawnedEntities[save.mayorIndex] ?? -1;
+  } else if (save.mayorName) {
+    // Legacy saves carried only the name — resolve to the first
+    // matching dwarf so the aura / targeting keep working.
+    sim.mayorId = spawnedEntities.find((id) => sim.dwarf.get(id)?.name === save.mayorName) ?? -1;
+  }
   if (save.kingName) sim.kingName = save.kingName;
+  if (save.kingIndex !== undefined) {
+    sim.kingId = spawnedEntities[save.kingIndex] ?? -1;
+  } else if (save.kingName) {
+    sim.kingId = spawnedEntities.find((id) => sim.dwarf.get(id)?.name === save.kingName) ?? -1;
+  }
   if (save.mandate) {
     sim.mandateResource = save.mandate.resource;
     sim.mandateTarget = save.mandate.target;

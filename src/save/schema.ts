@@ -361,6 +361,9 @@ export interface SaveV1 {
   }>;
   /** Currently-recognised Mayor's name. */
   mayorName?: string;
+  /** Mayor as an index into dwarves[] — identity that survives the
+   * restore id reshuffle. mayorName stays display-only. */
+  mayorIndex?: number;
   /** Active mayoral mandate. Empty `resource` means no mandate.
    * Round-trips so a save mid-season doesn't lose the deadline. */
   mandate?: {
@@ -375,6 +378,8 @@ export interface SaveV1 {
   mandatesFailed?: number;
   /** Currently-recognised King's name (empty if no King yet). */
   kingName?: string;
+  /** King as an index into dwarves[] — same encoding as mayorIndex. */
+  kingIndex?: number;
   /** Legacy pairwise grudges keyed by `${minId}:${maxId}` raw entity
    * ids — kept for reading old saves only; ids do not survive a
    * restore, so these entries can attach to the wrong pair. */

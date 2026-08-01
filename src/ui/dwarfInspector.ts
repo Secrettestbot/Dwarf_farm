@@ -154,10 +154,10 @@ export class DwarfInspector {
     const militaryLine = isSoldier
       ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">⚔ Standing guard${armedText}</div>`
       : "";
-    const mayorLine = sim.mayorName === dw.name
+    const mayorLine = sim.mayorId === this.targetId
       ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">Mayor of the colony — leadership ${dw.skills.leadership ?? 1}</div>`
       : "";
-    const kingLine = sim.kingName === dw.name
+    const kingLine = sim.kingId === this.targetId
       ? `<div style="margin-top:4px;font-size:11px;color:#e0c080;">King of the Colony — leadership ${dw.skills.leadership ?? 1}, military ${dw.skills.military ?? 1}</div>`
       : "";
     const disease = sim.disease.get(this.targetId);
@@ -239,7 +239,6 @@ export class DwarfInspector {
         if (!next || !next.trim()) return;
         const trimmed = next.trim().slice(0, 40);
         if (trimmed === target.name) return;
-        const oldName = target.name;
         target.name = trimmed;
         // Update cached name references so the rename doesn't leave
         // dangling lookups that would falsely report the mayor /
@@ -248,8 +247,8 @@ export class DwarfInspector {
         // the new name. Historical records (parentNames, graves,
         // artifacts, books) intentionally stay locked to who the
         // dwarf was at the time.
-        if (sim.mayorName === oldName) sim.mayorName = trimmed;
-        if (sim.kingName === oldName) sim.kingName = trimmed;
+        if (sim.mayorId === this.targetId) sim.mayorName = trimmed;
+        if (sim.kingId === this.targetId) sim.kingName = trimmed;
         const petEnts = sim.pet.entities;
         for (let i = 0; i < petEnts.length; i++) {
           const pet = sim.pet.get(petEnts[i]);

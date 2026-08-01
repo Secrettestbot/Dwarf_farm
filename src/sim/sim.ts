@@ -765,11 +765,13 @@ function mayorSystem(sim: SimWorld): void {
   }
   if (!best) {
     sim.mayorName = "";
+    sim.mayorId = -1;
     return;
   }
   const dw = sim.dwarf.get(best.id);
   if (!dw) return;
-  if (dw.name === sim.mayorName) return; // re-elected, no event
+  if (best.id === sim.mayorId) return; // re-elected, no event
+  sim.mayorId = best.id;
   sim.mayorName = dw.name;
   sim.events.add(
     sim.tick,
@@ -884,6 +886,7 @@ function kingSystem(sim: SimWorld): void {
     if (sim.kingName) {
       // Throne room destroyed somehow? Strip royalty.
       sim.kingName = "";
+      sim.kingId = -1;
     }
     return;
   }
@@ -913,8 +916,9 @@ function kingSystem(sim: SimWorld): void {
   }
   const dw = sim.dwarf.get(best.id);
   if (!dw) return;
-  if (dw.name === sim.kingName) return; // re-coronation, no event
+  if (best.id === sim.kingId) return; // re-coronation, no event
   const previous = sim.kingName;
+  sim.kingId = best.id;
   sim.kingName = dw.name;
   if (previous) {
     sim.events.add(
@@ -1312,14 +1316,7 @@ function passiveTraitSystem(sim: SimWorld): void {
   // Mayor aura: a small fortress-wide morale bump. The mayor name
   // is set yearly by mayorSystem; we re-resolve their entity here.
   if (sim.mayorName) {
-    let mayorAlive = false;
-    for (const id of ents) {
-      const dw = sim.dwarf.get(id);
-      if (dw && dw.name === sim.mayorName) {
-        mayorAlive = true;
-        break;
-      }
-    }
+    const mayorAlive = sim.mayorId !== -1 && sim.dwarf.has(sim.mayorId);
     if (mayorAlive) {
       for (const other of ents) {
         const n = sim.needs.get(other);
@@ -1335,19 +1332,13 @@ function passiveTraitSystem(sim: SimWorld): void {
         `${sim.mayorName} is dead. The Mayor's seat is empty until the next year's recognition.`,
       );
       sim.mayorName = "";
+      sim.mayorId = -1;
     }
   }
   // King aura: a stronger fortress-wide bump than the mayor. The
   // King's presence is the colony's pride.
   if (sim.kingName) {
-    let kingAlive = false;
-    for (const id of ents) {
-      const dw = sim.dwarf.get(id);
-      if (dw && dw.name === sim.kingName) {
-        kingAlive = true;
-        break;
-      }
-    }
+    const kingAlive = sim.kingId !== -1 && sim.dwarf.has(sim.kingId);
     if (kingAlive) {
       for (const other of ents) {
         const n = sim.needs.get(other);
@@ -1363,6 +1354,7 @@ function passiveTraitSystem(sim: SimWorld): void {
         `The King is dead. The throne sits empty, awaiting a worthy successor.`,
       );
       sim.kingName = "";
+      sim.kingId = -1;
     }
   }
   // Phobia: Deep Rock pass.
@@ -4145,9 +4137,15 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
     return;
   }
   const tile = sim.grid.getTile(pos.x, pos.y);
+  // The recipe is pinned on the job from its first tick — the inputs
+  // were consumed for THAT recipe, so a mid-craft shift in room demand
+  // must not retool the product. Resolution only runs when the field is
+  // unset (first tick, or the first tick after a save/load dropped the
+  // transient pin).
+  let recipe: import("./planner/recipes").Recipe | undefined = job.craftRecipe;
+  let blueprintKind: string | undefined = job.craftBlueprintKind;
+  if (recipe === undefined) {
   // Find the workshop blueprint that owns this workstation.
-  let recipe: import("./planner/recipes").Recipe | undefined;
-  let blueprintKind: string | undefined;
   for (const b of sim.planner.blueprints) {
     if (b.status !== "complete") continue;
     const r = recipeFor(b.kind);
@@ -4263,10 +4261,13 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       recipe = KITCHEN_STEW_RECIPE;
     }
   }
+  }
   if (!recipe) {
     dropJob(sim, e);
     return;
   }
+  job.craftRecipe = recipe;
+  job.craftBlueprintKind = blueprintKind;
   // Reserve the input on the first tick. Two paths:
   //  - An item of the recipe's input kind sitting on the station (a
   //    hauler dropped it there). Consume the item directly — no
@@ -5911,10 +5912,9 @@ function hostileMovementSystem(sim: SimWorld): void {
       if (d2 > def.pursueRange * def.pursueRange) return;
       let score = d2;
       if (isGoblin) {
-        const dw = sim.dwarf.get(id);
         const hp = sim.health.get(id);
         // Mayor's a banner kill — most-preferred target.
-        if (dw && dw.name === sim.mayorName) score -= 50;
+        if (id === sim.mayorId) score -= 50;
         // Civilians (not in the militia squad) score better than
         // armoured soldiers — soft underbellies first.
         if (!sim.squad.has(id)) score -= 25;

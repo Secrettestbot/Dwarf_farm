@@ -36,6 +36,7 @@ describe("goblin target priority", () => {
     const regular = sim.spawnDwarf({ name: "Regular", x: w.spawn.x + 4, y: w.spawn.y, age: 30 });
     pinDwarf(sim, mayor);
     pinDwarf(sim, regular);
+    sim.mayorId = mayor;
     sim.mayorName = "TheMayor";
     const gobId = sim.spawnHostile({ kind: "goblin_scout", x: w.spawn.x, y: w.spawn.y });
     // Step the sim for a few ticks. Goblin moveCooldown is 22, so
@@ -78,6 +79,7 @@ describe("goblin target priority", () => {
     const closer = sim.spawnDwarf({ name: "Closer", x: w.spawn.x - 3, y: w.spawn.y, age: 30 });
     pinDwarf(sim, mayor);
     pinDwarf(sim, closer);
+    sim.mayorId = mayor;
     sim.mayorName = "TheMayor";
     const ratId = sim.spawnHostile({ kind: "cave_rat", x: w.spawn.x, y: w.spawn.y });
     for (let i = 0; i < 80; i++) tick(sim);

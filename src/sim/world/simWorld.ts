@@ -367,6 +367,10 @@ export class SimWorld {
    * highest leadership skill ≥ 5; their presence anywhere on the
    * map gives a small fortress-wide morale aura. */
   mayorName = "";
+  /** Entity id of the current Mayor, -1 when the seat is empty.
+   * Identity checks use this id — mayorName is display-only, and
+   * duplicate names must not crown the wrong dwarf. */
+  mayorId = -1;
 
   /** Mayor's current quarterly mandate — a production target the
    * colony has the season to meet. Empty `resource` means there's
@@ -390,6 +394,9 @@ export class SimWorld {
    * gives the entire fortress a stronger morale aura than the
    * Mayor and the chronicle marks each succession. */
   kingName = "";
+  /** Entity id of the current King, -1 when the throne is empty.
+   * Same id-vs-display split as mayorId / mayorName. */
+  kingId = -1;
   /** Number of void shades the colony has put down since the King
    * woke. The Hollow King Falls milestone fires once enough have been
    * cut down — survival, in this game, is the win condition. */

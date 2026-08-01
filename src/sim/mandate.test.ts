@@ -5,8 +5,8 @@ import { tick } from "./sim";
 import { TICKS_PER_SEASON } from "./time";
 
 /** Set up a synthetic mayor + minimum-pop colony. Skips the
- * year-long real election cycle by writing sim.mayorName directly
- * — the mandate system only needs mayorName to be non-empty + pop
+ * year-long real election cycle by writing sim.mayorId/mayorName
+ * directly — the mandate system only needs a seated mayor + pop
  * ≥ 12. Lockdown blocks migration so the population stays as
  * configured for the test window. */
 function setupForMandate(sim: SimWorld, pop: number) {
@@ -18,6 +18,7 @@ function setupForMandate(sim: SimWorld, pop: number) {
       age: 30,
     });
   }
+  sim.mayorId = sim.dwarf.entities[0];
   sim.mayorName = "TheMayor";
   sim.emergency.mode = "lockdown";
   sim.emergency.startedAtTick = 0;
