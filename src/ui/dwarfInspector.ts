@@ -22,6 +22,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
   treat: "treating a patient",
   trade: "negotiating with a caravan",
   flee: "fleeing to the safe zone",
+  train: "drilling at the armoury",
 };
 
 export class DwarfInspector {

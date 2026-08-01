@@ -48,7 +48,7 @@ export interface SavedDwarf {
   parentNames?: [string, string];
   /** In-flight job at save time. */
   job?: {
-    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave" | "flee";
+    kind: "mine" | "sleep" | "socialise" | "wander" | "eat" | "drink" | "tend" | "maintain" | "shelter" | "haul" | "craft" | "engage" | "research" | "pump" | "visit_grave" | "treat" | "trade" | "engrave" | "flee" | "train";
     targetX: number;
     targetY: number;
     progress: number;

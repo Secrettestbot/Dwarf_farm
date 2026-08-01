@@ -170,6 +170,7 @@ function activityLabel(kind: string | undefined): string {
     case "treat": return "treating a patient";
     case "trade": return "negotiating with a caravan";
     case "flee": return "fleeing";
+    case "train": return "drilling";
     default: return kind;
   }
 }

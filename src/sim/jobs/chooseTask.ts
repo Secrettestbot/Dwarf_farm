@@ -361,6 +361,21 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 6.73 Drill at the armoury (GDD §9.3, Military slider). A drafted
+  //      soldier with no hostile to engage practises forms at a rack —
+  //      the only way to grow the military skill in peacetime. Drills
+  //      teach up to Expert (13); the tiers beyond come from real
+  //      combat. One trainee per rack.
+  if (age >= MIN_WORK_AGE && sim.squad.has(e) && sim.sliders.military > 0.05) {
+    const dw = sim.dwarf.get(e);
+    if (dw && (dw.skills.military ?? 1) < TRAIN_SKILL_CAP) {
+      const rack = findTrainingRack(sim, pos.x, pos.y);
+      if (rack) {
+        return { kind: "train" as JobKind, targetX: rack.x, targetY: rack.y, progress: 0 };
+      }
+    }
+  }
+
   // 6.75 Pump out a nearby flooded tile. Sits between crafting and
   //      research so a colony with active workshops still drains
   //      a breach, but doesn't pull the brewer off duty when there's
@@ -1255,6 +1270,39 @@ function hasWaterInRange(sim: SimWorld, sx: number, sy: number, radius: number):
     }
   }
   return false;
+}
+
+/** Drills stop teaching at Expert — the last tiers of the military
+ * skill only come from real combat (GDD §9.3). */
+export const TRAIN_SKILL_CAP = 13;
+
+/** Find the nearest Armoury rack not already claimed by another
+ * trainee. Racks with a stored weapon still work for drills — the
+ * soldier trains beside it, they don't consume it. */
+function findTrainingRack(sim: SimWorld, sx: number, sy: number): { x: number; y: number } | null {
+  const claimed = collectJobTargets(sim, "train");
+  let best: { x: number; y: number; d: number } | null = null;
+  for (const b of sim.planner.blueprints) {
+    if (b.kind !== "armoury" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) !== TileType.ArmouryRack) continue;
+      if (claimed.has((y << 16) | x)) continue;
+      const dx = x - sx;
+      const dy = y - sy;
+      const d = dx * dx + dy * dy;
+      if (
+        !best ||
+        d < best.d ||
+        (d === best.d && (y < best.y || (y === best.y && x < best.x)))
+      ) {
+        best = { x, y, d };
+      }
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
 }
 
 /** Find the nearest unclaimed Library desk for a research job. Skips

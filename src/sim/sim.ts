@@ -1,5 +1,5 @@
 import { SimWorld } from "./world/simWorld";
-import { chooseTask, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO } from "./jobs/chooseTask";
+import { chooseTask, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO, TRAIN_SKILL_CAP } from "./jobs/chooseTask";
 import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
@@ -142,6 +142,7 @@ export function tick(sim: SimWorld): void {
   festivalSystem(sim);
   diseaseSystem(sim);
   argumentSystem(sim);
+  reconciliationSystem(sim);
   engravingSystem(sim);
   floodSystem(sim);
   depthMilestoneSystem(sim);
@@ -1245,6 +1246,52 @@ function resolveBrawl(sim: SimWorld, aggressor: EntityId, victim: EntityId, kind
   sim.events.add(sim.tick, "crisis", line, aPos ? { x: aPos.x, y: aPos.y } : undefined);
   if (vHp && vHp.hp <= 0) {
     killDwarf(sim, victim, `struck dead by ${aDw.name}`);
+  }
+}
+
+/** Daily chance for a standing feud to END (GDD §6.4 social fabric).
+ * Reconciliation needs somewhere for it to happen — a tavern round or
+ * the Mayor sitting the pair down — and both parties in a good enough
+ * mood to accept it. Deep feuds resist: the chance shrinks with the
+ * grudge count. */
+const RECONCILE_TAVERN_CHANCE = 0.08;
+const RECONCILE_MAYOR_CHANCE = 0.07;
+const RECONCILE_MIN_MORALE = 60;
+const RECONCILE_MORALE_LIFT = 5;
+
+function reconciliationSystem(sim: SimWorld): void {
+  if (sim.tick === 0 || sim.tick % TICKS_PER_DAY !== 0) return;
+  if (sim.grudges.size === 0) return;
+  const hasTavern = sim.planner.blueprints.some((b) => b.kind === "tavern" && b.status === "complete");
+  const mayorAlive = sim.mayorId !== -1 && sim.dwarf.has(sim.mayorId);
+  if (!hasTavern && !mayorAlive) return;
+  for (const [key, entry] of Array.from(sim.grudges.entries())) {
+    const [a, b] = key.split(":").map(Number);
+    const dwA = sim.dwarf.get(a);
+    const dwB = sim.dwarf.get(b);
+    if (!dwA || !dwB) {
+      sim.grudges.delete(key);
+      continue;
+    }
+    // Lazily-decayed entries that reached zero just get pruned.
+    if (grudgeCount(sim, a, b) <= 0) {
+      sim.grudges.delete(key);
+      continue;
+    }
+    const na = sim.needs.get(a);
+    const nb = sim.needs.get(b);
+    if (!na || !nb) continue;
+    if (na.morale < RECONCILE_MIN_MORALE || nb.morale < RECONCILE_MIN_MORALE) continue;
+    let chance = (hasTavern ? RECONCILE_TAVERN_CHANCE : 0) + (mayorAlive ? RECONCILE_MAYOR_CHANCE : 0);
+    chance /= 1 + entry.count * 0.15;
+    if (sim.aiRng.nextFloat() >= chance) continue;
+    sim.grudges.delete(key);
+    na.morale = Math.min(100, na.morale + RECONCILE_MORALE_LIFT);
+    nb.morale = Math.min(100, nb.morale + RECONCILE_MORALE_LIFT);
+    const line = hasTavern
+      ? `${dwA.name} and ${dwB.name} share a round at the tavern. Whatever it was, it's done.`
+      : `${sim.mayorName || "The Mayor"} sits ${dwA.name} and ${dwB.name} down. The feud ends with a handshake nobody quite believes, but it holds.`;
+    sim.events.add(sim.tick, "social", line);
   }
 }
 
@@ -3816,6 +3863,9 @@ function workSystem(sim: SimWorld): void {
       case "flee":
         progressFlee(sim, e, job, pos);
         break;
+      case "train":
+        progressTrain(sim, e, job, pos);
+        break;
       case "haul":
         progressHaul(sim, e, job, pos);
         break;
@@ -5060,6 +5110,31 @@ export function creditOrDrop(
     // the floor when no needs_furnishing room is ready for them —
     // a later emission picks them up via findFurnitureRoute.
     sim.spawnItem({ kind, x, y, quality });
+  }
+}
+
+/** Drill at an armoury rack. One session lasts four in-game hours,
+ * crediting military XP each hour — the peacetime path to a competent
+ * guard. Ends early if the rack vanished or the soldier was demobbed. */
+const TRAIN_SESSION_TICKS = TICKS_PER_HOUR * 4;
+function progressTrain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
+  if (
+    sim.grid.getTile(pos.x, pos.y) !== TileType.ArmouryRack ||
+    !sim.squad.has(e) ||
+    (sim.dwarf.get(e)?.skills.military ?? 1) >= TRAIN_SKILL_CAP
+  ) {
+    dropJob(sim, e);
+    return;
+  }
+  const hoursBefore = Math.floor(job.progress / TICKS_PER_HOUR);
+  job.progress += effectiveWorkSpeed(sim, e);
+  const hoursAfter = Math.floor(job.progress / TICKS_PER_HOUR);
+  if (hoursAfter > hoursBefore) {
+    awardSkillXp(sim, e, "military", hoursAfter - hoursBefore);
+  }
+  if (job.progress >= TRAIN_SESSION_TICKS) {
+    sim.dwarf.get(e)!.lastJobTick = sim.tick;
+    dropJob(sim, e);
   }
 }
 

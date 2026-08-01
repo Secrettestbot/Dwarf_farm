@@ -89,13 +89,20 @@ describe("event log + stockpile", () => {
     expect(sim.oreEverStruck).toBe(true);
   });
 
-  it("event log is cap-bounded at 10000 entries", () => {
+  it("event log is cap-bounded, with milestones never evicted", () => {
     const sim = buildSim(109, 1);
-    for (let i = 0; i < 10100; i++) {
+    sim.events.add(0, "milestone", "The First Hearth.");
+    for (let i = 1; i <= 2100; i++) {
       sim.events.add(i, "construction", `event ${i}`);
     }
-    expect(sim.events.size()).toBe(10000);
-    // Earliest event should have been dropped.
-    expect(sim.events.events[0].tick).toBeGreaterThan(0);
+    expect(sim.events.size()).toBe(2000);
+    // The milestone from tick 0 survives eviction; the oldest routine
+    // entries do not.
+    expect(sim.events.events[0].category).toBe("milestone");
+    expect(sim.events.events[0].tick).toBe(0);
+    const routine = sim.events.events.filter((e) => e.category === "construction");
+    expect(routine[0].tick).toBeGreaterThan(1);
+    // The monotonic counter keeps advancing past the cap.
+    expect(sim.events.seq).toBeGreaterThan(2000);
   });
 });
