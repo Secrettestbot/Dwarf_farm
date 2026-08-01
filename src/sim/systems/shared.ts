@@ -8,6 +8,9 @@ import { SimWorld } from "../world/simWorld";
 import { EntityId } from "../ecs/world";
 import { levelFromXp } from "../dwarves/skillProgress";
 import { skillTier, skillTierLabel, SKILLS_BY_ID, SkillId } from "../dwarves/skills";
+import { TileType } from "../world/tiles";
+import { effectsFor } from "../dwarves/traitEffects";
+import { narrateDeath, narrateBereavement } from "../events/narrator";
 
 export function fireMilestone(sim: SimWorld, id: string, text: string): void {
   if (sim.narrativeMilestones.has(id)) return;
@@ -132,5 +135,153 @@ export function dropJob(sim: SimWorld, e: EntityId): void {
   }
   sim.job.remove(e);
   sim.pathing.remove(e);
+}
+
+
+/**
+ * Remove a dwarf from the sim, log the death in the chronicle, and
+ * place a Memorial tile where they fell. Releases the dwarf's job and
+ * reservations, handles The Fury trigger, bereavement, burial, item
+ * drops, and grudge pruning.
+ */
+export function killDwarf(sim: SimWorld, e: EntityId, cause: string): void {
+  const dw = sim.dwarf.get(e);
+  const pos = sim.position.get(e);
+  if (!dw || !pos) return;
+  // The Fury (GDD §6.5): once-per-life berserk rage that triggers
+  // when a bonded dwarf is killed in combat. Combat-only — death from
+  // age, dehydration, or starvation doesn't set the survivor on a
+  // war path.
+  const violentCause = /slain|gored|torn|crushed|struck/i.test(cause);
+  if (violentCause && dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId)) {
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (partner && partner.traitIds.includes("the_fury") && !sim.fury.has(dw.partnerId)) {
+      sim.fury.set(dw.partnerId, { startedAtTick: sim.tick, used: false });
+      sim.events.add(
+        sim.tick,
+        "crisis",
+        `${partner.name} sees ${dw.name} fall. Something behind their eyes goes still. They do not stop walking forward.`,
+      );
+    }
+  }
+  const age = sim.ageOf(e);
+  // Free any reservations (mine claim, item claims) with the job.
+  dropJob(sim, e);
+  // Memorial on the death tile if it's walkable space (a dwarf in transit
+  // through a tunnel; not a solid tile that another dwarf is mining).
+  if (sim.grid.isWalkable(pos.x, pos.y)) {
+    sim.grid.setTile(pos.x, pos.y, TileType.Memorial);
+  }
+  // Violent deaths fire as crisis so the player gets a notification;
+  // peaceful deaths (old age, disease) stay social so the chronicle
+  // is the place to read them. The position lets the UI offer a
+  // camera-jump to the death tile.
+  sim.events.add(
+    sim.tick,
+    violentCause ? "crisis" : "social",
+    narrateDeath(sim.aiRng, dw.name, dw.profession, age, cause),
+    { x: pos.x, y: pos.y },
+  );
+  // Burial: if a Cemetery exists with an empty Grave plot, mark a
+  // Headstone there and register the dead dwarf in the colony's
+  // gravestones registry. The Memorial tile on the spot they fell
+  // still stays (the place they fell is its own kind of marker), but
+  // the cemetery is where survivors visit.
+  buryDwarf(sim, dw, age, cause);
+  // If this dwarf had a partner, clear the survivor's partnerId and log a
+  // bereavement event. The relationship's length is approximated as
+  // min(both ages) - 18 (i.e. years they could have been bonded as adults),
+  // which is good enough for narration without a per-bond pairedAtTick.
+  if (dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId)) {
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (partner) {
+      const survivorAge = sim.ageOf(dw.partnerId);
+      const yearsTogether = Math.max(0, Math.min(age, survivorAge) - 18);
+      sim.events.add(
+        sim.tick,
+        "social",
+        narrateBereavement(sim.aiRng, partner.name, dw.name, yearsTogether),
+      );
+      // Bereavement morale hit, scaled by traits — Loyal grieves
+      // hard, Fickle barely notices (GDD §6.5).
+      const partnerNeeds = sim.needs.get(dw.partnerId);
+      if (partnerNeeds) {
+        const scale = effectsFor(partner.traitIds).bereavementScale;
+        const hit = Math.round(15 * scale);
+        partnerNeeds.morale = Math.max(0, partnerNeeds.morale - hit);
+      }
+      partner.partnerId = null;
+    }
+  }
+  // If the dwarf was carrying something, drop the whole stack on
+  // the death tile so a teammate can finish the haul. Releases any
+  // item claim implicitly via the alive-check in findHaulTarget.
+  // A checked-out wheelbarrow goes back into the shared pool.
+  const carrying = sim.carrying.get(e);
+  if (carrying) {
+    const dropCount = carrying.count ?? 1;
+    for (let i = 0; i < dropCount; i++) {
+      sim.spawnItem({ kind: carrying.kind, x: pos.x, y: pos.y, quality: carrying.quality });
+    }
+    if (carrying.withWheelbarrow) sim.stockpile.wheelbarrows++;
+  }
+  // Prune grudge entries involving this dwarf — the feud dies with
+  // them. The other party feels relieved, not vindicated; we don't
+  // bump morale here because grief from buryDwarf already runs.
+  for (const key of sim.grudges.keys()) {
+    const [a, b] = key.split(":").map(Number);
+    if (a === e || b === e) sim.grudges.delete(key);
+  }
+  // Remove from the ECS, which strips all component stores.
+  sim.ecs.destroy(e, [sim.position, sim.dwarf, sim.pathing, sim.job, sim.needs, sim.health, sim.carrying, sim.squad, sim.equipment, sim.fury, sim.obsession, sim.tantrum, sim.disease]);
+}
+
+
+/** Find an empty Grave plot in any complete Cemetery and turn it
+ * into a Headstone holding this dwarf's record. The colony's
+ * `graves` registry stores the deceased's details so the chronicle
+ * + future visit-grave job can reference them. Falls through quietly
+ * if no cemetery exists or every plot is already filled — the
+ * Memorial tile on the death spot is still there as a fallback. */
+function buryDwarf(sim: SimWorld, dw: import("../ecs/components").Dwarf, age: number, cause: string): void {
+  let plot: { x: number; y: number } | null = null;
+  outer: for (const b of sim.planner.blueprints) {
+    if (b.kind !== "cemetery" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (sim.grid.getTile(x, y) === TileType.Grave) {
+        plot = { x, y };
+        break outer;
+      }
+    }
+  }
+  if (!plot) return;
+  sim.grid.setTile(plot.x, plot.y, TileType.Headstone);
+  sim.graves.push({
+    x: plot.x,
+    y: plot.y,
+    name: dw.name,
+    profession: dw.profession,
+    ageAtDeath: age,
+    deathTick: sim.tick,
+    cause,
+  });
+  // If this dwarf had a partner who's still alive, record the grave
+  // location on the survivor so chooseTask can route them to pay
+  // respects when their morale dips. The partnerId reference is
+  // already cleared by the bereavement branch above; we passed `dw`
+  // (the deceased's component) into this helper so the partnerId
+  // there is the survivor's id.
+  if (dw.partnerId !== null && sim.ecs.isAlive(dw.partnerId)) {
+    const partner = sim.dwarf.get(dw.partnerId);
+    if (partner) partner.lostPartnerGrave = { x: plot.x, y: plot.y };
+  }
+  sim.events.add(
+    sim.tick,
+    "social",
+    `${dw.name} is laid to rest in the cemetery. Aged ${age} years.`,
+  );
 }
 
