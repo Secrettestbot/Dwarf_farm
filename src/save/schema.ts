@@ -247,7 +247,16 @@ export interface SaveV1 {
   /** Loose items on the floor at save time. */
   items?: SavedItem[];
   /** Research progress. Optional for back-compat with v2 saves. */
-  research?: { current: string | null; progress: number; completed: string[] };
+  research?: {
+    current: string | null;
+    progress: number;
+    completed: string[];
+    /** Player-queued next topic. Optional — absent in older saves. */
+    queued?: string | null;
+    /** Banked per-topic progress for topics the player switched away
+     * from. Optional — absent in older saves. */
+    progressById?: Record<string, number>;
+  };
   /** GDD §10.2 narrative milestones already announced (e.g. "The First
    * Hearth", "Iron Mountain"). Optional for back-compat — older saves
    * lose the bookkeeping but the milestones don't re-fire because the

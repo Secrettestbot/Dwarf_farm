@@ -967,17 +967,27 @@ function hasNeedsFurnishingFor(sim: SimWorld, kind: string): boolean {
   return haulIndex(sim).furnishingNeeds.has(kind);
 }
 
+/** Base hauler share: one hauler slot per this many dwarves. */
+const HAULER_DWARVES_PER_SLOT = 3;
+/** Minecart Tracks (Tier 2): carts on rails let more of the colony
+ * keep goods moving without tripping over each other — one hauler
+ * slot per two dwarves instead of per three. */
+const MINECART_TRACKS_DWARVES_PER_SLOT = 2;
+
 /** Cap on the number of dwarves committed to a haul job at once.
  * Keeps a fixed fraction of the population in non-haul roles so the
  * colony reads as a mix of activities rather than a single hauling
  * column. Hauling specialists bypass this — they go through the
  * specialty branch before the general work order kicks in. */
-function haulerCapForColony(sim: SimWorld): number {
+export function haulerCapForColony(sim: SimWorld): number {
   // Roughly one in three dwarves, floor 2. With pop=20 → 6 haulers,
   // with pop=7 founders → 2. Lower than that and the colony can't
   // clear farm yield + workshop outputs; higher and idle dwarves
   // all converge on the haul branch.
-  return Math.max(2, Math.floor(sim.dwarf.size() / 3));
+  const per = sim.research.completed.includes("minecart_tracks")
+    ? MINECART_TRACKS_DWARVES_PER_SLOT
+    : HAULER_DWARVES_PER_SLOT;
+  return Math.max(2, Math.floor(sim.dwarf.size() / per));
 }
 
 /** Count dwarves currently committed to a haul job — either walking

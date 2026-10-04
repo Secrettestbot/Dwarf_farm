@@ -1,13 +1,32 @@
-// Research tree (GDD §10.2). Tier 1 + Tier 2 are fully wired here;
-// Tier 3+ topics arrive in later sessions when their gates (deep-rock
-// access, ancient-ruin discovery, gem cutting, etc.) are reachable.
+// Research tree (GDD §10.2). Six tiers, all wired.
 //
-// The simulation is intentionally minimal: each topic has a fixed
-// research cost in ticks, and at most one topic is studied at a time
-// by whoever is sitting at a Library desk. When the cost is paid, the
-// topic completes and the chronicle records it. Production gates on
-// research land in a follow-up — for now the tree is a parallel
-// progression counter the player can watch grow.
+// Each topic has a fixed base cost (scaled by RESEARCH_COST_SCALE),
+// topic prereqs, and optional material gates (cumulative haul totals
+// or discovered tile types). Scholars sitting at a Library desk
+// advance the current topic in sim.ts (progressResearch). When a
+// topic completes it is logged, a book is written, and the next topic
+// is chosen by `chooseNextTopic`: the player's queued topic if it is
+// available, else the cheapest available topic (deterministic id
+// tie-break).
+//
+// Player choice: the research panel offers two buttons on every
+// available topic.
+//   * "Study next" sets ResearchState.queued. When the current topic
+//     completes (or immediately, if scholars are idle) the queued
+//     topic is picked instead of the cheapest one. A queued topic
+//     that isn't available falls back to the cheapest-available rule
+//     and stays queued until it opens up.
+//   * "Study now" switches the current topic straight away. Work on
+//     the topic being set aside is banked per-topic in
+//     `progressById` and restored when the colony returns to it
+//     (by player choice or auto-pick), so switching never throws
+//     scholarship away.
+//
+// Every topic unlocks something concrete. Planner gates (workshops,
+// rooms) live in planner/colonyPlanner.ts; numeric bonuses live next
+// to the system they modify, as named constants citing the topic id.
+// Each topic's `effect` string is the player-facing summary shown in
+// the research panel — keep it in sync with the code.
 
 export type ResearchTier = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -49,6 +68,9 @@ export interface MaterialGate {
 export interface ResearchTopic {
   id: string;
   name: string;
+  /** Player-facing one-liner describing what completing the topic
+   * unlocks. Shown in the research panel; keep in sync with code. */
+  effect: string;
   tier: ResearchTier;
   /** Total scholarship-ticks required to complete. */
   cost: number;
@@ -65,15 +87,22 @@ export interface ResearchTopic {
  * unlock from day one. Iron-related Tier 1 topics gate on ore /
  * bars: a colony that's never seen ore can't research smelting. */
 export const TIER_1_TOPICS: ResearchTopic[] = [
-  { id: "basic_stonecutting", name: "Basic Stonecutting", tier: 1, cost: 600, prereqs: [] },
-  { id: "basic_carpentry", name: "Basic Carpentry", tier: 1, cost: 600, prereqs: [] },
-  { id: "iron_smelting", name: "Iron Smelting", tier: 1, cost: 800, prereqs: [],
+  { id: "basic_stonecutting", name: "Basic Stonecutting", effect: "Unlocks the Mason's workshop (stone blocks).",
+    tier: 1, cost: 600, prereqs: [] },
+  { id: "basic_carpentry", name: "Basic Carpentry", effect: "Unlocks the Carpenter's workshop (furniture).",
+    tier: 1, cost: 600, prereqs: [] },
+  { id: "iron_smelting", name: "Iron Smelting", effect: "Unlocks the Smelter (ore into iron bars).",
+    tier: 1, cost: 800, prereqs: [],
     materials: [{ resource: "ore", min: 3, describe: "3 ore mined" }] },
-  { id: "iron_toolmaking", name: "Iron Toolmaking", tier: 1, cost: 800, prereqs: ["iron_smelting"],
+  { id: "iron_toolmaking", name: "Iron Toolmaking", effect: "Unlocks the Forge (bars into tools and weapons).",
+    tier: 1, cost: 800, prereqs: ["iron_smelting"],
     materials: [{ resource: "bars", min: 1, describe: "1 iron bar smelted" }] },
-  { id: "basic_cooking", name: "Basic Cooking", tier: 1, cost: 500, prereqs: [] },
-  { id: "basic_brewing", name: "Basic Brewing", tier: 1, cost: 500, prereqs: [] },
-  { id: "rope_and_fibre", name: "Rope & Fibre", tier: 1, cost: 600, prereqs: [] },
+  { id: "basic_cooking", name: "Basic Cooking", effect: "Unlocks the Kitchen: cooked meals restore more hunger.",
+    tier: 1, cost: 500, prereqs: [] },
+  { id: "basic_brewing", name: "Basic Brewing", effect: "Unlocks the Brewery.",
+    tier: 1, cost: 500, prereqs: [] },
+  { id: "rope_and_fibre", name: "Rope & Fibre", effect: "Unlocks the Loom; traders start offering rope.",
+    tier: 1, cost: 600, prereqs: [] },
 ];
 
 /** GDD Tier 2 — Applied Engineering. Each requires one or more Tier 1
@@ -82,6 +111,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "masonry_and_mortaring",
     name: "Masonry & Mortaring",
+    effect: "Unlocks the Throne Room for a large colony.",
     tier: 2,
     cost: 900,
     prereqs: ["basic_stonecutting"],
@@ -89,6 +119,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "carpentry_mechanisms",
     name: "Carpentry: Mechanisms",
+    effect: "Unlocks the Water Wheel.",
     tier: 2,
     cost: 900,
     prereqs: ["basic_carpentry", "rope_and_fibre"],
@@ -96,6 +127,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "steel_alloying",
     name: "Steel Alloying",
+    effect: "Smelters yield 2 bars per ore instead of 1.",
     tier: 2,
     cost: 1100,
     prereqs: ["iron_smelting", "masonry_and_mortaring"],
@@ -104,6 +136,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "armoury_basics",
     name: "Armoury Basics",
+    effect: "Unlocks the Armoury.",
     tier: 2,
     cost: 1000,
     prereqs: ["iron_toolmaking"],
@@ -111,6 +144,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "medical_practice",
     name: "Medical Practice",
+    effect: "Unlocks the Hospital.",
     tier: 2,
     cost: 900,
     prereqs: [],
@@ -118,6 +152,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "textile_craft",
     name: "Textile Craft",
+    effect: "Unlocks the Tannery; traders start offering cloth.",
     tier: 2,
     cost: 800,
     prereqs: ["rope_and_fibre"],
@@ -126,6 +161,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "underground_agriculture",
     name: "Underground Agriculture",
+    effect: "Farm yield +50%.",
     tier: 2,
     cost: 900,
     prereqs: ["basic_cooking", "basic_brewing"],
@@ -133,6 +169,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "minecart_tracks",
     name: "Minecart Tracks",
+    effect: "Hauler cap rises from 1 in 3 dwarves to 1 in 2.",
     tier: 2,
     cost: 1000,
     prereqs: ["iron_toolmaking", "carpentry_mechanisms"],
@@ -140,6 +177,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
   {
     id: "pottery_and_kilns",
     name: "Pottery & Kilns",
+    effect: "Unlocks the Kiln.",
     tier: 2,
     cost: 800,
     prereqs: ["basic_stonecutting"],
@@ -153,6 +191,7 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
     // pumping entirely.
     id: "hydraulic_basics",
     name: "Hydraulic Basics",
+    effect: "Unlocks the Pump Station to drain a breached aquifer.",
     tier: 2,
     cost: 1000,
     prereqs: ["carpentry_mechanisms"],
@@ -163,16 +202,23 @@ export const TIER_2_TOPICS: ResearchTopic[] = [
  * the gem economy. Gem topics gate on actually discovering a gem
  * vein; Fortification Design gates on stonework experience. */
 export const TIER_3_TOPICS: ResearchTopic[] = [
-  { id: "advanced_metallurgy", name: "Advanced Metallurgy", tier: 3, cost: 1400, prereqs: ["steel_alloying"],
+  { id: "advanced_metallurgy", name: "Advanced Metallurgy", effect: "+1 quality tier on smelter and forge output.",
+    tier: 3, cost: 1400, prereqs: ["steel_alloying"],
     materials: [{ resource: "bars", min: 20, describe: "20 bars produced" }] },
-  { id: "weaponsmithing", name: "Weaponsmithing", tier: 3, cost: 1300, prereqs: ["armoury_basics", "advanced_metallurgy"] },
-  { id: "military_tactics", name: "Military Tactics", tier: 3, cost: 1500, prereqs: ["weaponsmithing"] },
-  { id: "fortification_design", name: "Fortification Design", tier: 3, cost: 1500, prereqs: ["masonry_and_mortaring", "carpentry_mechanisms"],
+  { id: "weaponsmithing", name: "Weaponsmithing", effect: "+1 quality tier on forge output.",
+    tier: 3, cost: 1300, prereqs: ["armoury_basics", "advanced_metallurgy"] },
+  { id: "military_tactics", name: "Military Tactics", effect: "Goblin scouts arrive in larger, more frequent patrols (the enemy adapts).",
+    tier: 3, cost: 1500, prereqs: ["weaponsmithing"] },
+  { id: "fortification_design", name: "Fortification Design", effect: "Besieging warbands give up after 4 days instead of 6.",
+    tier: 3, cost: 1500, prereqs: ["masonry_and_mortaring", "carpentry_mechanisms"],
     materials: [{ resource: "blocks", min: 10, describe: "10 stone blocks cut" }] },
-  { id: "gem_cutting", name: "Gem Cutting", tier: 3, cost: 1200, prereqs: [],
+  { id: "gem_cutting", name: "Gem Cutting", effect: "Unlocks the Jeweller (rough gems into cut gems).",
+    tier: 3, cost: 1200, prereqs: [],
     materials: [{ tile: 21, describe: "a gem vein discovered" }] }, // RawDiamond — any gem tile counts (see hasMaterials).
-  { id: "gem_inlay", name: "Gem Inlay", tier: 3, cost: 1300, prereqs: ["gem_cutting"] },
-  { id: "advanced_medicine", name: "Advanced Medicine", tier: 3, cost: 1300, prereqs: ["medical_practice"] },
+  { id: "gem_inlay", name: "Gem Inlay", effect: "Cut-gem engravings add +6 more room quality.",
+    tier: 3, cost: 1300, prereqs: ["gem_cutting"] },
+  { id: "advanced_medicine", name: "Advanced Medicine", effect: "Resting dwarves heal +1 HP more per healing tick; disease recovery is twice as fast.",
+    tier: 3, cost: 1300, prereqs: ["medical_practice"] },
 ];
 
 /** GDD Tier 4 — Deep Knowledge. Each topic requires the colony to
@@ -180,34 +226,46 @@ export const TIER_3_TOPICS: ResearchTopic[] = [
  * landmark — magma vents, ancient ruins. Without the discovery
  * the scholars have nothing to study. */
 export const TIER_4_TOPICS: ResearchTopic[] = [
-  { id: "magma_tapping", name: "Magma Tapping", tier: 4, cost: 1800, prereqs: ["advanced_metallurgy"],
+  { id: "magma_tapping", name: "Magma Tapping", effect: "Smelter and magma-forge work takes 30% less time.",
+    tier: 4, cost: 1800, prereqs: ["advanced_metallurgy"],
     materials: [{ tile: 24, describe: "a magma vent discovered" }] }, // MagmaVent
-  { id: "magma_forge_craft", name: "Magma Forge Craft", tier: 4, cost: 1900, prereqs: ["magma_tapping"] },
-  { id: "relic_analysis", name: "Relic Analysis", tier: 4, cost: 2000, prereqs: ["advanced_medicine"],
+  { id: "magma_forge_craft", name: "Magma Forge Craft", effect: "Unlocks the Magma Forge (+1 quality tier on its output).",
+    tier: 4, cost: 1900, prereqs: ["magma_tapping"] },
+  { id: "relic_analysis", name: "Relic Analysis", effect: "Research progresses 25% faster.",
+    tier: 4, cost: 2000, prereqs: ["advanced_medicine"],
     materials: [{ tile: 25, describe: "an ancient ruin discovered" }] }, // AncientRuin
-  { id: "alchemy_basics", name: "Alchemy Basics", tier: 4, cost: 1700, prereqs: ["advanced_medicine"] },
-  { id: "deep_cartography", name: "Deep Cartography", tier: 4, cost: 1600, prereqs: ["advanced_metallurgy"] },
+  { id: "alchemy_basics", name: "Alchemy Basics", effect: "Hunger, thirst, sleep and social needs decay 15% slower.",
+    tier: 4, cost: 1700, prereqs: ["advanced_medicine"] },
+  { id: "deep_cartography", name: "Deep Cartography", effect: "Dwarves reveal the map 3 tiles further around them.",
+    tier: 4, cost: 1600, prereqs: ["advanced_metallurgy"] },
 ];
 
 /** GDD Tier 5 — Ancient Lore. Adamantite Smelting needs the metal
  * actually mined; Tier 5 lore otherwise gates on the deeper prereq
  * chain. */
 export const TIER_5_TOPICS: ResearchTopic[] = [
-  { id: "adamantite_smelting", name: "Adamantite Smelting", tier: 5, cost: 2500, prereqs: ["magma_forge_craft"],
+  { id: "adamantite_smelting", name: "Adamantite Smelting", effect: "+1 quality tier on every workshop's crafted items.",
+    tier: 5, cost: 2500, prereqs: ["magma_forge_craft"],
     materials: [{ tile: 26, describe: "adamantite mined" }] }, // Adamantite
-  { id: "rune_inscription", name: "Rune Inscription", tier: 5, cost: 2500, prereqs: ["relic_analysis"] },
-  { id: "void_engineering", name: "Void Engineering", tier: 5, cost: 2700, prereqs: ["alchemy_basics", "relic_analysis"] },
-  { id: "the_deep_breath", name: "The Deep Breath", tier: 5, cost: 2400, prereqs: ["alchemy_basics"] },
+  { id: "rune_inscription", name: "Rune Inscription", effect: "Sleeping or eating in an engraved room grants +3 extra morale.",
+    tier: 5, cost: 2500, prereqs: ["relic_analysis"] },
+  { id: "void_engineering", name: "Void Engineering", effect: "The Hollow King's sieges send 2 void shades instead of 3.",
+    tier: 5, cost: 2700, prereqs: ["alchemy_basics", "relic_analysis"] },
+  { id: "the_deep_breath", name: "The Deep Breath", effect: "Mining is 25% faster at depth 700 and below.",
+    tier: 5, cost: 2400, prereqs: ["alchemy_basics"] },
 ];
 
 /** GDD Tier 6 — Void Science. The final research topics. Void
  * Metallurgy needs void-ore mined — the colony has to push into
  * Layer 6 before it can study it. */
 export const TIER_6_TOPICS: ResearchTopic[] = [
-  { id: "void_metallurgy", name: "Void Metallurgy", tier: 6, cost: 3500, prereqs: ["adamantite_smelting", "void_engineering"],
+  { id: "void_metallurgy", name: "Void Metallurgy", effect: "+10 damage against void shades and the Hollow King.",
+    tier: 6, cost: 3500, prereqs: ["adamantite_smelting", "void_engineering"],
     materials: [{ tile: 27, describe: "void-ore mined" }] }, // VoidOre
-  { id: "anchor_runes", name: "Anchor Runes", tier: 6, cost: 3500, prereqs: ["rune_inscription", "void_engineering"] },
-  { id: "the_kings_name", name: "The King's Name", tier: 6, cost: 5000, prereqs: ["void_metallurgy", "anchor_runes"] },
+  { id: "anchor_runes", name: "Anchor Runes", effect: "The Hollow King's nightmares come half as often.",
+    tier: 6, cost: 3500, prereqs: ["rune_inscription", "void_engineering"] },
+  { id: "the_kings_name", name: "The King's Name", effect: "Speaks the Hollow King's true name: he manifests and can be slain.",
+    tier: 6, cost: 5000, prereqs: ["void_metallurgy", "anchor_runes"] },
 ];
 
 export const ALL_TOPICS: ResearchTopic[] = [
@@ -227,18 +285,25 @@ export const TOPICS_BY_ID: Record<string, ResearchTopic> = (() => {
 
 export interface ResearchState {
   /** Topic id currently being studied, or null if no topic is active.
-   * The system auto-picks the next available topic; the player has no
-   * control here yet (an "assign topic" UI lands later). */
+   * Picked by `chooseNextTopic` (player's queued topic, else the
+   * cheapest available), or set directly by `switchTopic`. */
   current: string | null;
   /** Accumulated ticks of study toward `current`. Reset to 0 on
-   * completion or topic switch. */
+   * completion; banked into `progressById` on a player switch. */
   progress: number;
   /** Topic ids that have been fully researched. */
   completed: string[];
+  /** Player-chosen next topic ("Study next"). Consumed when it becomes
+   * `current`. Optional for back-compat with older saves. */
+  queued?: string | null;
+  /** Banked progress for topics the player switched away from before
+   * finishing. Restored when the topic becomes current again. Optional
+   * for back-compat with older saves. */
+  progressById?: Record<string, number>;
 }
 
 export function defaultResearch(): ResearchState {
-  return { current: null, progress: 0, completed: [] };
+  return { current: null, progress: 0, completed: [], queued: null, progressById: {} };
 }
 
 /** Context the research selector consults to decide what's
@@ -301,4 +366,72 @@ export function nextTopic(state: ResearchState, ctx?: ResearchAvailabilityContex
     }
   }
   return best;
+}
+
+/** True if `t` could be studied right now: not complete, all topic
+ * prereqs complete, and (when a context is given) material gates met. */
+export function isTopicAvailable(
+  state: ResearchState,
+  t: ResearchTopic,
+  ctx?: ResearchAvailabilityContext,
+): boolean {
+  if (state.completed.includes(t.id)) return false;
+  if (!t.prereqs.every((p) => state.completed.includes(p))) return false;
+  if (ctx && !hasMaterials(t, ctx)) return false;
+  return true;
+}
+
+/** The topic scholars should take up next: the player's queued topic
+ * if it is available (and not already current), otherwise the
+ * cheapest available topic per `nextTopic`. */
+export function chooseNextTopic(state: ResearchState, ctx?: ResearchAvailabilityContext): ResearchTopic | null {
+  const q = state.queued ? TOPICS_BY_ID[state.queued] : undefined;
+  if (q && q.id !== state.current && isTopicAvailable(state, q, ctx)) return q;
+  return nextTopic(state, ctx);
+}
+
+/** Make `id` the current topic, banking any progress on the topic
+ * being set aside and restoring any progress banked on `id`. Clears
+ * `queued` if it pointed at `id`. Caller is responsible for checking
+ * availability. */
+export function beginTopic(state: ResearchState, id: string): void {
+  if (state.current === id) return;
+  const bank = (state.progressById ??= {});
+  if (state.current && state.progress > 0) bank[state.current] = state.progress;
+  state.current = id;
+  state.progress = bank[id] ?? 0;
+  delete bank[id];
+  if (state.queued === id) state.queued = null;
+}
+
+/** Player action "Study next": queue an available topic to be picked
+ * when the current one finishes (or right away if scholars are idle).
+ * Passing the already-queued id again un-queues it. Returns true if
+ * the state changed. */
+export function queueTopic(state: ResearchState, id: string, ctx?: ResearchAvailabilityContext): boolean {
+  if (state.queued === id) {
+    state.queued = null;
+    return true;
+  }
+  const t = TOPICS_BY_ID[id];
+  if (!t || state.current === id || !isTopicAvailable(state, t, ctx)) return false;
+  state.queued = id;
+  return true;
+}
+
+/** Player action "Study now": switch the current topic to `id`
+ * immediately, banking the progress on the topic being set aside so
+ * nothing is lost. Returns true if the switch happened. */
+export function switchTopic(state: ResearchState, id: string, ctx?: ResearchAvailabilityContext): boolean {
+  const t = TOPICS_BY_ID[id];
+  if (!t || state.current === id || !isTopicAvailable(state, t, ctx)) return false;
+  beginTopic(state, id);
+  return true;
+}
+
+/** Fraction (0..1) of `t` already studied — live progress for the
+ * current topic, banked progress for a topic set aside. */
+export function topicProgressFraction(state: ResearchState, t: ResearchTopic): number {
+  const ticks = state.current === t.id ? state.progress : (state.progressById?.[t.id] ?? 0);
+  return Math.min(1, ticks / (t.cost * RESEARCH_COST_SCALE));
 }

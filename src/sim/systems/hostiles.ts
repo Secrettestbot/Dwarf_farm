@@ -100,6 +100,16 @@ const SIEGE_MIN_POPULATION = 10; // sieges start when the colony is worth raidin
  * goblins path well now, but they can't dig, so an unreachable
  * fortress stalled the siege state forever. */
 const SIEGE_WITHDRAW_TICKS = TICKS_PER_DAY * 6;
+/** Fortification Design (Tier 3): properly designed gates, murder
+ * holes and baffled entrances break a warband's will sooner — they
+ * withdraw after four days at the walls instead of six. */
+const FORTIFIED_SIEGE_WITHDRAW_TICKS = TICKS_PER_DAY * 4;
+
+export function siegeWithdrawTicks(sim: SimWorld): number {
+  return sim.research.completed.includes("fortification_design")
+    ? FORTIFIED_SIEGE_WITHDRAW_TICKS
+    : SIEGE_WITHDRAW_TICKS;
+}
 
 export function siegeSystem(sim: SimWorld): void {
   // Mid-siege check: if the warband is wiped, fire a victory event.
@@ -120,7 +130,7 @@ export function siegeSystem(sim: SimWorld): void {
       );
     } else if (
       sim.siegeStartedAtTick >= 0 &&
-      sim.tick - sim.siegeStartedAtTick >= SIEGE_WITHDRAW_TICKS
+      sim.tick - sim.siegeStartedAtTick >= siegeWithdrawTicks(sim)
     ) {
       // Withdrawal: the warband gives up. Outlasting a siege counts
       // as surviving it — the fortress held, whether by axe or wall.
@@ -136,7 +146,7 @@ export function siegeSystem(sim: SimWorld): void {
       sim.events.add(
         sim.tick,
         "milestone",
-        `The warband breaks camp and withdraws — six days at the gate bought them nothing. Count it the ${ordinal(sim.siegesSurvived)} siege the colony has survived.`,
+        `The warband breaks camp and withdraws — ${siegeWithdrawTicks(sim) === FORTIFIED_SIEGE_WITHDRAW_TICKS ? "four" : "six"} days at the gate bought them nothing. Count it the ${ordinal(sim.siegesSurvived)} siege the colony has survived.`,
       );
     }
   }
@@ -481,6 +491,16 @@ export function hostileMovementSystem(sim: SimWorld): void {
  * dropping to 0 HP dies on the spot. Dwarf deaths re-use killDwarf so the
  * memorial-tile + bereavement pipeline still works.
  */
+/** Void Metallurgy (Tier 6): blades folded with void-ore bite into
+ * the King's incorporeal servants — flat bonus damage against void
+ * shades and the Hollow King himself. */
+const VOID_METALLURGY_BONUS_DAMAGE = 10;
+
+export function voidMetallurgyBonus(sim: SimWorld, kind: HostileKind): number {
+  if (kind !== "void_shade" && kind !== "hollow_king") return 0;
+  return sim.research.completed.includes("void_metallurgy") ? VOID_METALLURGY_BONUS_DAMAGE : 0;
+}
+
 export function combatSystem(sim: SimWorld): void {
   const hEnts = sim.hostile.entities.slice(); // snapshot — combat may remove
   for (const h of hEnts) {
@@ -553,7 +573,8 @@ export function combatSystem(sim: SimWorld): void {
         (equipped ? 8 : 0) +
         (equipped ? weaponQuality * 2 : 0) + // Fine +2, Masterwork +8 (§6.3).
         (equipped && ambidextrous ? 4 : 0) + // Two-weapon flourish (GDD §6.5).
-        (inFury ? 30 : 0); // The Fury: huge bonus, hostiles fall fast.
+        (inFury ? 30 : 0) + // The Fury: huge bonus, hostiles fall fast.
+        voidMetallurgyBonus(sim, hostile.kind);
       hHealth.hp -= damage;
       // Every successful retaliation hit earns military XP — combat
       // experience is the only way the skill grows. Soldiers practising
