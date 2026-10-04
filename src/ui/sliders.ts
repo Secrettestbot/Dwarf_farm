@@ -1,6 +1,7 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { SLIDER_KEYS, SLIDER_LABELS, SliderState } from "../sim/sliders";
 import { attachPanelVisibility } from "./displaySettings";
+import { LABOR_CATEGORIES, LaborCategory, laborSnapshot } from "../sim/jobs/laborWeights";
 
 /**
  * Right-side panel of ten priority sliders (GDD §4.1). The user adjusts a
@@ -8,15 +9,16 @@ import { attachPanelVisibility } from "./displaySettings";
  * chooseTask on the next tick. No commit button — the colony is always
  * listening.
  *
- * Sliders for systems that don't exist yet (hauling, construction,
- * crafting, military, research, medicine) are visible but inert until
- * their underlying systems land in later sessions; they're labelled
- * accordingly so the player knows.
+ * Work sliders show a live head-count ("3 at work") so the player can
+ * see the labour split shift as they drag. See sim/jobs/laborWeights.ts
+ * for how values map to behaviour.
  */
 export class SliderPanel {
   private root: HTMLDivElement;
   private valueLabels: Map<keyof SliderState, HTMLElement> = new Map();
   private inputs: Map<keyof SliderState, HTMLInputElement> = new Map();
+  private countLabels: Map<LaborCategory, HTMLElement> = new Map();
+  private lastCountTick = -1;
   private unsubscribeVisibility: () => void = () => {};
 
   constructor(host: HTMLElement, private sim: SimWorld) {
@@ -42,6 +44,13 @@ export class SliderPanel {
       right.style.color = "#e0c080";
       right.textContent = formatPercent(sim.sliders[key]);
       labelRow.appendChild(left);
+      if ((LABOR_CATEGORIES as ReadonlyArray<string>).includes(key)) {
+        const count = document.createElement("span");
+        count.style.cssText = "color:#777;margin-left:auto;margin-right:8px;";
+        count.title = "Dwarves currently doing this work";
+        labelRow.appendChild(count);
+        this.countLabels.set(key as LaborCategory, count);
+      }
       labelRow.appendChild(right);
       row.appendChild(labelRow);
 
@@ -85,6 +94,18 @@ export class SliderPanel {
       const v = sim.sliders[key];
       if (input) input.value = String(Math.round(v * 100));
       if (label) label.textContent = formatPercent(v);
+    }
+  }
+
+  /** Refresh the per-category head-counts. Cheap: the snapshot is
+   * cached per tick and we only repaint when the tick advances. */
+  update(): void {
+    if (this.sim.tick === this.lastCountTick) return;
+    this.lastCountTick = this.sim.tick;
+    const { counts } = laborSnapshot(this.sim);
+    for (const [cat, el] of this.countLabels) {
+      const n = counts[cat];
+      el.textContent = this.sim.sliders[cat] <= 0.05 ? "off" : `${n} at work`;
     }
   }
 

@@ -356,7 +356,6 @@ function runGame(active: ActiveFortress, camera: Camera) {
   const inspector = new DwarfInspector(uiHost);
   populationPanel = new PopulationPanel(uiHost, inspector, camera);
   const sliders = new SliderPanel(uiHost, sim);
-  void sliders;
   const emergency = new EmergencyPanel(uiHost, sim);
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
@@ -536,6 +535,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
     eventPanel.update(sim.events.events);
     inspector.update(sim);
     emergency.update();
+    sliders.update();
     notifications.refresh(sim, now);
     requestAnimationFrame(frame);
   }

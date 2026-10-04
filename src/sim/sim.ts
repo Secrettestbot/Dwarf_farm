@@ -1,5 +1,6 @@
 import { SimWorld } from "./world/simWorld";
 import { chooseTask, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO, TRAIN_SKILL_CAP } from "./jobs/chooseTask";
+import { noteAssigned } from "./jobs/laborWeights";
 import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
@@ -1878,6 +1879,7 @@ function jobAssignmentSystem(sim: SimWorld): void {
     const pathing: Pathing = { path, pathIndex: 0, goalX: proposal.targetX, goalY: proposal.targetY };
     sim.job.set(e, proposal);
     sim.pathing.set(e, pathing);
+    noteAssigned(sim, proposal.kind);
     if (proposal.kind === "mine") {
       sim.claimMineTarget(proposal.targetX, proposal.targetY);
     }

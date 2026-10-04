@@ -11,6 +11,13 @@ import { TileType } from "../world/tiles";
 import { BlueprintKind, FURNITURE_REQUIREMENTS, isRoomNeglected, maxDecorationsFor } from "../planner/blueprint";
 import { isShelterMode } from "../emergency";
 import { recipeFor } from "../planner/recipes";
+import {
+  categoryOpen,
+  haulerCapScale,
+  LaborCategory,
+  promotedCategories,
+  SLIDER_OFF,
+} from "./laborWeights";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
@@ -193,9 +200,9 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     Hospital cot (their own findSleepTarget routed them there); and
   //     no other medic is already on the way. Walks adjacent to the
   //     patient and stays until the disease clears.
-  if (age >= MIN_WORK_AGE) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "medicine")) {
     const selfDw = sim.dwarf.get(e);
-    if (selfDw && (selfDw.skills.medicine ?? 1) >= MEDIC_MIN_SKILL) {
+    if (selfDw && (selfDw.skills.medicine ?? 1) >= medicMinSkill(sim)) {
       const patient = findPatientForTreatment(sim, e, pos.x, pos.y);
       if (patient !== -1) {
         const ppos = sim.position.get(patient)!;
@@ -249,6 +256,17 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 4.9 Slider emphasis — a share of workers proportional to how far
+  //     a work slider sits above neutral checks that category before
+  //     the standard order (see laborWeights.ts). At default settings
+  //     nobody is promoted and the cascade below is unchanged.
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e)) {
+    for (const cat of promotedCategories(sim, e)) {
+      const proposal = trySpecialtyBranch(sim, e, pos, CATEGORY_JOB[cat]);
+      if (proposal) return proposal;
+    }
+  }
+
   // 5. Tend a farm cell that's getting close to fallow. Capped at
   //    one concurrent tender per farm via findTendTarget — without
   //    that cap every farm with overdue cells (most of them, most
@@ -257,7 +275,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //    prevents the tend → harvest → re-tend loop when a dwarf
   //    finishes a tend holding the harvested food: they fall
   //    through to step 6.5's delivery branch instead.
-  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && sim.sliders.farming > 0.05) {
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && categoryOpen(sim, "farming")) {
     const tendTarget = findTendTarget(sim, pos.x, pos.y);
     if (tendTarget) {
       return { kind: "tend" as JobKind, targetX: tendTarget.x, targetY: tendTarget.y, progress: 0 };
@@ -267,7 +285,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // 6. Maintain a neglected room. !carrying gate for the same
   //    reason as tend — a dwarf holding something needs to drop it
   //    in step 6.5 before starting upkeep work.
-  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && sim.sliders.construction > 0.05) {
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && categoryOpen(sim, "construction")) {
     const maintainTarget = findMaintainTarget(sim, pos.x, pos.y);
     if (maintainTarget) {
       return { kind: "maintain" as JobKind, targetX: maintainTarget.x, targetY: maintainTarget.y, progress: 0 };
@@ -282,7 +300,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     them here automatically. Carrying-with-no-destination drops
   //     in place and falls THROUGH past the else-pickup branch so
   //     the dwarf doesn't immediately re-grab what they just dropped.
-  if (age >= MIN_WORK_AGE && sim.sliders.hauling > 0.05) {
+  if (age >= MIN_WORK_AGE && sim.sliders.hauling > SLIDER_OFF) {
     const carrying = sim.carrying.get(e);
     if (carrying) {
       const workshop = findWorkshopWantingInput(sim, carrying.kind, pos.x, pos.y);
@@ -329,8 +347,8 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       // haul jobs, leaving nobody at workshops, mining faces, or
       // research desks and making the colony read as a single big
       // haul column.
-      const haulerCap = haulerCapForColony(sim);
-      if (countActiveHaulers(sim) < haulerCap) {
+      const haulerCap = Math.round(haulerCapForColony(sim) * haulerCapScale(sim.sliders));
+      if (categoryOpen(sim, "hauling") && countActiveHaulers(sim) < haulerCap) {
         const haul = findHaulTarget(sim, e, pos.x, pos.y);
         if (haul) {
           return { kind: "haul" as JobKind, targetX: haul.x, targetY: haul.y, progress: 0 };
@@ -342,7 +360,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // 6.7 Craft at a workshop. Gated by the Crafting slider. Skips
   //     workshops whose recipe input isn't in the stockpile so a smelter
   //     with no ore doesn't tie up a dwarf for nothing.
-  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "crafting")) {
     const craftTarget = findCraftTarget(sim, pos.x, pos.y);
     if (craftTarget) {
       return { kind: "craft" as JobKind, targetX: craftTarget.x, targetY: craftTarget.y, progress: 0 };
@@ -354,7 +372,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     that isn't already maxed on decorations. Sinks the surplus
   //     mason / jeweller output into permanent room-quality bumps
   //     and chronicle-worthy art. Same Crafting slider gate.
-  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "crafting")) {
     const engraveTarget = findEngraveTarget(sim, pos.x, pos.y);
     if (engraveTarget) {
       return { kind: "engrave" as JobKind, targetX: engraveTarget.x, targetY: engraveTarget.y, progress: 0 };
@@ -366,7 +384,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //      the only way to grow the military skill in peacetime. Drills
   //      teach up to Expert (13); the tiers beyond come from real
   //      combat. One trainee per rack.
-  if (age >= MIN_WORK_AGE && sim.squad.has(e) && sim.sliders.military > 0.05) {
+  if (age >= MIN_WORK_AGE && sim.squad.has(e) && categoryOpen(sim, "military")) {
     const dw = sim.dwarf.get(e);
     if (dw && (dw.skills.military ?? 1) < TRAIN_SKILL_CAP) {
       const rack = findTrainingRack(sim, pos.x, pos.y);
@@ -390,7 +408,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 6.8 Research at a Library desk. Gated by the Research slider, and
   //     only fires when there's an active topic to study.
-  if (age >= MIN_WORK_AGE && sim.sliders.research > 0.05 && sim.research.current) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "research") && sim.research.current) {
     const desk = findResearchDesk(sim, pos.x, pos.y);
     if (desk) {
       return { kind: "research" as JobKind, targetX: desk.x, targetY: desk.y, progress: 0 };
@@ -399,7 +417,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 7. Mine inside an active blueprint. Gated by the Excavation slider —
   //    set to zero, the colony stops digging entirely.
-  if (age >= MIN_WORK_AGE && sim.sliders.excavation > 0.05) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "excavation")) {
     const mineTarget = findMineTarget(sim, pos.x, pos.y);
     if (mineTarget) {
       return { kind: "mine" as JobKind, targetX: mineTarget.x, targetY: mineTarget.y, progress: 0 };
@@ -522,44 +540,52 @@ function trySpecialtyBranch(
 ): JobAssignment | null {
   switch (kind) {
     case "mine": {
-      if (sim.sliders.excavation <= 0.05) return null;
+      if (!categoryOpen(sim, "excavation")) return null;
       const t = findMineTarget(sim, pos.x, pos.y);
       return t ? { kind: "mine" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "haul": {
-      if (sim.sliders.hauling <= 0.05) return null;
+      if (!categoryOpen(sim, "hauling")) return null;
       const t = findHaulTarget(sim, e, pos.x, pos.y);
       return t ? { kind: "haul" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "tend": {
-      if (sim.sliders.farming <= 0.05) return null;
+      if (!categoryOpen(sim, "farming")) return null;
       const t = findTendTarget(sim, pos.x, pos.y);
       return t ? { kind: "tend" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "craft": {
-      if (sim.sliders.crafting <= 0.05) return null;
+      if (!categoryOpen(sim, "crafting")) return null;
       const t = findCraftTarget(sim, pos.x, pos.y);
       return t ? { kind: "craft" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "research": {
-      if (sim.sliders.research <= 0.05 || !sim.research.current) return null;
+      if (!categoryOpen(sim, "research") || !sim.research.current) return null;
       const t = findResearchDesk(sim, pos.x, pos.y);
       return t ? { kind: "research" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "treat": {
+      if (!categoryOpen(sim, "medicine")) return null;
       const dw = sim.dwarf.get(e);
-      if (!dw || (dw.skills.medicine ?? 1) < MEDIC_MIN_SKILL) return null;
+      if (!dw || (dw.skills.medicine ?? 1) < medicMinSkill(sim)) return null;
       const patient = findPatientForTreatment(sim, e, pos.x, pos.y);
       if (patient === -1) return null;
       const ppos = sim.position.get(patient)!;
       return { kind: "treat" as JobKind, targetX: ppos.x, targetY: ppos.y, progress: 0, partnerId: patient };
+    }
+    case "train": {
+      if (!sim.squad.has(e) || !categoryOpen(sim, "military")) return null;
+      const dw = sim.dwarf.get(e);
+      if (!dw || (dw.skills.military ?? 1) >= TRAIN_SKILL_CAP) return null;
+      const t = findTrainingRack(sim, pos.x, pos.y);
+      return t ? { kind: "train" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "pump": {
       const t = findPumpTarget(sim, pos.x, pos.y);
       return t ? { kind: "pump" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "maintain": {
-      if (sim.sliders.construction <= 0.05) return null;
+      if (!categoryOpen(sim, "construction")) return null;
       const t = findMaintainTarget(sim, pos.x, pos.y);
       return t ? { kind: "maintain" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
@@ -580,6 +606,29 @@ const GRAVE_VISIT_COOLDOWN_TICKS = 60 * 24 * 6; // ~6 in-game days
  * grows past the founders. Below this, a dwarf stays out of the
  * hospital and the patient lies on the cot recovering passively. */
 const MEDIC_MIN_SKILL = 4;
+
+/** The Medicine slider widens (or narrows) who counts as a medic: at
+ * high emphasis even novices sit with the sick; at low emphasis only
+ * trained healers bother. */
+function medicMinSkill(sim: SimWorld): number {
+  const s = sim.sliders.medicine;
+  if (s >= 0.85) return 1;
+  if (s >= 0.65) return 2;
+  if (s < 0.3) return MEDIC_MIN_SKILL + 3;
+  return MEDIC_MIN_SKILL;
+}
+
+/** The job each labour category promotes when its slider is high. */
+const CATEGORY_JOB: Record<LaborCategory, JobKind> = {
+  excavation: "mine",
+  hauling: "haul",
+  construction: "maintain",
+  crafting: "craft",
+  farming: "tend",
+  military: "train",
+  research: "research",
+  medicine: "treat",
+};
 
 /** Find a sick dwarf lying on a Hospital cot who isn't already being
  * treated by another medic. Returns the patient's entity id, or -1 if
