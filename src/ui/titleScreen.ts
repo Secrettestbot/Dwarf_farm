@@ -4,6 +4,8 @@ import { GameMode, SAVE_SLOT_IDS, SaveSlotId, SlotSummary } from "../save/schema
 import { BUNNY_BUTTON_ROWS, paintSpriteAtScale, SpriteSet } from "../render/sprites";
 import { loadSpriteSet, saveSpriteSet } from "../render/spriteSetPref";
 import { formatGameDate } from "../sim/time";
+import { showConfirm, showDialog, showMessage } from "./dialog";
+import { pickRestorePoint } from "./fallScreen";
 
 export interface NewGameRequest {
   kind: "new";
@@ -81,7 +83,34 @@ async function chooseSlot(host: HTMLElement, byId: Record<string, SlotSummary>):
           root.remove();
           resolve({ kind: "new", slotId, seed: choice.seed, mode: choice.mode });
         } else if (action === "delete") {
-          await deleteSave(slotId);
+          if (!summary) return;
+          const isMemorial = summary.fallenAtTick !== undefined && summary.mode === "saga";
+          if (summary.mode === "saga" && !isMemorial) {
+            // Saga: abandoning ends the run — the slot becomes a memorial.
+            const ok = await showConfirm(
+              host,
+              `Abandon ${summary.fortressName}?`,
+              "This is a Saga. The run ends permanently and the slot becomes a memorial.",
+              "Abandon",
+              true,
+            );
+            if (!ok) return;
+            const save = await loadGame(slotId);
+            if (save) {
+              save.fallenAtTick = save.tick;
+              await saveGame(save);
+            }
+          } else {
+            const ok = await showConfirm(
+              host,
+              isMemorial ? `Clear the memorial to ${summary.fortressName}?` : `Abandon ${summary.fortressName}?`,
+              "The slot and its chronicle are deleted permanently. This cannot be undone.",
+              isMemorial ? "Clear" : "Abandon",
+              true,
+            );
+            if (!ok) return;
+            await deleteSave(slotId);
+          }
           // Refresh.
           const summaries = await listSlotSummaries();
           const map: Record<string, SlotSummary> = {};
@@ -95,7 +124,7 @@ async function chooseSlot(host: HTMLElement, byId: Record<string, SlotSummary>):
           const imported = await pickSaveFile();
           if (imported === null) return;
           if (typeof imported === "string") {
-            alert(imported); // readable error from the parser
+            await showMessage(host, "Couldn't import that file", imported);
             return;
           }
           imported.slotId = slotId;
@@ -105,13 +134,21 @@ async function chooseSlot(host: HTMLElement, byId: Record<string, SlotSummary>):
           for (const s of summaries) map[s.slotId] = s;
           const next = await chooseSlot(host, map);
           resolve(next);
+        } else if (action === "restore") {
+          if (await pickRestorePoint(host, slotId)) {
+            root.remove();
+            resolve({ kind: "continue", slotId });
+          }
+        } else if (action === "chronicle") {
+          const save = await loadGame(slotId);
+          if (save) await showChronicle(host, save.fortressName, save.events ?? []);
         }
       }));
     }
   });
 }
 
-type SlotAction = "continue" | "new" | "delete" | "export" | "import";
+type SlotAction = "continue" | "new" | "delete" | "export" | "import" | "restore" | "chronicle";
 
 function buildSlotRow(
   slotId: SaveSlotId,
@@ -143,44 +180,78 @@ function buildSlotRow(
   }
 
   const elapsed = Date.now() - summary.realTimestampMs;
+  const fallen = summary.fallenAtTick !== undefined;
+  const memorial = fallen && summary.mode === "saga";
   const modeBadge =
     summary.mode === "saga"
       ? `<span style="color:#ff8a5c;font-size:10px;letter-spacing:2px;">SAGA</span>`
       : `<span style="color:#789;font-size:10px;letter-spacing:2px;">LEGACY</span>`;
+  const statusBadge = memorial
+    ? ` <span style="color:#a99;font-size:10px;letter-spacing:2px;">✝ MEMORIAL</span>`
+    : fallen
+      ? ` <span style="color:#e07050;font-size:10px;letter-spacing:2px;">FALLEN</span>`
+      : "";
+  const detail = fallen
+    ? `Fell in ${formatGameDate(summary.fallenAtTick!)}`
+    : `${summary.population} ${summary.population === 1 ? "dwarf" : "dwarves"} · ${formatGameDate(summary.tick)} · last seen ${formatElapsed(elapsed)} ago`;
 
   wrap.innerHTML = `
     <div style="flex:1;">
-      <div style="font-size:14px;color:#e0c080;">${escapeHtml(summary.fortressName)} ${modeBadge}</div>
-      <div style="font-size:11px;color:#888;margin-top:2px;">${summary.population} ${summary.population === 1 ? "dwarf" : "dwarves"} · ${formatGameDate(summary.tick)} · last seen ${formatElapsed(elapsed)} ago</div>
+      <div style="font-size:14px;color:${memorial ? "#a99" : "#e0c080"};">${escapeHtml(summary.fortressName)} ${modeBadge}${statusBadge}</div>
+      <div style="font-size:11px;color:#888;margin-top:2px;">${detail}</div>
     </div>
   `;
-  const cont = document.createElement("button");
-  cont.className = "btn";
-  cont.textContent = "Continue";
-  cont.style.minWidth = "100px";
-  cont.addEventListener("click", () => onAction("continue"));
-  wrap.appendChild(cont);
+  const addBtn = (label: string, action: SlotAction, title: string, primary = false) => {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = label;
+    b.title = title;
+    if (primary) {
+      b.style.minWidth = "100px";
+    } else {
+      b.style.opacity = "0.6";
+      b.style.fontSize = "11px";
+    }
+    b.addEventListener("click", () => onAction(action));
+    wrap.appendChild(b);
+  };
 
-  const exp = document.createElement("button");
-  exp.className = "btn";
-  exp.textContent = "Export";
-  exp.title = "Download this fortress as a save file (backup / sharing)";
-  exp.style.opacity = "0.6";
-  exp.style.fontSize = "11px";
-  exp.addEventListener("click", () => onAction("export"));
-  wrap.appendChild(exp);
-
-  const del = document.createElement("button");
-  del.className = "btn";
-  del.textContent = "Abandon";
-  del.style.opacity = "0.6";
-  del.style.fontSize = "11px";
-  del.addEventListener("click", () => {
-    if (confirm(`Permanently abandon ${summary.fortressName}? This cannot be undone.`)) onAction("delete");
-  });
-  wrap.appendChild(del);
+  if (memorial) {
+    addBtn("Read chronicle", "chronicle", "Read the fallen fortress's chronicle", true);
+    addBtn("Export", "export", "Download this fortress as a save file (backup / sharing)");
+    addBtn("Clear", "delete", "Delete this memorial");
+    return wrap;
+  }
+  if (!fallen) addBtn("Continue", "continue", "Return to this fortress", true);
+  if (summary.mode === "legacy") {
+    addBtn(fallen ? "Restore a season…" : "Restore…", "restore", "Rewind to a seasonal restore point", fallen);
+  }
+  addBtn("Export", "export", "Download this fortress as a save file (backup / sharing)");
+  addBtn("Abandon", "delete", summary.mode === "saga" ? "End this Saga — the slot becomes a memorial" : "Delete this fortress");
 
   return wrap;
+}
+
+/** Read-only view of a fallen fortress's chronicle. */
+async function showChronicle(
+  host: HTMLElement,
+  name: string,
+  events: ReadonlyArray<{ tick: number; text: string }>,
+): Promise<void> {
+  const body = document.createElement("div");
+  body.style.cssText =
+    "font-size:11px;line-height:1.5;color:#9a8a6a;max-height:55vh;overflow:auto;border-left:2px solid #4a4030;padding-left:8px;margin-bottom:12px;";
+  body.innerHTML = events.length === 0
+    ? "<div>The chronicle is empty.</div>"
+    : events
+      .map((e) => `<div><span style="color:#666;">${formatGameDate(e.tick)}</span> — ${escapeHtml(e.text)}</div>`)
+      .join("");
+  await showDialog(host, {
+    title: `The chronicle of ${name}`,
+    body,
+    buttons: [{ label: "Close", value: true, tone: "primary" }],
+    dismissValue: true,
+  });
 }
 
 function labelForSlot(slotId: SaveSlotId): string {
@@ -240,7 +311,7 @@ async function chooseMode(host: HTMLElement): Promise<ModeChoice | null> {
       modeRow(
         "legacy",
         "Legacy Mode",
-        "Reloadable saves. Auto-saves every 30 in-game days. Death is recoverable. Recommended for most players — losing weeks of real-time progress to a single cave-in is punishing in a way that feels unfair rather than dramatic.",
+        "Reloadable saves. Keeps a restore point at the turn of each season (the last three), so even a fallen fortress can be rewound. Recommended for most players — losing weeks of real-time progress to a single cave-in is punishing in a way that feels unfair rather than dramatic.",
         true,
       ),
     );

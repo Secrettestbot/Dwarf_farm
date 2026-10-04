@@ -15,6 +15,8 @@ export interface SnapshotInput {
   slotId: string;
   fortressName: string;
   mode: GameMode;
+  /** See SaveV1.fallenAtTick. */
+  fallenAtTick?: number;
   cameraX: number;
   cameraY: number;
   zoomIndex: number;
@@ -161,6 +163,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     slotId: input.slotId,
     fortressName: input.fortressName,
     mode: input.mode,
+    ...(input.fallenAtTick !== undefined ? { fallenAtTick: input.fallenAtTick } : {}),
     seed: input.sim.seed,
     width: input.sim.grid.width,
     height: input.sim.grid.height,

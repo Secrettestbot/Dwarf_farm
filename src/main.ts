@@ -1,7 +1,7 @@
 import { generateWorld } from "./sim/world/worldgen";
 import { SimWorld } from "./sim/world/simWorld";
 import { tick } from "./sim/sim";
-import { Clock, SpeedLevel, TICKS_PER_SECOND_AT_1X } from "./sim/time";
+import { Clock, SpeedLevel, TICKS_PER_SEASON, TICKS_PER_SECOND_AT_1X } from "./sim/time";
 import { Camera } from "./render/camera";
 import { renderWorld } from "./render/renderer";
 import { Minimap } from "./render/minimap";
@@ -21,7 +21,7 @@ import {
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
-import { saveGame, loadGame } from "./save/db";
+import { saveGame, loadGame, saveCheckpoint } from "./save/db";
 import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
 import { WorkerToMain } from "./shared/protocol";
 import { Founder } from "./sim/dwarves/founders";
@@ -32,6 +32,8 @@ import { HistoryPanel } from "./ui/historyPanel";
 import { ResearchPanel } from "./ui/researchPanel";
 import { PopulationPanel } from "./ui/populationPanel";
 import { NotificationCenter } from "./ui/notificationCenter";
+import { showPrompt } from "./ui/dialog";
+import { showFallScreen } from "./ui/fallScreen";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
 // 200×500 world for speed; live play uses the full size.
@@ -44,6 +46,11 @@ const WORLD_HEIGHT = 2000;
 // at 6 ticks/real-second ≈ 1.5M ticks — well bounded and still
 // covers weekend gaps without forcing a hard truncation.
 const MAX_CATCHUP_TICKS = 3 * 24 * 3600 * TICKS_PER_SECOND_AT_1X;
+/** Real-time autosave cadence. Tick-based saving fired every few
+ * hundred milliseconds at 16× and hammered IndexedDB; a wall-clock
+ * interval keeps the cost flat at any speed. Tab-hide and unload
+ * still save immediately. */
+const AUTOSAVE_INTERVAL_MS = 30_000;
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d", { alpha: false })!;
@@ -72,6 +79,7 @@ interface ActiveFortress {
   slotId: SaveSlotId;
   fortressName: string;
   mode: GameMode;
+  fallenAtTick?: number;
 }
 
 boot().catch((err) => {
@@ -105,6 +113,9 @@ async function boot() {
     camera.setZoom(2);
     active = { sim, slotId: choice.slotId, fortressName: founderResult.fortressName, mode: choice.mode };
     await persist(active, camera);
+    // Legacy fortresses get a day-one restore point so a disastrous
+    // first season can always be rolled back.
+    if (active.mode === "legacy") await checkpoint(active, camera);
     // First-fortress tutorial — shown once across the player's
     // localStorage. The replay button on the HUD opens it again.
     if (!tutorialAlreadySeen()) {
@@ -132,7 +143,13 @@ async function boot() {
     camera.x = save.cameraX;
     camera.y = save.cameraY;
     camera.setZoom(save.zoomIndex);
-    active = { sim, slotId: save.slotId as SaveSlotId, fortressName: save.fortressName, mode: save.mode };
+    active = {
+      sim,
+      slotId: save.slotId as SaveSlotId,
+      fortressName: save.fortressName,
+      mode: save.mode,
+      fallenAtTick: save.fallenAtTick,
+    };
   }
 
   runGame(active, camera);
@@ -290,6 +307,9 @@ async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Pro
 
 function runGame(active: ActiveFortress, camera: Camera) {
   const { sim } = active;
+  // Dev-server only: expose live state for console debugging and
+  // browser smoke tests. Stripped from production builds.
+  if (import.meta.env.DEV) (window as unknown as { __dd: unknown }).__dd = { active, camera };
   const clock = new Clock();
   clock.tick = sim.tick;
   clock.setSpeed(1);
@@ -344,12 +364,15 @@ function runGame(active: ActiveFortress, camera: Camera) {
     onShowPopulation: () => {
       if (populationPanel) populationPanel.open(active.sim);
     },
-    onRenameFortress: () => {
-      const next = window.prompt("Rename the fortress:", active.fortressName);
+    onRenameFortress: async () => {
+      const next = await showPrompt(uiHost, "Rename the fortress", active.fortressName);
       if (next && next.trim()) {
         active.fortressName = next.trim().slice(0, 60);
         void persist(active, camera);
       }
+    },
+    onQuitToTitle: () => {
+      void quitToTitle();
     },
   });
   const eventPanel = new EventLogPanel(uiHost);
@@ -443,14 +466,53 @@ function runGame(active: ActiveFortress, camera: Camera) {
   });
 
   // ---- Auto-save lifecycle ----
-  let autoSaveAccum = 0;
+  let lastAutoSaveMs = performance.now();
+  // Legacy restore points land at each season boundary.
+  let lastCheckpointSeason = Math.floor(sim.tick / TICKS_PER_SEASON);
+  let fallHandled = active.fallenAtTick !== undefined;
+  let quitting = false;
+  async function quitToTitle(): Promise<void> {
+    if (quitting) return;
+    quitting = true;
+    clock.setSpeed(0);
+    await persist(active, camera);
+    // persist() may have queued a trailing write; wait for it too.
+    while (saveInFlight) await saveInFlight;
+    window.location.reload();
+  }
+  async function handleFall(): Promise<void> {
+    clock.setSpeed(0);
+    active.fallenAtTick = sim.tick;
+    // From here on the slot is only written explicitly.
+    quitting = true;
+    sim.events.add(sim.tick, "crisis", `${active.fortressName} has fallen. No dwarf remains to keep its fires.`);
+    await persist(active, camera);
+    while (saveInFlight) await saveInFlight;
+    const choice = await showFallScreen(uiHost, {
+      fortressName: active.fortressName,
+      mode: active.mode,
+      slotId: active.slotId,
+      fellAtTick: sim.tick,
+      graves: sim.graves.length,
+      artifacts: sim.artifacts.length,
+      books: sim.books.length,
+      lastWords: sim.events.events.slice(-6).map((e) => ({ tick: e.tick, category: e.category, text: e.text })),
+    });
+    // "restored" rewrote the slot; either way reload into the title
+    // screen (a restored slot continues from there).
+    void choice;
+    window.location.reload();
+  }
+  // While quitting / after a fall the slot has already been written
+  // (possibly replaced by a restore point) — an unload-time save would
+  // clobber it with the stale in-memory fortress.
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
+    if (document.visibilityState === "hidden" && !quitting) {
       void persist(active, camera);
     }
   });
   window.addEventListener("beforeunload", () => {
-    void persist(active, camera);
+    if (!quitting) void persist(active, camera);
   });
 
   // ---- Game loop ----
@@ -501,10 +563,18 @@ function runGame(active: ActiveFortress, camera: Camera) {
       }
     }
 
-    autoSaveAccum += ticks;
-    if (autoSaveAccum >= 60) {
-      autoSaveAccum = 0;
+    if (now - lastAutoSaveMs >= AUTOSAVE_INTERVAL_MS) {
+      lastAutoSaveMs = now;
       void persist(active, camera);
+    }
+    const season = Math.floor(sim.tick / TICKS_PER_SEASON);
+    if (season !== lastCheckpointSeason) {
+      lastCheckpointSeason = season;
+      if (active.mode === "legacy" && !fallHandled) void checkpoint(active, camera);
+    }
+    if (!fallHandled && sim.dwarf.size() === 0) {
+      fallHandled = true;
+      void handleFall();
     }
 
     // Play sounds for any chronicle entries added this frame, deduped
@@ -603,15 +673,7 @@ async function persist(active: ActiveFortress, camera: Camera): Promise<void> {
     saveQueued = { active, camera };
     return saveInFlight;
   }
-  const save = snapshot({
-    sim: active.sim,
-    slotId: active.slotId,
-    fortressName: active.fortressName,
-    mode: active.mode,
-    cameraX: camera.x,
-    cameraY: camera.y,
-    zoomIndex: camera.zoomIndex,
-  });
+  const save = snapshotActive(active, camera);
   saveInFlight = saveGame(save).finally(() => {
     saveInFlight = null;
     if (saveQueued) {
@@ -621,6 +683,29 @@ async function persist(active: ActiveFortress, camera: Camera): Promise<void> {
     }
   });
   return saveInFlight;
+}
+
+function snapshotActive(active: ActiveFortress, camera: Camera): SaveV1 {
+  return snapshot({
+    sim: active.sim,
+    slotId: active.slotId,
+    fortressName: active.fortressName,
+    mode: active.mode,
+    fallenAtTick: active.fallenAtTick,
+    cameraX: camera.x,
+    cameraY: camera.y,
+    zoomIndex: camera.zoomIndex,
+  });
+}
+
+/** Record a Legacy restore point. Failures are logged, not fatal —
+ * the live save is unaffected. */
+async function checkpoint(active: ActiveFortress, camera: Camera): Promise<void> {
+  try {
+    await saveCheckpoint(snapshotActive(active, camera));
+  } catch (err) {
+    console.error("checkpoint failed", err);
+  }
 }
 
 let flashTimer: ReturnType<typeof setTimeout> | null = null;

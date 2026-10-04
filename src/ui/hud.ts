@@ -38,7 +38,9 @@ export interface HudHandlers {
   onShowPopulation(): void;
   /** Player wants to rename the fortress; the host pops a prompt
    * and, on a non-empty answer, calls `setFortressName`. */
-  onRenameFortress(): void;
+  onRenameFortress(): Promise<void>;
+  /** Save and return to the title screen. */
+  onQuitToTitle(): void;
 }
 
 export class Hud {
@@ -70,8 +72,8 @@ export class Hud {
     `;
     this.nameLabel = top.querySelector("#hud-fortress-name") as HTMLDivElement;
     this.refreshFortressName(modeBadge);
-    this.nameLabel.addEventListener("click", () => {
-      handlers.onRenameFortress();
+    this.nameLabel.addEventListener("click", async () => {
+      await handlers.onRenameFortress();
       this.refreshFortressName(modeBadge);
     });
 
@@ -189,6 +191,13 @@ export class Hud {
     helpButton.title = "Show tutorial";
     helpButton.addEventListener("click", () => handlers.onShowTutorial());
     tools.appendChild(helpButton);
+
+    const quitButton = document.createElement("button");
+    quitButton.className = "btn";
+    quitButton.textContent = "Quit";
+    quitButton.title = "Save and return to the title screen";
+    quitButton.addEventListener("click", () => handlers.onQuitToTitle());
+    tools.appendChild(quitButton);
 
     // Display popover — per-panel checkboxes so the player can
     // hide just the slider rail, just the event log, etc. A "Hide

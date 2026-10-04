@@ -202,6 +202,9 @@ export interface SaveV1 {
   fortressName: string;
   /** Permadeath choice. Stored at fortress creation; never changes. */
   mode: GameMode;
+  /** Set when the fortress fell (population reached zero) or a Saga
+   * run was abandoned. A fallen Saga slot is a read-only memorial. */
+  fallenAtTick?: number;
   seed: number;
   width: number;
   height: number;
@@ -422,6 +425,7 @@ export interface SlotSummary {
   population: number;
   tick: number;
   realTimestampMs: number;
+  fallenAtTick?: number;
 }
 
 export const SAVE_SLOT_IDS = ["slot0", "slot1", "slot2", "slot3", "slot4"] as const;

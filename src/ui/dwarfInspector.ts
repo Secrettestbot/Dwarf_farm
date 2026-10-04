@@ -6,6 +6,7 @@
 // Updates in real-time while open so you can watch a dwarf's needs decay
 // or their progress on the current job tick.
 
+import { showPrompt } from "./dialog";
 import { SimWorld } from "../sim/world/simWorld";
 import { EntityId } from "../sim/ecs/world";
 import { TRAITS_BY_ID } from "../sim/dwarves/traits";
@@ -241,12 +242,18 @@ export class DwarfInspector {
     }
     const renameBtn = this.root.querySelector("#inspector-rename") as HTMLButtonElement | null;
     if (renameBtn) {
-      renameBtn.onclick = () => {
+      renameBtn.onclick = async () => {
         if (this.targetId === null) return;
-        const target = sim.dwarf.get(this.targetId);
-        if (!target) return;
-        const next = window.prompt("Rename this dwarf:", target.name);
+        const targetId = this.targetId;
+        const initial = sim.dwarf.get(targetId)?.name;
+        if (initial === undefined) return;
+        const next = await showPrompt(this.host, "Rename this dwarf", initial, 40);
         if (!next || !next.trim()) return;
+        // The dwarf may have died or the inspector moved on while the
+        // dialog was open — re-resolve against the same entity.
+        if (this.targetId !== targetId) return;
+        const target = sim.dwarf.get(targetId);
+        if (!target) return;
         const trimmed = next.trim().slice(0, 40);
         if (trimmed === target.name) return;
         target.name = trimmed;
