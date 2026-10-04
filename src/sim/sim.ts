@@ -1,6 +1,7 @@
 import { SimWorld } from "./world/simWorld";
 import { chooseTask, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO, TRAIN_SKILL_CAP } from "./jobs/chooseTask";
 import { noteAssigned } from "./jobs/laborWeights";
+import { Rng } from "./rng";
 import { TileType } from "./world/tiles";
 import { unpackCell } from "./pathing/astar";
 import { JobAssignment, Pathing, WHEELBARROW_ITEM_SIZE, WHEELBARROW_CAPACITY, WHEELBARROW_DEFAULT_SIZE } from "./ecs/components";
@@ -10,7 +11,8 @@ import { TICKS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR, TICKS_PER_SEASON, season
 import { inheritTraits, newbornSkills, rollChildName } from "./dwarves/birth";
 import { generateFounder } from "./dwarves/founders";
 import { SkillId } from "./dwarves/skills";
-import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS } from "./emergency";
+import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS, MIGRANT_CAMP_TICKS, isShelterMode } from "./emergency";
+import { chooseSafeZone, restoreSeal, sealPerimeter } from "./systems/emergency";
 import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE, KITCHEN_STEW_RECIPE, KITCHEN_FEAST_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, ENGRAVE_QUALITY_PER_BLOCK, ENGRAVE_QUALITY_PER_GEM, isMaintainable, maxDecorationsFor } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
@@ -610,31 +612,59 @@ function emergencySystem(sim: SimWorld): void {
     e.alarmCooldownUntil = sim.tick + ALARM_COOLDOWN_TICKS;
     sim.events.add(sim.tick, "crisis", "The alarm has been lifted. The fortress returns to its work.");
   }
-  // Door bar/unbar transitions: when we enter lockdown, every Door
-  // becomes a DoorBarred (non-walkable); when we leave, the reverse.
-  // doorsBarred tracks the last applied state so we only sweep the
-  // grid on transitions.
-  const wantBarred = e.mode === "lockdown";
-  if ((sim as { _doorsBarred?: boolean })._doorsBarred !== wantBarred) {
-    (sim as { _doorsBarred?: boolean })._doorsBarred = wantBarred;
-    sweepDoors(sim, wantBarred);
-  }
-}
 
-function sweepDoors(sim: SimWorld, barred: boolean): void {
-  const from = barred ? TileType.Door : TileType.DoorBarred;
-  const to = barred ? TileType.DoorBarred : TileType.Door;
-  const grid = sim.grid;
-  let changed = false;
-  for (let y = 0; y < grid.height; y++) {
-    for (let x = 0; x < grid.width; x++) {
-      if (grid.getTile(x, y) === from) {
-        grid.setTile(x, y, to);
-        changed = true;
-      }
+  // Shelter transitions: entering Alarm / Evacuate picks a Safe Zone
+  // and makes the affected dwarves drop what they're doing (GDD: "drop
+  // their current job, including eating, sleeping, and socialising").
+  const shelter = isShelterMode(e);
+  if (shelter && sim.lastEmergencyMode !== e.mode) {
+    const zone = chooseSafeZone(sim);
+    e.safeZoneId = zone ? zone.id : -1;
+    const where = zone ? `the ${zone.kind.replace(/_/g, " ")} at depth ${zone.originY - sim.surfaceY[zone.originX]}` : "the entrance hall";
+    sim.events.add(sim.tick, "crisis", `The Safe Zone is ${where}.`);
+    let sheltering = 0;
+    let rallying = 0;
+    for (const d of sim.dwarf.entities) {
+      const soldier = sim.squad.has(d);
+      if (soldier && e.mode === "alarm") rallying++;
+      else sheltering++;
+      const job = sim.job.get(d);
+      if (!job || job.kind === "engage" || job.kind === "flee" || job.kind === "shelter") continue;
+      if (soldier && e.mode === "alarm") continue;
+      dropJob(sim, d);
+    }
+    if (e.mode === "alarm" && rallying > 0) {
+      sim.events.add(sim.tick, "crisis", `${rallying} ${rallying === 1 ? "dwarf takes" : "dwarves take"} up arms; ${sheltering} shelter below.`);
     }
   }
-  if (changed) sim.regions.invalidate();
+  sim.lastEmergencyMode = e.mode;
+
+  // Lockdown seals the surface openings on entry and restores them on
+  // exit. doorsSealed is transient: after a load it is undefined, so the
+  // first tick re-syncs the grid with the saved mode.
+  const wantSealed = e.mode === "lockdown";
+  if (sim.doorsSealed !== wantSealed) {
+    sim.doorsSealed = wantSealed;
+    if (wantSealed) {
+      // Re-entering after a load: the saved grid already holds the seal.
+      if (!e.sealed || e.sealed.length === 0) e.sealed = sealPerimeter(sim);
+    } else {
+      restoreSeal(sim, e.sealed);
+      e.sealed = undefined;
+    }
+  }
+
+  // Migrants camped outside a Lockdown come in when it lifts, or give up.
+  const camp = e.migrantsCampUntil ?? 0;
+  if (camp > 0) {
+    if (e.mode !== "lockdown") {
+      e.migrantsCampUntil = 0;
+      admitMigrants(sim);
+    } else if (sim.tick >= camp) {
+      e.migrantsCampUntil = 0;
+      sim.events.add(sim.tick, "social", "The migrants camped outside the sealed gates have given up and moved on.");
+    }
+  }
 }
 
 // ---- Narrative milestones (GDD §10.2) ---------------------------------
@@ -1553,14 +1583,27 @@ export function migrationChance(pop: number): number {
 function migrationSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
   if (sim.tick % SEASON_TICKS !== 0) return;
-  // Lockdown blocks immigrants — the GDD's "any immigrant group currently
-  // travelling to the fortress cannot enter" rule.
-  if (sim.emergency.mode === "lockdown") return;
   const pop = sim.dwarf.size();
   const chance = migrationChance(pop);
   if (chance === 0) return;
+  // Lockdown: the party can't enter. They camp outside for up to three
+  // days and come in if the gates reopen (emergencySystem). The arrival
+  // roll uses a stateless per-season draw so a Lockdown doesn't shift
+  // the shared aiRng stream.
+  if (sim.emergency.mode === "lockdown") {
+    if (Rng.fromSeed((sim.seed ^ sim.tick) >>> 0).fork("migrant-camp").nextFloat() >= chance) return;
+    if (!sim.emergency.migrantsCampUntil) {
+      sim.emergency.migrantsCampUntil = sim.tick + MIGRANT_CAMP_TICKS;
+      sim.events.add(sim.tick, "social", "A migrant party arrives to find the gates sealed. They make camp outside.");
+    }
+    return;
+  }
   if (sim.aiRng.nextFloat() >= chance) return;
+  admitMigrants(sim);
+}
 
+/** Spawn one migrant group (1–4 adults) at the entrance. */
+function admitMigrants(sim: SimWorld): void {
   // 1–4 arrivals per season, weighted toward small groups.
   const r = sim.aiRng.nextFloat();
   const count = r < 0.45 ? 1 : r < 0.80 ? 2 : r < 0.95 ? 3 : 4;
@@ -3138,9 +3181,15 @@ function progressShelter(sim: SimWorld, e: EntityId, _job: JobAssignment, _pos: 
   if (sim.emergency.mode !== "alarm" && sim.emergency.mode !== "evacuate") {
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     dropJob(sim, e);
+    return;
   }
-  // While sheltering, the job sticks. The dwarf has already pathed to the
-  // spawn (or as close as they can reach); they stand idle there.
+  // Soldiers holding the entrance during an Alarm re-evaluate every few
+  // ticks so a hostile that shows up gets engaged rather than watched.
+  if (sim.squad.has(e) && sim.emergency.mode === "alarm" && sim.tick % 10 === 0) {
+    dropJob(sim, e);
+  }
+  // Otherwise the job sticks: the dwarf has pathed to their Safe Zone
+  // spot (or as close as they can reach) and waits there.
 }
 
 function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {

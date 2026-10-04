@@ -10,6 +10,7 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
 import { BlueprintKind, FURNITURE_REQUIREMENTS, isRoomNeglected, maxDecorationsFor } from "../planner/blueprint";
 import { isShelterMode } from "../emergency";
+import { shelterSpotFor } from "../systems/emergency";
 import { recipeFor } from "../planner/recipes";
 import {
   categoryOpen,
@@ -59,19 +60,20 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // through if no target is found, so a dwarf never gets stuck idle when a
   // lower-priority alternative is reachable.
 
-  // 0. Emergency shelter override — Alarm and Evacuate both pull every
-  //    civilian to the Safe Zone (currently the spawn tile). Even hunger
-  //    and thirst defer until the panic subsides; that matches the GDD's
+  // 0. Emergency shelter override — Alarm sends civilians, and
+  //    Evacuate sends everyone, to the Safe Zone (the deepest finished
+  //    room, chosen by emergencySystem; see systems/emergency.ts). Even
+  //    hunger and thirst defer until the panic subsides, per the GDD's
   //    "drop their current job (including eating, sleeping, and
-  //    socialising)" rule. Lockdown does not pull dwarves — it just
-  //    blocks the perimeter and the migration system. Soldiers don't
-  //    shelter — they engage; their branch lands two priorities below
-  //    survival needs.
-  if (isShelterMode(sim.emergency) && !sim.squad.has(e)) {
+  //    socialising)" rule. Lockdown does not pull dwarves — it seals the
+  //    perimeter and holds migrants outside. During an Alarm, soldiers
+  //    engage (0.5 below) or rally at the entrance.
+  if (isShelterMode(sim.emergency) && (sim.emergency.mode === "evacuate" || !sim.squad.has(e))) {
+    const spot = shelterSpotFor(sim, e);
     return {
       kind: "shelter" as JobKind,
-      targetX: sim.spawn.x,
-      targetY: sim.spawn.y,
+      targetX: spot.x,
+      targetY: spot.y,
       progress: 0,
     };
   }
@@ -96,6 +98,10 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
           targetY: target.y,
           progress: 0,
         };
+      }
+      // Alarm with nothing to fight: hold the entrance.
+      if (sim.emergency.mode === "alarm") {
+        return { kind: "shelter" as JobKind, targetX: sim.spawn.x, targetY: sim.spawn.y, progress: 0 };
       }
     }
   }

@@ -365,6 +365,13 @@ export class SimWorld {
    * line. */
   books: Book[] = [];
 
+  /** Emergency mode seen on the previous tick, so emergencySystem can
+   * react to transitions the UI makes. Transient. */
+  lastEmergencyMode: import("../emergency").EmergencyMode = "none";
+  /** Whether the Lockdown perimeter seal is currently applied to the
+   * grid. Transient: undefined after a load so the first tick re-syncs. */
+  doorsSealed: boolean | undefined = undefined;
+
   /** Name of the colony's currently-recognised Mayor, or empty
    * string if none. Picked annually from the dwarf with the
    * highest leadership skill ≥ 5; their presence anywhere on the

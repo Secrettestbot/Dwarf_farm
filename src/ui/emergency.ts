@@ -1,7 +1,6 @@
 import { SimWorld } from "../sim/world/simWorld";
 import {
   EVACUATE_COOLDOWN_TICKS,
-  isShelterMode,
 } from "../sim/emergency";
 import { attachPanelVisibility } from "./displaySettings";
 import { formatGameDuration } from "../sim/time";
@@ -10,14 +9,8 @@ import { formatGameDuration } from "../sim/time";
  * Three large, instant emergency buttons (GDD §4.3) — Alarm, Evacuate,
  * Lockdown. Distinct from the priority sliders: sliders are gradual and
  * persistent, buttons are immediate and temporary. Each button is
- * disabled while its cooldown is active.
- *
- * Most of the GDD effects (military rally, doors barring, caravans
- * turning back) require systems that arrive in later sessions. The
- * minimum viable implementation here:
- * - Alarm pulls civilians to the spawn / Safe Zone for one in-game hour.
- * - Evacuate pulls everyone to the Safe Zone until cancelled.
- * - Lockdown blocks immigrant arrivals until cancelled.
+ * disabled while its cooldown is active. The sim reacts to mode
+ * changes in emergencySystem (see sim/emergency.ts for semantics).
  */
 export class EmergencyPanel {
   private root: HTMLDivElement;
@@ -41,8 +34,14 @@ export class EmergencyPanel {
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;";
     this.alarmBtn = makeBtn(row, "🜲 Alarm", "#e0a040", () => this.toggleAlarm());
+    this.alarmBtn.title =
+      "Civilians drop work and shelter in the Safe Zone (the deepest finished room); soldiers rally at the entrance. Lasts one in-game hour, then a 4-hour cooldown.";
     this.evacBtn = makeBtn(row, "↘ Evacuate", "#e07050", () => this.toggleEvacuate());
+    this.evacBtn.title =
+      "Everyone, soldiers included, withdraws to the Safe Zone until you cancel. 8-hour cooldown afterwards.";
     this.lockBtn = makeBtn(row, "▮ Lockdown", "#7090e0", () => this.toggleLockdown());
+    this.lockBtn.title =
+      "Seal every opening to the surface. Work inside continues; migrants camp outside and caravans turn back until you lift it.";
     root.appendChild(row);
 
     this.statusLabel = document.createElement("div");
@@ -89,7 +88,7 @@ export class EmergencyPanel {
     this.sim.events.add(
       this.sim.tick,
       "crisis",
-      "Evacuation ordered. The fortress withdraws to the Safe Zone.",
+      "Evacuation ordered. The whole fortress withdraws to the Safe Zone.",
     );
   }
 
@@ -106,7 +105,7 @@ export class EmergencyPanel {
     this.sim.events.add(
       this.sim.tick,
       "crisis",
-      "Lockdown imposed. All external access is sealed.",
+      "Lockdown imposed. Every opening to the surface is sealed.",
     );
   }
 
@@ -130,13 +129,14 @@ export class EmergencyPanel {
     this.lockBtn.disabled = e.mode !== "none" && e.mode !== "lockdown";
 
     let status = "";
-    if (e.mode === "alarm") status = "Alarm sounded — civilians sheltering.";
-    else if (e.mode === "evacuate") status = "Evacuation in progress.";
-    else if (e.mode === "lockdown") status = "Locked down. Migration suspended.";
+    if (e.mode === "alarm") status = "Alarm sounded — civilians to the Safe Zone, soldiers to the gate.";
+    else if (e.mode === "evacuate") status = "Evacuation in progress — everyone to the Safe Zone.";
+    else if (e.mode === "lockdown") status = (e.migrantsCampUntil ?? 0) > 0
+      ? "Locked down. Migrants are camped outside."
+      : "Locked down. The surface is sealed.";
     else if (tick < e.alarmCooldownUntil) status = `Alarm ready in ${formatGameDuration(e.alarmCooldownUntil - tick)}.`;
     else if (tick < e.evacuateCooldownUntil) status = `Evacuate ready in ${formatGameDuration(e.evacuateCooldownUntil - tick)}.`;
     else status = "All quiet.";
-    if (isShelterMode(e)) status += " Dwarves drop work to head to the Safe Zone.";
     this.statusLabel.textContent = status;
   }
 

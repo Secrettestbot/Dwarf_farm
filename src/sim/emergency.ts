@@ -3,13 +3,16 @@
 // instant, and timed — they're the only direct action available in an
 // otherwise hands-off game.
 //
-// Active wiring this session:
-// - Alarm: civilians shelter at the spawn, military rallies (when
-//   military squads land in Session 5, this gains its full meaning).
-// - Evacuate: every dwarf paths to the Safe Zone (currently the spawn
-//   tile). Until cancelled by the player.
-// - Lockdown: blocks immigrant arrivals. Caravan + door interactions
-//   land alongside trade in Session 6 and rooms-with-doors later.
+// - Alarm: civilians drop work and shelter in the Safe Zone; soldiers
+//   without a target rally at the entrance. Auto-cancels after an hour.
+// - Evacuate: every dwarf, soldiers included, withdraws to the Safe
+//   Zone until cancelled.
+// - Lockdown: the openings between the fortress and the surface are
+//   sealed (internal doors are untouched); migrants camp outside and
+//   caravans hold off until it lifts.
+//
+// The Safe Zone is chosen automatically when shelter begins: the
+// deepest finished room reachable from the entrance (systems/emergency.ts).
 
 import { TICKS_PER_HOUR } from "./time";
 
@@ -23,7 +26,20 @@ export interface EmergencyState {
    * Tracked per kind so an Alarm cooldown doesn't block Evacuate. */
   alarmCooldownUntil: number;
   evacuateCooldownUntil: number;
+  /** Safe Zone chosen for the current shelter episode — a finished
+   * room's blueprint id, or -1 for the entrance fallback. Optional for
+   * back-compat with older saves. */
+  safeZoneId?: number;
+  /** Tiles sealed by the current Lockdown as packed [x, y, tile]
+   * triples, so lifting it restores exactly what was there. */
+  sealed?: number[];
+  /** Tick until which a migrant party waits outside a Lockdown; 0 when
+   * none is camped. */
+  migrantsCampUntil?: number;
 }
+
+/** Migrants give up on a sealed fortress after three in-game days. */
+export const MIGRANT_CAMP_TICKS = TICKS_PER_HOUR * 24 * 3;
 
 export const ALARM_DURATION_TICKS = TICKS_PER_HOUR; // 1 in-game hour
 export const ALARM_COOLDOWN_TICKS = TICKS_PER_HOUR * 4;
