@@ -3,6 +3,7 @@ import { generateWorld } from "./world/worldgen";
 import { SimWorld } from "./world/simWorld";
 import { tick } from "./sim";
 import { TIER_5_TOPICS, TIER_6_TOPICS, TOPICS_BY_ID, nextTopic, defaultResearch } from "./research";
+import { TICKS_PER_DAY } from "./time";
 
 describe("endgame content", () => {
   it("the research tree includes Tier 5 and Tier 6 topics", () => {
@@ -71,5 +72,24 @@ describe("endgame content", () => {
       }
     }
     expect(shadeSpawned).toBe(true);
+  });
+});
+
+describe("Hollow King nightmares", () => {
+  it("cost the dreamer morale and unsettle the rest of the fortress", () => {
+    const w = generateWorld({ seed: 61, width: 200, height: 500 });
+    const sim = new SimWorld(61, w.grid, w.surfaceY, w.spawn);
+    const dreamer = sim.spawnDwarf({ name: "Seer", x: w.spawn.x, y: w.spawn.y, age: 30, traitIds: ["void_sensitive"] });
+    const other = sim.spawnDwarf({ name: "Sleeper", x: w.spawn.x + 1, y: w.spawn.y, age: 30 });
+    sim.hollowKingAware = true;
+    for (const id of [dreamer, other]) sim.needs.get(id)!.morale = 80;
+    // Jump to the tick before a nightmare boundary (every 3 days).
+    sim.tick = TICKS_PER_DAY * 3 - 1;
+    tick(sim);
+    expect(sim.hollowKingNightmares).toBe(1);
+    const dm = sim.needs.get(dreamer)!.morale;
+    const om = sim.needs.get(other)!.morale;
+    expect(dm).toBeLessThan(om);
+    expect(om).toBeLessThan(80);
   });
 });

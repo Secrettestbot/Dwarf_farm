@@ -13,6 +13,7 @@ import { generateFounder } from "./dwarves/founders";
 import { SkillId } from "./dwarves/skills";
 import { ALARM_DURATION_TICKS, ALARM_COOLDOWN_TICKS, MIGRANT_CAMP_TICKS, isShelterMode } from "./emergency";
 import { chooseSafeZone, restoreSeal, sealPerimeter } from "./systems/emergency";
+import { strandedSystem } from "./systems/stranded";
 import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE, KITCHEN_STEW_RECIPE, KITCHEN_FEAST_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, ENGRAVE_QUALITY_PER_BLOCK, ENGRAVE_QUALITY_PER_GEM, isMaintainable, maxDecorationsFor } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
@@ -130,6 +131,7 @@ export function tick(sim: SimWorld): void {
   populationMilestoneSystem(sim);
   deathSystem(sim);
   needsSystem(sim);
+  strandedSystem(sim);
   jobAssignmentSystem(sim);
   movementSystem(sim);
   workSystem(sim);

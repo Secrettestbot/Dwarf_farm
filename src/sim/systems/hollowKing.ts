@@ -149,7 +149,21 @@ function deliverNightmare(sim: SimWorld): void {
   ];
   const text = dreams[sim.aiRng.nextRange(0, dreams.length)];
   sim.events.add(sim.tick, "crisis", text);
+  // The dream costs the dreamer their peace, and the whole fortress
+  // sleeps a little worse for it — the King's pressure is felt before
+  // his shades ever arrive.
+  for (const id of ents) {
+    const n = sim.needs.get(id);
+    if (!n) continue;
+    const hit = id === dreamer ? NIGHTMARE_DREAMER_MORALE : NIGHTMARE_COLONY_MORALE;
+    n.morale = Math.max(0, n.morale - hit);
+  }
 }
+
+/** Morale lost by the dwarf who has a Hollow King nightmare. */
+const NIGHTMARE_DREAMER_MORALE = 12;
+/** Morale lost by everyone else on a nightmare night. */
+const NIGHTMARE_COLONY_MORALE = 2;
 
 function spawnVoidShadeSiege(sim: SimWorld): void {
   const reachable = sim.planner.exposeReachable(sim);
