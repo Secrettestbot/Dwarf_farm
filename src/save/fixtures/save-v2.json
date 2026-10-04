@@ -1,0 +1,96 @@
+{
+  "encoding": "dwarven-deep-save-v1",
+  "save": {
+    "version": 2,
+    "slotId": "slot1",
+    "fortressName": "Fixture Hold (v2)",
+    "mode": "legacy",
+    "seed": 2201,
+    "width": 200,
+    "height": 500,
+    "tick": 1800,
+    "realTimestampMs": 1767225600000,
+    "rngStates": {
+      "ai": [305419896, 2271560481],
+      "world": [19088743, 2309737967],
+      "planner": [4275878552, 1985229328]
+    },
+    "tileOverrides": "yAD0AQEAAABLFgAAAwAH",
+    "dwarves": [
+      {
+        "name": "Urist",
+        "x": 108,
+        "y": 28,
+        "traitIds": ["diligent"],
+        "skills": { "mining": 3, "masonry": 1 },
+        "profession": "Miner",
+        "bornAtTick": -1036800,
+        "partnerIndex": 1,
+        "lastJobTick": 1790,
+        "needs": { "sleep": 72, "social": 64, "decayAccumSleep": 4, "decayAccumSocial": 11 },
+        "job": { "kind": "mine", "targetX": 110, "targetY": 28, "progress": 2 },
+        "pathing": { "path": [1835117], "pathIndex": 0, "goalX": 109, "goalY": 28 }
+      },
+      {
+        "name": "Doren",
+        "x": 98,
+        "y": 29,
+        "traitIds": ["lazy"],
+        "skills": { "carpentry": 2 },
+        "profession": "Carpenter",
+        "bornAtTick": -933120,
+        "partnerIndex": 0,
+        "lastJobTick": 1500,
+        "needs": { "sleep": 40, "social": 80, "decayAccumSleep": 0, "decayAccumSocial": 0 }
+      },
+      {
+        "name": "Kadol",
+        "x": 103,
+        "y": 30,
+        "traitIds": [],
+        "skills": {},
+        "profession": "Worker",
+        "age": 30,
+        "partnerIndex": null,
+        "lastJobTick": 0
+      }
+    ],
+    "blueprints": [
+      {
+        "id": 1,
+        "kind": "corridor",
+        "originX": 107,
+        "originY": 28,
+        "width": 3,
+        "height": 1,
+        "cells": [107, 28, 108, 28, 109, 28],
+        "status": "complete",
+        "priority": 1,
+        "createdTick": 60
+      },
+      {
+        "id": 2,
+        "kind": "corridor",
+        "originX": 110,
+        "originY": 28,
+        "width": 6,
+        "height": 1,
+        "cells": [110, 28, 111, 28, 112, 28, 113, 28, 114, 28, 115, 28],
+        "status": "digging",
+        "priority": 1,
+        "createdTick": 1200,
+        "lastMaintainedTick": 1200
+      }
+    ],
+    "plannerNextId": 3,
+    "plannerCompleted": 1,
+    "plannerAccum": 15,
+    "cameraX": 100,
+    "cameraY": 28,
+    "zoomIndex": 1,
+    "events": [
+      { "tick": 0, "category": "founding", "text": "Three dwarves strike the first pick." }
+    ],
+    "stockpile": { "ore": 0, "stone": 3, "dirt": 6, "food": 60, "drink": 60 }
+  }
+}

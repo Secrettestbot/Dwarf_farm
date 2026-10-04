@@ -3,7 +3,7 @@ import { generateWorld } from "../sim/world/worldgen";
 import { SimWorld } from "../sim/world/simWorld";
 import { tick, grudgeCount } from "../sim/sim";
 import { snapshot, restore } from "./snapshot";
-import { SaveV1 } from "./schema";
+import { SaveData } from "./schema";
 
 /** Build a small colony and run it long enough that most systems have
  * fired: jobs, hauling, planner emissions, hostiles, events. Stocked
@@ -20,12 +20,12 @@ function buildAndRun(seed: number, ticks: number): SimWorld {
   return sim;
 }
 
-function takeSnapshot(sim: SimWorld): SaveV1 {
+function takeSnapshot(sim: SimWorld): SaveData {
   return snapshot({
     sim,
     slotId: "slot-test",
     fortressName: "Roundtrip Hold",
-    mode: "standard" as SaveV1["mode"],
+    mode: "standard" as SaveData["mode"],
     cameraX: 0,
     cameraY: 0,
     zoomIndex: 1,
@@ -33,7 +33,7 @@ function takeSnapshot(sim: SimWorld): SaveV1 {
 }
 
 /** Drop the wall-clock timestamp — the only field allowed to differ. */
-function strip(save: SaveV1): Omit<SaveV1, "realTimestampMs"> {
+function strip(save: SaveData): Omit<SaveData, "realTimestampMs"> {
   const { realTimestampMs, ...rest } = save;
   void realTimestampMs;
   return rest;

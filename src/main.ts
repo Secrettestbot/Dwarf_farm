@@ -22,7 +22,7 @@ import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
 import { saveGame, loadGame } from "./save/db";
-import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
+import { GameMode, SaveSlotId, SaveData } from "./save/schema";
 import { WorkerToMain } from "./shared/protocol";
 import { Founder } from "./sim/dwarves/founders";
 import { narrateFounding } from "./sim/events/narrator";
@@ -239,7 +239,7 @@ function placeFounders(sim: SimWorld, founders: Founder[]) {
   sim.revealAroundDwarves();
 }
 
-async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {
+async function catchUp(save: SaveData, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {
   const screen = showReturnScreen(uiHost, elapsedMs, ticksToRun);
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./workers/sim.worker.ts", import.meta.url), { type: "module" });
