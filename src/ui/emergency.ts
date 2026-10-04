@@ -4,6 +4,7 @@ import {
   isShelterMode,
 } from "../sim/emergency";
 import { attachPanelVisibility } from "./displaySettings";
+import { formatGameDuration } from "../sim/time";
 
 /**
  * Three large, instant emergency buttons (GDD §4.3) — Alarm, Evacuate,
@@ -132,8 +133,8 @@ export class EmergencyPanel {
     if (e.mode === "alarm") status = "Alarm sounded — civilians sheltering.";
     else if (e.mode === "evacuate") status = "Evacuation in progress.";
     else if (e.mode === "lockdown") status = "Locked down. Migration suspended.";
-    else if (tick < e.alarmCooldownUntil) status = `Alarm cooldown: ${e.alarmCooldownUntil - tick} ticks.`;
-    else if (tick < e.evacuateCooldownUntil) status = `Evacuate cooldown: ${e.evacuateCooldownUntil - tick} ticks.`;
+    else if (tick < e.alarmCooldownUntil) status = `Alarm ready in ${formatGameDuration(e.alarmCooldownUntil - tick)}.`;
+    else if (tick < e.evacuateCooldownUntil) status = `Evacuate ready in ${formatGameDuration(e.evacuateCooldownUntil - tick)}.`;
     else status = "All quiet.";
     if (isShelterMode(e)) status += " Dwarves drop work to head to the Safe Zone.";
     this.statusLabel.textContent = status;

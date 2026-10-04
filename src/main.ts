@@ -410,6 +410,26 @@ function runGame(active: ActiveFortress, camera: Camera) {
   }, { passive: false });
 
   document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+    // Keyboard camera: WASD / arrows pan a fraction of the viewport,
+    // +/- zoom around the viewport centre.
+    const panStep = Math.max(4, Math.round(Math.min(viewW, viewH) / camera.pxPerTile / 6));
+    const panKeys: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0], KeyA: [-1, 0],
+      ArrowRight: [1, 0], KeyD: [1, 0],
+      ArrowUp: [0, -1], KeyW: [0, -1],
+      ArrowDown: [0, 1], KeyS: [0, 1],
+    };
+    const dir = panKeys[e.code];
+    if (dir) {
+      e.preventDefault();
+      camera.pan(dir[0] * panStep, dir[1] * panStep);
+      return;
+    }
+    if (e.key === "+" || e.key === "=") { camera.zoomBy(+1, camera.x, camera.y); return; }
+    if (e.key === "-" || e.key === "_") { camera.zoomBy(-1, camera.x, camera.y); return; }
     if (e.code === "Space") {
       e.preventDefault();
       if (clock.speed === 0) {

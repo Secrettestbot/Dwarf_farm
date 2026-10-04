@@ -396,9 +396,9 @@ export class Hud {
     const min = tick % TICKS_PER_HOUR;
     const season = seasonOf(tick);
     const seasonLabel = season.charAt(0).toUpperCase() + season.slice(1);
-    this.clockLabel.textContent = `Day ${day} · ${pad(hour)}:${pad(min)} · ${seasonLabel}  (tick ${tick})`;
+    this.clockLabel.textContent = `Day ${day} · ${pad(hour)}:${pad(min)} · ${seasonLabel}`;
     const dwarfCount = sim.dwarf.size();
-    this.dwarfLabel.textContent = `${dwarfCount} dwarf${dwarfCount === 1 ? "" : "ves"}`;
+    this.dwarfLabel.textContent = `${dwarfCount} ${dwarfCount === 1 ? "dwarf" : "dwarves"}`;
     const active = sim.planner.activeCount();
     const built = sim.planner.completed;
     this.plannerLabel.textContent = `Plans: ${active} digging · ${built} done`;

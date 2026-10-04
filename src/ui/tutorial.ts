@@ -38,7 +38,7 @@ export function showTutorial(host: HTMLElement): Promise<void> {
       <div style="color:#888;font-size:10px;letter-spacing:3px;margin-bottom:6px;">⛏ DWARVEN DEEP</div>
       <div style="color:#e0c080;font-size:16px;margin-bottom:14px;">A note from the chronicler.</div>
       <p style="color:#cdb88a;margin:0 0 10px;">
-        The seven have entered the mountain. They will dig, build, eat,
+        Your founders have entered the mountain. They will dig, build, eat,
         sleep, fight, and grow old without your direction. You don't
         give orders. You watch.
       </p>
@@ -56,7 +56,7 @@ export function showTutorial(host: HTMLElement): Promise<void> {
         door bars itself shut).
       </p>
       <div style="color:#888;font-size:11px;border-top:1px solid #4a4030;padding-top:10px;line-height:1.7;">
-        <div><span style="color:#e0c080;">Drag</span> to pan · <span style="color:#e0c080;">scroll</span> to zoom</div>
+        <div><span style="color:#e0c080;">Drag</span> or <span style="color:#e0c080;">WASD / arrows</span> to pan · <span style="color:#e0c080;">scroll</span> or <span style="color:#e0c080;">+ / −</span> to zoom</div>
         <div><span style="color:#e0c080;">Space</span> pauses · <span style="color:#e0c080;">1 / 2 / 3</span> set speed</div>
         <div><span style="color:#e0c080;">Click a dwarf</span> to inspect them</div>
         <div><span style="color:#e0c080;">Close the tab</span> any time. The mountain remembers.</div>

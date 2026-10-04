@@ -3,6 +3,7 @@ import { exportSaveToJson, importSaveFromJson } from "../save/transfer";
 import { GameMode, SAVE_SLOT_IDS, SaveSlotId, SlotSummary } from "../save/schema";
 import { BUNNY_BUTTON_ROWS, paintSpriteAtScale, SpriteSet } from "../render/sprites";
 import { loadSpriteSet, saveSpriteSet } from "../render/spriteSetPref";
+import { formatGameDate } from "../sim/time";
 
 export interface NewGameRequest {
   kind: "new";
@@ -150,7 +151,7 @@ function buildSlotRow(
   wrap.innerHTML = `
     <div style="flex:1;">
       <div style="font-size:14px;color:#e0c080;">${escapeHtml(summary.fortressName)} ${modeBadge}</div>
-      <div style="font-size:11px;color:#888;margin-top:2px;">${summary.population} dwarves · tick ${summary.tick} · last seen ${formatElapsed(elapsed)} ago</div>
+      <div style="font-size:11px;color:#888;margin-top:2px;">${summary.population} ${summary.population === 1 ? "dwarf" : "dwarves"} · ${formatGameDate(summary.tick)} · last seen ${formatElapsed(elapsed)} ago</div>
     </div>
   `;
   const cont = document.createElement("button");

@@ -68,7 +68,7 @@ export class SliderPanel {
     const note = document.createElement("div");
     note.style.cssText = "font-size:9px;color:#666;line-height:1.4;margin-top:6px;";
     note.textContent =
-      "Sliders bias the colony's autonomous job selection. Some categories activate only when their underlying systems land in later sessions.";
+      "Sliders bias the colony's autonomous job selection. Higher values pull more dwarves toward that work; near zero switches it off.";
     root.appendChild(note);
 
     host.appendChild(root);

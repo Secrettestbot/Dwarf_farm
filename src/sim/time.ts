@@ -59,3 +59,21 @@ export class Clock {
     this.speed = s;
   }
 }
+
+/** Player-facing span of in-game time, e.g. "45m", "3h 20m", "2d 5h". */
+export function formatGameDuration(ticks: number): string {
+  const t = Math.max(0, Math.ceil(ticks));
+  const days = Math.floor(t / TICKS_PER_DAY);
+  const hours = Math.floor((t % TICKS_PER_DAY) / TICKS_PER_HOUR);
+  const mins = t % TICKS_PER_HOUR;
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  return `${mins}m`;
+}
+
+/** Player-facing calendar position, e.g. "Year 2, Day 14". */
+export function formatGameDate(tick: number): string {
+  const year = Math.floor(tick / TICKS_PER_YEAR) + 1;
+  const day = Math.floor((tick % TICKS_PER_YEAR) / TICKS_PER_DAY) + 1;
+  return `Year ${year}, Day ${day}`;
+}
