@@ -82,7 +82,7 @@ function defaultVisibility(): Record<PanelId, boolean> {
   };
 }
 
-let visibility: Record<PanelId, boolean> = readInitialState();
+const visibility: Record<PanelId, boolean> = readInitialState();
 
 function readInitialState(): Record<PanelId, boolean> {
   const base = defaultVisibility();

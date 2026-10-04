@@ -75,6 +75,7 @@ interface ActiveFortress {
 }
 
 boot().catch((err) => {
+  // eslint-disable-next-line no-console -- deliberate: fatal boot error, keep the stack
   console.error(err);
   uiHost.innerHTML = `<div style="position:fixed;inset:0;display:grid;place-items:center;color:#f88;font-family:monospace;">${
     err instanceof Error ? err.message : String(err)
@@ -92,7 +93,7 @@ async function boot() {
   const choice = await showTitleScreen(uiHost);
 
   let active: ActiveFortress;
-  let camera = new Camera();
+  const camera = new Camera();
 
   if (choice.kind === "new") {
     const founderResult = await showFoundersScreen(uiHost, choice.seed);
@@ -462,7 +463,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
         // the game. The sim's own paths handle entity-cap overflow
         // gracefully via -1 sentinels; this catches everything
         // else so the player can see the chronicle and save.
-        // eslint-disable-next-line no-console
+        // eslint-disable-next-line no-console -- deliberate: surface the stack in devtools
         console.error("tick failed", err);
         sim.events.add(
           sim.tick,
