@@ -107,6 +107,7 @@ const TILE_PIXELS: Partial<Record<TileType, string[]>> = {
   [TileType.Gold]: oreVeinSprite("D"),
   [TileType.Silver]: oreVeinSprite("B"),
   [TileType.Coal]: oreVeinSprite("1"),
+  [TileType.Rubble]: noisyFillWithSpecks(9, 3, 11),
 };
 
 /** Wooden barrel: vertical cylinder with three iron hoops. */
