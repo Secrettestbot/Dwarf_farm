@@ -1,11 +1,11 @@
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveData, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
 import { migrateSave } from "./migrations";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
-// Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
+// Serialize / deserialize a SimWorld to/from a SaveData. The save records only
 // what's needed to deterministically reconstruct the simulation: seed, RLE
 // delta vs a clean regen, RNG states, the dwarf list with traits/skills, and
 // the colony planner state.
@@ -15,7 +15,7 @@ export interface SnapshotInput {
   slotId: string;
   fortressName: string;
   mode: GameMode;
-  /** See SaveV1.fallenAtTick. */
+  /** See SaveData.fallenAtTick. */
   fallenAtTick?: number;
   cameraX: number;
   cameraY: number;
@@ -37,7 +37,7 @@ function baselineGridFor(seed: number, width: number, height: number): import(".
   return baselineCache.grid;
 }
 
-export function snapshot(input: SnapshotInput): SaveV1 {
+export function snapshot(input: SnapshotInput): SaveData {
   const baseline = baselineGridFor(input.sim.seed, input.sim.grid.width, input.sim.grid.height);
   const overrides = encodeOverrides(input.sim.grid, baseline);
 
@@ -366,7 +366,7 @@ function collectHostiles(sim: SimWorld): SavedHostile[] {
   return out;
 }
 
-export function restore(save: SaveV1): SimWorld {
+export function restore(save: SaveData): SimWorld {
   save = migrateSave(save);
   const w = generateWorld({ seed: save.seed, width: save.width, height: save.height });
   const decoded = decodeOverrides(save.tileOverrides);

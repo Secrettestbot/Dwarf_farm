@@ -23,7 +23,7 @@ import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
 import { saveGame, loadGame, saveCheckpoint } from "./save/db";
-import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
+import { GameMode, SaveSlotId, SaveData } from "./save/schema";
 import { WorkerToMain } from "./shared/protocol";
 import { placeFounders } from "./sim/dwarves/embark";
 import { narrateFounding } from "./sim/events/narrator";
@@ -88,6 +88,7 @@ interface ActiveFortress {
 }
 
 boot().catch((err) => {
+  // eslint-disable-next-line no-console -- deliberate: fatal boot error, keep the stack
   console.error(err);
   uiHost.innerHTML = `<div style="position:fixed;inset:0;display:grid;place-items:center;color:#f88;font-family:monospace;">${
     err instanceof Error ? err.message : String(err)
@@ -105,7 +106,7 @@ async function boot() {
   const choice = await showTitleScreen(uiHost);
 
   let active: ActiveFortress;
-  let camera = new Camera();
+  const camera = new Camera();
 
   if (choice.kind === "new") {
     const founderResult = await showFoundersScreen(uiHost, choice.seed);
@@ -160,7 +161,7 @@ async function boot() {
   runGame(active, camera);
 }
 
-async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {
+async function catchUp(save: SaveData, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {
   const screen = showReturnScreen(uiHost, elapsedMs, ticksToRun);
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./workers/sim.worker.ts", import.meta.url), { type: "module" });
@@ -527,7 +528,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
         // the game. The sim's own paths handle entity-cap overflow
         // gracefully via -1 sentinels; this catches everything
         // else so the player can see the chronicle and save.
-        // eslint-disable-next-line no-console
+        // eslint-disable-next-line no-console -- deliberate: surface the stack in devtools
         console.error("tick failed", err);
         sim.events.add(
           sim.tick,
@@ -683,7 +684,7 @@ async function persist(active: ActiveFortress, camera: Camera): Promise<void> {
   return saveInFlight;
 }
 
-function snapshotActive(active: ActiveFortress, camera: Camera): SaveV1 {
+function snapshotActive(active: ActiveFortress, camera: Camera): SaveData {
   return snapshot({
     sim: active.sim,
     slotId: active.slotId,
@@ -702,6 +703,7 @@ async function checkpoint(active: ActiveFortress, camera: Camera): Promise<void>
   try {
     await saveCheckpoint(snapshotActive(active, camera));
   } catch (err) {
+    // eslint-disable-next-line no-console -- deliberate: a failed restore point is non-fatal but worth a stack
     console.error("checkpoint failed", err);
   }
 }

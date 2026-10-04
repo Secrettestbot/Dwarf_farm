@@ -286,21 +286,7 @@ export function renderWorld(
   // room is built, paint the most recent artifact's name above the
   // throne tile so the colony's history is visible at a glance.
   if (sim.artifacts.length > 0 && pt >= 8) {
-    let throneX = -1;
-    let throneY = -1;
-    outer: for (const b of sim.planner.blueprints) {
-      if (b.kind !== "throne_room" || b.status !== "complete") continue;
-      for (let i = 0; i < b.cavity.length; i++) {
-        const c = b.cavity[i];
-        const x = c & 0xffff;
-        const y = (c >>> 16) & 0xffff;
-        if (grid.getTile(x, y) === TileType.Throne) {
-          throneX = x;
-          throneY = y;
-          break outer;
-        }
-      }
-    }
+    const { x: throneX, y: throneY } = findThroneTile(sim);
     if (throneX >= 0 && grid.isSeen(throneX, throneY)) {
       const tx = (throneX - camera.x) * pt + viewW / 2;
       const ty = (throneY - camera.y) * pt + viewH / 2;
@@ -411,6 +397,54 @@ export function renderWorld(
   });
   ctx.textAlign = "start";
   ctx.textBaseline = "alphabetic";
+}
+
+/** Cached throne-tile lookup for the artifact label. Scanning every
+ * complete throne room's cavity each frame is wasted work — the answer
+ * only changes when a blueprint completes or is added/removed (the
+ * planner's completed counter, blueprint array identity/length) or the
+ * throne tile itself is dug out (re-verified each frame with one
+ * getTile). A miss (-1) is cached under the same key. */
+interface ThroneCacheEntry {
+  blueprints: readonly unknown[];
+  count: number;
+  completed: number;
+  x: number;
+  y: number;
+}
+const throneCache = new WeakMap<SimWorld, ThroneCacheEntry>();
+
+function findThroneTile(sim: SimWorld): { x: number; y: number } {
+  const bps = sim.planner.blueprints;
+  const grid = sim.grid;
+  const hit = throneCache.get(sim);
+  if (
+    hit &&
+    hit.blueprints === bps &&
+    hit.count === bps.length &&
+    hit.completed === sim.planner.completed &&
+    (hit.x < 0 || grid.getTile(hit.x, hit.y) === TileType.Throne)
+  ) {
+    return hit;
+  }
+  let throneX = -1;
+  let throneY = -1;
+  outer: for (const b of bps) {
+    if (b.kind !== "throne_room" || b.status !== "complete") continue;
+    for (let i = 0; i < b.cavity.length; i++) {
+      const c = b.cavity[i];
+      const x = c & 0xffff;
+      const y = (c >>> 16) & 0xffff;
+      if (grid.getTile(x, y) === TileType.Throne) {
+        throneX = x;
+        throneY = y;
+        break outer;
+      }
+    }
+  }
+  const entry: ThroneCacheEntry = { blueprints: bps, count: bps.length, completed: sim.planner.completed, x: throneX, y: throneY };
+  throneCache.set(sim, entry);
+  return entry;
 }
 
 function formatKindLabel(kind: BlueprintKind): string {

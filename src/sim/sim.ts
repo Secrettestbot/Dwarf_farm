@@ -97,16 +97,25 @@ export function tick(sim: SimWorld): void {
   sim.tick++;
   // Order matters for determinism. Each system iterates entities via sparse-set
   // dense arrays so iteration order is deterministic.
-  // Built once per tick and passed to the planner — it consults the
-  // set to decide whether a room can be furnished from existing
-  // supply when its producer workshop isn't operational yet.
-  // Founder-kit drops at spawn land here on day one, so the first
-  // dining hall / bedroom / etc. emit immediately.
-  const availableFurniture = new Set<string>();
-  for (const ie of sim.item.entities) {
-    const it = sim.item.get(ie);
-    if (it) availableFurniture.add(it.kind);
-  }
+  // Item kinds on the floor, for the planner — it consults the set to
+  // decide whether a room can be furnished from existing supply when
+  // its producer workshop isn't operational yet. Founder-kit drops at
+  // spawn land here on day one, so the first dining hall / bedroom /
+  // etc. emit immediately. Built lazily (at most once per tick): the
+  // architect only evaluates once per in-game hour, and even then only
+  // asks when a room's producer is missing. The planner never touches
+  // items, so building it on first use sees the same state as building
+  // it here.
+  let availableFurniture: Set<string> | null = null;
+  const getAvailableFurniture = (): Set<string> => {
+    if (availableFurniture) return availableFurniture;
+    availableFurniture = new Set<string>();
+    for (const ie of sim.item.entities) {
+      const it = sim.item.get(ie);
+      if (it) availableFurniture.add(it.kind);
+    }
+    return availableFurniture;
+  };
   sim.planner.tick({
     grid: sim.grid,
     spawn: sim.spawn,
@@ -121,7 +130,7 @@ export function tick(sim: SimWorld): void {
     // this so a haul-saturated colony stops digging more rock until
     // the dwarves have caught up on hauling.
     looseItemCount: sim.item.size(),
-    availableFurniture,
+    availableFurniture: getAvailableFurniture,
   });
   yearRolloverSystem(sim);
   seasonRolloverSystem(sim);
@@ -747,20 +756,35 @@ const VISIBILITY_RADIUS = 5;
  * the rock this many tiles further into the fog. */
 const DEEP_CARTOGRAPHY_VISION_BONUS = 3;
 
+/** Per-world memo of the last (x, y, radius) each dwarf revealed,
+ * packed into one number. Reveal is monotonic (markSeen never clears)
+ * and depends only on (x, y, r), so a dwarf that hasn't moved and
+ * whose radius hasn't changed would re-mark exactly the tiles it
+ * already marked — skipping it is exact. Not saved: after a restore
+ * the memo starts empty and the first tick re-reveals (idempotent). */
+const lastRevealByWorld = new WeakMap<SimWorld, Map<EntityId, number>>();
+
 function visibilitySystem(sim: SimWorld): void {
   const grid = sim.grid;
   const dwarves = sim.dwarf.entities;
+  let lastReveal = lastRevealByWorld.get(sim);
+  if (!lastReveal) {
+    lastReveal = new Map();
+    lastRevealByWorld.set(sim, lastReveal);
+  }
   // Pre-compute per-owner pet vision bonuses (cave bats grant a
   // visionRadius bump to whoever owns them). One pass over the pet
   // store builds an owner→bonus map; the dwarf loop then folds it
-  // into each dwarf's reveal radius.
-  const ownerBonus = new Map<number, number>();
+  // into each dwarf's reveal radius. Allocated only when some tamed
+  // pet actually grants vision.
+  let ownerBonus: Map<number, number> | null = null;
   const petEnts = sim.pet.entities;
   for (let i = 0; i < petEnts.length; i++) {
     const pet = sim.pet.get(petEnts[i]);
     if (!pet || pet.tamedAtTick < 0 || pet.ownerId === -1) continue;
     const def = PET_DEFS[pet.kind];
     if (def.visionRadius === 0) continue;
+    ownerBonus ??= new Map();
     ownerBonus.set(pet.ownerId, (ownerBonus.get(pet.ownerId) ?? 0) + def.visionRadius);
   }
   const cartographyBonus = sim.research.completed.includes("deep_cartography") ? DEEP_CARTOGRAPHY_VISION_BONUS : 0;
@@ -771,7 +795,11 @@ function visibilitySystem(sim: SimWorld): void {
     // Eagle-Eyed dwarves see further into the fog (GDD §6.5).
     const dw = sim.dwarf.get(id);
     const traitR = dw ? effectsFor(dw.traitIds).visibilityRadius : VISIBILITY_RADIUS;
-    const r = traitR + (ownerBonus.get(id) ?? 0) + cartographyBonus;
+    const r = traitR + (ownerBonus?.get(id) ?? 0) + cartographyBonus;
+    // x, y < 65536 (codec limit) and r < 1024 — the packing is exact.
+    const key = (pos.y * 65536 + pos.x) * 1024 + r;
+    if (lastReveal.get(id) === key) continue;
+    lastReveal.set(id, key);
     const x0 = Math.max(0, pos.x - r);
     const y0 = Math.max(0, pos.y - r);
     const x1 = Math.min(grid.width - 1, pos.x + r);

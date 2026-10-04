@@ -1,4 +1,4 @@
-import { SaveV1, SlotSummary } from "./schema";
+import { SaveData, SlotSummary } from "./schema";
 
 const DB_NAME = "dwarven-deep";
 // v2 adds the "checkpoints" store (Legacy-mode restore points).
@@ -16,7 +16,7 @@ export interface CheckpointRecord {
   tick: number;
   population: number;
   createdAtMs: number;
-  save: SaveV1;
+  save: SaveData;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -49,7 +49,7 @@ export function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-export async function saveGame(save: SaveV1): Promise<void> {
+export async function saveGame(save: SaveData): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
@@ -60,12 +60,12 @@ export async function saveGame(save: SaveV1): Promise<void> {
   });
 }
 
-export async function loadGame(slotId: string): Promise<SaveV1 | null> {
+export async function loadGame(slotId: string): Promise<SaveData | null> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly");
     const req = tx.objectStore(STORE).get(slotId);
-    req.onsuccess = () => resolve((req.result as SaveV1) ?? null);
+    req.onsuccess = () => resolve((req.result as SaveData) ?? null);
     req.onerror = () => reject(req.error);
   });
 }
@@ -85,12 +85,12 @@ export async function deleteSave(slotId: string): Promise<void> {
   });
 }
 
-export async function listSaves(): Promise<SaveV1[]> {
+export async function listSaves(): Promise<SaveData[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly");
     const req = tx.objectStore(STORE).getAll();
-    req.onsuccess = () => resolve((req.result as SaveV1[]) ?? []);
+    req.onsuccess = () => resolve((req.result as SaveData[]) ?? []);
     req.onerror = () => reject(req.error);
   });
 }
@@ -111,7 +111,7 @@ export async function listSlotSummaries(): Promise<SlotSummary[]> {
 
 /** Store a restore point for the save's slot and prune the oldest
  * beyond MAX_CHECKPOINTS_PER_SLOT. */
-export async function saveCheckpoint(save: SaveV1): Promise<void> {
+export async function saveCheckpoint(save: SaveData): Promise<void> {
   const db = await openDb();
   const existing = await listCheckpoints(save.slotId);
   await new Promise<void>((resolve, reject) => {

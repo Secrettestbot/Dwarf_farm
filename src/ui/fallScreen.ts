@@ -5,7 +5,7 @@
 // back to one of their seasonal restore points.
 
 import { listCheckpoints, saveGame } from "../save/db";
-import { SavedLogEvent, SaveV1 } from "../save/schema";
+import { SavedLogEvent, SaveData } from "../save/schema";
 import { formatGameDate, TICKS_PER_DAY, TICKS_PER_YEAR } from "../sim/time";
 import { showDialog } from "./dialog";
 
@@ -95,8 +95,8 @@ export async function pickRestorePoint(host: HTMLElement, slotId: string): Promi
 /** A restore point is written back as the slot's live save. Reset the
  * wall-clock stamp so reopening it doesn't trigger a catch-up for the
  * whole time since the checkpoint was taken, and clear any fall. */
-export function prepareRestoredSave(save: SaveV1, nowMs = Date.now()): SaveV1 {
-  const out: SaveV1 = { ...save, realTimestampMs: nowMs };
+export function prepareRestoredSave(save: SaveData, nowMs = Date.now()): SaveData {
+  const out: SaveData = { ...save, realTimestampMs: nowMs };
   delete out.fallenAtTick;
   return out;
 }

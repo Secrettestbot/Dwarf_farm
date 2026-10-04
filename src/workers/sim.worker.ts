@@ -31,7 +31,7 @@ function post(msg: WorkerToMain): void {
   (self as unknown as Worker).postMessage(msg);
 }
 
-async function runCatchup(saveData: import("../save/schema").SaveV1, ticksToRun: number): Promise<void> {
+async function runCatchup(saveData: import("../save/schema").SaveData, ticksToRun: number): Promise<void> {
   try {
     const sim = restore(saveData);
     let done = 0;

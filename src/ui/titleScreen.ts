@@ -461,7 +461,7 @@ function downloadSaveFile(fortressName: string, json: string): void {
 
 /** File-picker + parse. Resolves to the parsed save, a string error
  * message for the user, or null if the picker was cancelled. */
-function pickSaveFile(): Promise<import("../save/schema").SaveV1 | string | null> {
+function pickSaveFile(): Promise<import("../save/schema").SaveData | string | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
