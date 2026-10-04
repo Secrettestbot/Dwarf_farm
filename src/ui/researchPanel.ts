@@ -15,7 +15,7 @@ import {
   ALL_TOPICS, ResearchTopic, ResearchTier, TOPICS_BY_ID, hasMaterials, RESEARCH_COST_SCALE,
   queueTopic, switchTopic, topicProgressFraction,
 } from "../sim/research";
-import { TICKS_PER_YEAR } from "../sim/time";
+import { formatGameDuration, TICKS_PER_YEAR } from "../sim/time";
 
 export class ResearchPanel {
   private root: HTMLElement;
@@ -169,7 +169,7 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
         ${materialLine}
         ${progressBar}
       </div>
-      <div style="font-size:11px;text-align:right;flex-shrink:0;">${status}<div style="color:#666;font-size:10px;">${t.cost * RESEARCH_COST_SCALE} ticks</div>${buttons}</div>
+      <div style="font-size:11px;text-align:right;flex-shrink:0;">${status}<div style="color:#666;font-size:10px;" title="Scholar time at one library desk">${formatGameDuration(t.cost * RESEARCH_COST_SCALE)} of study</div>${buttons}</div>
     </div>
   `;
 }

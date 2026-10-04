@@ -247,6 +247,8 @@ export interface SaveV1 {
   sliders?: SliderState;
   /** Active emergency-button state. Optional for back-compat. */
   emergency?: EmergencyState;
+  /** Player-painted zones (rectangles). Optional for back-compat. */
+  zones?: Array<{ kind: import("../sim/zones").ZoneKind; x0: number; y0: number; x1: number; y1: number }>;
   /** Loose items on the floor at save time. */
   items?: SavedItem[];
   /** Research progress. Optional for back-compat with v2 saves. */

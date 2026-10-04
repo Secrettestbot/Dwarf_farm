@@ -25,6 +25,9 @@ const NEIGHBORS_COST = [
   DIAGONAL_COST,
 ];
 
+/** Mirrors ZONE_BITS.forbidden in sim/zones.ts. */
+const FORBIDDEN_BIT = 2;
+
 export class AStar {
   private readonly width: number;
   private readonly height: number;
@@ -42,6 +45,10 @@ export class AStar {
   /** Optional region map — when set, findPath fast-fails on
    * disconnected goals before running the heap-based search. */
   regions: RegionMap | null = null;
+  /** Per-tile zone bits (see sim/zones.ts). Tiles with the Forbidden
+   * bit are impassable unless the search starts inside one, so a dwarf
+   * caught in a freshly painted zone can still walk out. */
+  zoneMask: Uint8Array | null = null;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -60,9 +67,19 @@ export class AStar {
    * Returns a packed Int32Array of cells (origin included) or null if no path
    * exists or maxNodes was exceeded.
    */
+  /** The zone mask to honour for a search from (sx, sy): null when no
+   * mask is set or the start itself is Forbidden (walking out is allowed). */
+  private forbidMaskFor(sx: number, sy: number): Uint8Array | null {
+    const m = this.zoneMask;
+    if (!m) return null;
+    return (m[sy * this.width + sx] & FORBIDDEN_BIT) !== 0 ? null : m;
+  }
+
   findPath(grid: TileGrid, sx: number, sy: number, gx: number, gy: number, maxNodes = 6000): Int32Array | null {
     if (!grid.isWalkable(sx, sy)) return null;
     if (!grid.isWalkable(gx, gy)) return null;
+    const forbid = this.forbidMaskFor(sx, sy);
+    if (forbid && (forbid[gy * this.width + gx] & FORBIDDEN_BIT) !== 0) return null;
     if (sx === gx && sy === gy) {
       const out = new Int32Array(1);
       out[0] = (sy << 16) | sx;
@@ -105,6 +122,7 @@ export class AStar {
         const ny = cy + NEIGHBORS_DY[i];
         if (nx < 0 || ny < 0 || nx >= w || ny >= this.height) continue;
         if (!grid.isWalkable(nx, ny)) continue;
+        if (forbid && (forbid[ny * w + nx] & FORBIDDEN_BIT) !== 0) continue;
         // Block diagonal squeezes through solid corners.
         if (i >= 4) {
           if (!grid.isWalkable(cx + NEIGHBORS_DX[i], cy)) continue;
@@ -151,12 +169,14 @@ export class AStar {
   ): Int32Array | null {
     if (!grid.isWalkable(sx, sy)) return null;
     const w = this.width;
+    const forbid = this.forbidMaskFor(sx, sy);
     const goals = new Set<number>();
     for (let i = 0; i < 8; i++) {
       const nx = tx + NEIGHBORS_DX[i];
       const ny = ty + NEIGHBORS_DY[i];
       if (nx < 0 || ny < 0 || nx >= w || ny >= this.height) continue;
       if (!grid.isWalkable(nx, ny)) continue;
+      if (forbid && (forbid[ny * w + nx] & FORBIDDEN_BIT) !== 0) continue;
       goals.add(ny * w + nx);
     }
     if (goals.size === 0) return null;
@@ -206,6 +226,7 @@ export class AStar {
         const ny = cy + NEIGHBORS_DY[i];
         if (nx < 0 || ny < 0 || nx >= w || ny >= this.height) continue;
         if (!grid.isWalkable(nx, ny)) continue;
+        if (forbid && (forbid[ny * w + nx] & FORBIDDEN_BIT) !== 0) continue;
         if (i >= 4) {
           if (!grid.isWalkable(cx + NEIGHBORS_DX[i], cy)) continue;
           if (!grid.isWalkable(cx, cy + NEIGHBORS_DY[i])) continue;
