@@ -890,24 +890,78 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
   let bestEnt = -1;
   let bestTier = -1;
   let best: { x: number; y: number; d: number } | null = null;
+  // The claim-independent filters and the tier are cached per tick;
+  // only the claim check, the Armoury-rack tile check and the distance
+  // run per call. Candidate order is the item store's dense order, so
+  // the tie-breaking below sees items in exactly the order it used to.
+  const cands = haulCandidates(sim);
+  for (let i = 0; i < cands.ents.length; i++) {
+    const ent = cands.ents[i];
+    const it = sim.item.get(ent)!;
+    // A claim by *this* hauler doesn't disqualify — an interrupted haul
+    // leaves the claim in place, and the claimant must be able to come
+    // back for the item rather than orphan it for as long as they live.
+    if (it.claimedBy !== -1 && it.claimedBy !== hauler && sim.ecs.isAlive(it.claimedBy)) continue;
+    const px = cands.xs[i];
+    const py = cands.ys[i];
+    // Tools sitting on an Armoury rack are "stored" — they wait there
+    // for the next draft to equip a soldier. Same loop-prevention
+    // logic as the workshop destination skip. Checked live (not
+    // cached) since it reads the tile grid.
+    if (it.kind === "tools" && sim.grid.getTile(px, py) === TileType.ArmouryRack) continue;
+    const tier = cands.tiers[i];
+    if (tier < bestTier) continue;
+    const dx = px - sx;
+    const dy = py - sy;
+    const d = dx * dx + dy * dy;
+    if (
+      tier > bestTier ||
+      !best ||
+      d < best.d ||
+      (d === best.d && (py < best.y || (py === best.y && px < best.x)))
+    ) {
+      best = { x: px, y: py, d };
+      bestEnt = ent;
+      bestTier = tier;
+    }
+  }
+  if (bestEnt !== -1) {
+    sim.item.get(bestEnt)!.claimedBy = hauler;
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Loose items that pass findHaulTarget's claim-independent filters,
+ * with their haul tier. Everything these filters read — item kind and
+ * position (items never move; they are destroyed and respawned) and
+ * the per-tick haulIndex — is fixed for a given (tick, item-store
+ * version), so one scan serves every idle hauler that tick instead of
+ * each one walking the whole item store (O(haulers × items)). */
+interface HaulCandidates {
+  tick: number;
+  itemVersion: number;
+  ents: number[];
+  xs: number[];
+  ys: number[];
+  tiers: number[];
+}
+
+const haulCandidateCache = new WeakMap<SimWorld, HaulCandidates>();
+
+function haulCandidates(sim: SimWorld): HaulCandidates {
+  const cached = haulCandidateCache.get(sim);
+  if (cached && cached.tick === sim.tick && cached.itemVersion === sim.item.version) return cached;
+  const out: HaulCandidates = { tick: sim.tick, itemVersion: sim.item.version, ents: [], xs: [], ys: [], tiers: [] };
   const ents = sim.item.entities;
   for (let i = 0; i < ents.length; i++) {
     const it = sim.item.get(ents[i]);
     const p = sim.position.get(ents[i]);
     if (!it || !p) continue;
-    // A claim by *this* hauler doesn't disqualify — an interrupted haul
-    // leaves the claim in place, and the claimant must be able to come
-    // back for the item rather than orphan it for as long as they live.
-    if (it.claimedBy !== -1 && it.claimedBy !== hauler && sim.ecs.isAlive(it.claimedBy)) continue;
     // Skip items already sitting on a workshop station that wants
     // them — those are "delivered", waiting for the crafter to consume.
     // Without this, a hauler picks up the item it just dropped at the
     // smelter and the production chain loops forever.
     if (isItemAtWorkshopDestination(sim, p.x, p.y, it.kind)) continue;
-    // Tools sitting on an Armoury rack are "stored" — they wait there
-    // for the next draft to equip a soldier. Same loop-prevention
-    // logic as the workshop destination skip.
-    if (it.kind === "tools" && sim.grid.getTile(p.x, p.y) === TileType.ArmouryRack) continue;
     // Items already sitting inside a complete stockpile cavity, with
     // no demand from a needs_furnishing room or a workshop input
     // tile, are effectively in storage — picking them up just to
@@ -918,29 +972,16 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     if (isItemStoredAtStockpile(sim, p.x, p.y) && !itemHasOpenDemand(sim, it.kind)) continue;
     // Tier 2: furniture (or any non-counter kind) that a
     // needs_furnishing room is actively waiting on. Tier 1: bulk /
-    // counter-backed goods. We keep the best candidate from the
-    // higher tier we've seen so far; a Tier-2 candidate beats any
-    // Tier-1 candidate regardless of distance.
-    const tier = isFurnitureKind(it.kind) && hasNeedsFurnishingFor(sim, it.kind) ? 2 : 1;
-    if (tier < bestTier) continue;
-    const dx = p.x - sx;
-    const dy = p.y - sy;
-    const d = dx * dx + dy * dy;
-    if (
-      tier > bestTier ||
-      !best ||
-      d < best.d ||
-      (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
-    ) {
-      best = { x: p.x, y: p.y, d };
-      bestEnt = ents[i];
-      bestTier = tier;
-    }
+    // counter-backed goods. findHaulTarget keeps the best candidate
+    // from the higher tier it has seen so far; a Tier-2 candidate
+    // beats any Tier-1 candidate regardless of distance.
+    out.ents.push(ents[i]);
+    out.xs.push(p.x);
+    out.ys.push(p.y);
+    out.tiers.push(isFurnitureKind(it.kind) && hasNeedsFurnishingFor(sim, it.kind) ? 2 : 1);
   }
-  if (bestEnt !== -1) {
-    sim.item.get(bestEnt)!.claimedBy = hauler;
-  }
-  return best ? { x: best.x, y: best.y } : null;
+  haulCandidateCache.set(sim, out);
+  return out;
 }
 
 /** True iff `kind` is a furniture / workshop-bench / room-deliverable
@@ -984,14 +1025,27 @@ function haulerCapForColony(sim: SimWorld): number {
  * to a pickup (haul progress=0), walking to a delivery (haul
  * progress=1), or already carrying. */
 function countActiveHaulers(sim: SimWorld): number {
+  // Memoised on the dwarf / carrying / job store versions: the count
+  // only depends on which dwarves exist, which carry, and each job's
+  // kind — and jobs are always replaced via job.set(), never mutated
+  // to a different kind in place. Saves an O(dwarves) walk per idle
+  // dwarf (O(dwarves²) per tick) while staying exact mid-tick, as
+  // earlier dwarves in the same pass pick up haul jobs.
+  const c = haulerCountCache.get(sim);
+  if (c && c.dwarfV === sim.dwarf.version && c.carryV === sim.carrying.version && c.jobV === sim.job.version) {
+    return c.count;
+  }
   let n = 0;
   for (const e of sim.dwarf.entities) {
     if (sim.carrying.has(e)) { n++; continue; }
     const job = sim.job.get(e);
     if (job && job.kind === "haul") n++;
   }
+  haulerCountCache.set(sim, { dwarfV: sim.dwarf.version, carryV: sim.carrying.version, jobV: sim.job.version, count: n });
   return n;
 }
+
+const haulerCountCache = new WeakMap<SimWorld, { dwarfV: number; carryV: number; jobV: number; count: number }>();
 
 /** Find the nearest Armoury rack tile that doesn't already have a tool
  * sitting on it. Caps each rack at one weapon — a fortress with five
@@ -1611,7 +1665,7 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
   // position every tick, so the colony's idle population pooled
   // around the food counters between meals. A wider random scatter
   // makes idle behavior actually wander.
-  const R = 20;
+  const R = WANDER_RADIUS;
   if (!grid.isWalkable(sx, sy)) return null;
   // Flood-fill the R-box from the dwarf's tile (8-connected with the same
   // corner-cut rule as A*) so every candidate is genuinely *reachable*,
@@ -1619,13 +1673,34 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
   // picked, fail pathfinding in jobAssignmentSystem, and leave the dwarf
   // standing idle until its AI bucket came round again.
   const side = 2 * R + 1;
-  const seen = new Uint8Array(side * side);
-  const queue = new Int32Array(side * side);
+  // Scratch buffers are reused across calls (chooseTask is synchronous
+  // and never re-enters this function). `walk` memoises isWalkable per
+  // box cell — 0 unknown, 1 walkable, 2 blocked — so each tile is
+  // looked up at most once instead of up to ~24 times by the flood.
+  const seen = WANDER_SEEN;
+  const walk = WANDER_WALK;
+  const queue = WANDER_QUEUE;
+  seen.fill(0);
+  walk.fill(0);
+  const x0 = sx - R;
+  const y0 = sy - R;
+  const walkable = (x: number, y: number): boolean => {
+    // Every lookup is inside the box: the flood only visits box cells,
+    // and the diagonal corner cells share a row/column with one.
+    const li = (y - y0) * side + (x - x0);
+    let w = walk[li];
+    if (w === 0) {
+      w = grid.isWalkable(x, y) ? 1 : 2;
+      walk[li] = w;
+    }
+    return w === 1;
+  };
   let head = 0;
   let tail = 0;
   seen[R * side + R] = 1;
   queue[tail++] = (sy << 16) | sx;
-  const candidates: number[] = [];
+  // Every enqueued cell except the start is a candidate, in enqueue
+  // order — so the candidates are exactly queue[1..tail).
   while (head < tail) {
     const c = queue[head++];
     const cx = c & 0xffff;
@@ -1636,21 +1711,27 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
         const x = cx + dx;
         const y = cy + dy;
         if (x < sx - R || x > sx + R || y < sy - R || y > sy + R) continue;
-        const li = (y - sy + R) * side + (x - sx + R);
+        const li = (y - y0) * side + (x - x0);
         if (seen[li]) continue;
-        if (!grid.isWalkable(x, y)) continue;
+        if (!walkable(x, y)) continue;
         // Match A*'s diagonal rule: no squeezing through solid corners.
-        if (dx !== 0 && dy !== 0 && (!grid.isWalkable(cx + dx, cy) || !grid.isWalkable(cx, cy + dy))) {
+        if (dx !== 0 && dy !== 0 && (!walkable(cx + dx, cy) || !walkable(cx, cy + dy))) {
           continue;
         }
         seen[li] = 1;
         queue[tail++] = (y << 16) | x;
-        candidates.push((y << 16) | x);
       }
     }
   }
-  if (candidates.length === 0) return null;
-  const idx = sim.aiRng.nextRange(0, candidates.length);
-  const c = candidates[idx];
+  const candidateCount = tail - 1;
+  if (candidateCount === 0) return null;
+  const idx = sim.aiRng.nextRange(0, candidateCount);
+  const c = queue[1 + idx];
   return { x: c & 0xffff, y: (c >>> 16) & 0xffff };
 }
+
+const WANDER_RADIUS = 20;
+const WANDER_SIDE = 2 * WANDER_RADIUS + 1;
+const WANDER_SEEN = new Uint8Array(WANDER_SIDE * WANDER_SIDE);
+const WANDER_WALK = new Uint8Array(WANDER_SIDE * WANDER_SIDE);
+const WANDER_QUEUE = new Int32Array(WANDER_SIDE * WANDER_SIDE);
