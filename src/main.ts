@@ -13,6 +13,7 @@ import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
 import { applyStoredSpriteSet } from "./render/spriteSetPref";
 import {
+  getPauseOnCrisis,
   installHudHotkey,
   isPanelVisible,
   getMinimapDimensions,
@@ -34,6 +35,7 @@ import { PopulationPanel } from "./ui/populationPanel";
 import { NotificationCenter } from "./ui/notificationCenter";
 import { showPrompt } from "./ui/dialog";
 import { showFallScreen } from "./ui/fallScreen";
+import { HintCenter } from "./ui/hints";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
 // 200×500 world for speed; live play uses the full size.
@@ -380,15 +382,58 @@ function runGame(active: ActiveFortress, camera: Camera) {
   populationPanel = new PopulationPanel(uiHost, inspector, camera);
   const sliders = new SliderPanel(uiHost, sim);
   const emergency = new EmergencyPanel(uiHost, sim);
+  const hints = new HintCenter(uiHost, sim);
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
+  // Touch pinch-zoom: track active pointers; with two down, each
+  // 25% change in their separation steps one zoom level.
+  const touches = new Map<number, { x: number; y: number }>();
+  let pinchBase = 0;
+  const pinchDistance = () => {
+    const [a, b] = [...touches.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
   canvas.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      pinchBase = pinchDistance();
+      panStart = null;
+      isPanning = true; // suppress the click-to-inspect on release
+    }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size !== 2 || pinchBase <= 0) return;
+    const d = pinchDistance();
+    const pts = [...touches.values()];
+    const mid = camera.screenToTile((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2, viewW, viewH);
+    if (d > pinchBase * 1.25) { camera.zoomBy(+1, mid.x, mid.y); pinchBase = d; }
+    else if (d < pinchBase * 0.8) { camera.zoomBy(-1, mid.x, mid.y); pinchBase = d; }
+  });
+  const endTouch = (e: PointerEvent) => {
+    touches.delete(e.pointerId);
+    if (touches.size < 2) pinchBase = 0;
+  };
+  canvas.addEventListener("pointerup", endTouch);
+  canvas.addEventListener("pointercancel", endTouch);
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (touches.size >= 2) return;
+    // Clicking the minimap jumps the camera there instead of panning.
+    const mmTile = isPanelVisible("minimap") ? minimap.tileAtScreen(e.clientX, e.clientY) : null;
+    if (mmTile) {
+      camera.x = mmTile.x;
+      camera.y = mmTile.y;
+      return;
+    }
     canvas.setPointerCapture(e.pointerId);
     panStart = { mx: e.clientX, my: e.clientY, cx: camera.x, cy: camera.y };
     isPanning = false;
   });
 
   canvas.addEventListener("pointermove", (e) => {
+    if (touches.size >= 2) return;
     if (panStart) {
       const dx = e.clientX - panStart.mx;
       const dy = e.clientY - panStart.my;
@@ -529,9 +574,14 @@ function runGame(active: ActiveFortress, camera: Camera) {
   // forever; after a few consecutive failures we pause the clock so the
   // player can read the chronicle and save.
   let consecutiveTickErrors = 0;
+  // Emergency mode at the end of the previous frame. A change seen at
+  // the start of a frame was the player pressing a button, so the
+  // crisis lines it produces shouldn't trigger pause-on-crisis.
+  let lastFrameEmergency = sim.emergency.mode;
   function frame(now: number) {
     const dt = Math.min(100, now - lastFrame);
     lastFrame = now;
+    const playerToggledEmergency = sim.emergency.mode !== lastFrameEmergency;
 
     const ticks = clock.consume(dt);
     for (let i = 0; i < ticks; i++) {
@@ -580,8 +630,9 @@ function runGame(active: ActiveFortress, camera: Camera) {
     // Play sounds for any chronicle entries added this frame, deduped
     // by category so a busy tick doesn't overflow the audio bus.
     const seq = sim.events.seq;
+    const fresh = seq > lastEventSeq ? sim.events.events.slice(-(seq - lastEventSeq)) : [];
+    hints.observe(sim, fresh);
     if (seq > lastEventSeq) {
-      const fresh = sim.events.events.slice(-(seq - lastEventSeq));
       const played = new Set<string>();
       for (const ev of fresh) {
         if (played.has(ev.category)) continue;
@@ -589,8 +640,18 @@ function runGame(active: ActiveFortress, camera: Camera) {
         playEventSound(ev.category);
       }
       lastEventSeq = seq;
+      if (
+        getPauseOnCrisis() &&
+        clock.speed !== 0 &&
+        !playerToggledEmergency &&
+        fresh.some((ev) => ev.category === "crisis")
+      ) {
+        lastRunSpeed = clock.speed;
+        clock.setSpeed(0);
+      }
     }
 
+    lastFrameEmergency = sim.emergency.mode;
     minimap.refresh(sim, now);
 
     renderWorld(ctx, sim, camera, viewW, viewH);
@@ -599,6 +660,8 @@ function runGame(active: ActiveFortress, camera: Camera) {
       const mx = viewW - minimap.width - 14;
       const my = viewH - minimap.height - 14;
       minimap.draw(ctx, mx, my, camera, viewW, viewH);
+    } else {
+      minimap.clearDrawn();
     }
 
     hud.update(clock, sim);

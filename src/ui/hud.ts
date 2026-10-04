@@ -1,19 +1,21 @@
 import { Clock, SPEED_LEVELS, SpeedLevel, TICKS_PER_HOUR, TICKS_PER_DAY, seasonOf } from "../sim/time";
 import { SimWorld } from "../sim/world/simWorld";
 import { GameMode } from "../save/schema";
-import { isMuted, setMuted } from "../audio/sound";
+import { getVolume, isMuted, setMuted, setVolume } from "../audio/sound";
 import {
   MINIMAP_HEIGHT_RANGE,
   MINIMAP_WIDTH_RANGE,
   PANELS,
   attachPanelVisibility,
   getMinimapDimensions,
+  getPauseOnCrisis,
   hideAllPanels,
   isPanelVisible,
   onMinimapDimensionsChange,
   onPanelVisibilityChange,
   setMinimapDimensions,
   setPanelVisible,
+  setPauseOnCrisis,
   showAllPanels,
 } from "./displaySettings";
 
@@ -215,7 +217,7 @@ export class Hud {
     const help = document.createElement("div");
     help.style.cssText = "font-size:10px;color:#666;line-height:1.4;margin-top:6px;";
     help.innerHTML =
-      "Drag to pan · scroll to zoom · space pauses · H toggles HUD<br/>The dwarves work on their own. You only watch.";
+      "Drag / WASD to pan · scroll / +− to zoom · space pauses · H toggles HUD<br/>The dwarves work on their own. You only watch.";
     top.appendChild(help);
 
     host.appendChild(top);
@@ -339,6 +341,49 @@ export class Hud {
     };
     popover.appendChild(makeDimSlider("Width", MINIMAP_WIDTH_RANGE, "width"));
     popover.appendChild(makeDimSlider("Height", MINIMAP_HEIGHT_RANGE, "height"));
+
+    const playTitle = document.createElement("div");
+    playTitle.style.cssText = "font-size:9px;letter-spacing:2px;color:#888;margin-top:6px;";
+    playTitle.textContent = "PLAY";
+    popover.appendChild(playTitle);
+    const pauseRow = document.createElement("label");
+    pauseRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:11px;color:#ddd;cursor:pointer;";
+    pauseRow.title = "Pause the game whenever a crisis enters the chronicle";
+    const pauseCb = document.createElement("input");
+    pauseCb.type = "checkbox";
+    pauseCb.checked = getPauseOnCrisis();
+    pauseCb.addEventListener("change", () => setPauseOnCrisis(pauseCb.checked));
+    pauseRow.appendChild(pauseCb);
+    const pauseLabel = document.createElement("span");
+    pauseLabel.textContent = "Pause on crisis";
+    pauseRow.appendChild(pauseLabel);
+    popover.appendChild(pauseRow);
+
+    const volRow = document.createElement("div");
+    volRow.style.cssText = "display:flex;flex-direction:column;gap:2px;font-size:10px;color:#aaa;";
+    const volLabelRow = document.createElement("div");
+    volLabelRow.style.cssText = "display:flex;justify-content:space-between;";
+    const volLabel = document.createElement("span");
+    volLabel.textContent = "Sound volume";
+    const volValue = document.createElement("span");
+    volValue.style.color = "#e0c080";
+    volValue.textContent = `${Math.round(getVolume() * 100)}%`;
+    volLabelRow.appendChild(volLabel);
+    volLabelRow.appendChild(volValue);
+    volRow.appendChild(volLabelRow);
+    const volInput = document.createElement("input");
+    volInput.type = "range";
+    volInput.min = "0";
+    volInput.max = "100";
+    volInput.value = String(Math.round(getVolume() * 100));
+    volInput.style.width = "100%";
+    volInput.setAttribute("aria-label", "Sound volume");
+    volInput.addEventListener("input", () => {
+      setVolume(Number(volInput.value) / 100);
+      volValue.textContent = `${volInput.value}%`;
+    });
+    volRow.appendChild(volInput);
+    popover.appendChild(volRow);
 
     const masterRow = document.createElement("div");
     masterRow.style.cssText = "display:flex;gap:4px;margin-top:6px;";

@@ -20,6 +20,16 @@ const CATEGORY_COLOR: Record<string, string> = {
   crisis: "#ff7060",
 };
 
+/** Glyph per category, so the log doesn't rely on colour alone. */
+const CATEGORY_ICON: Record<string, string> = {
+  founding: "⚑",
+  discovery: "✦",
+  construction: "⌂",
+  social: "♥",
+  milestone: "★",
+  crisis: "⚠",
+};
+
 const FILTER_CATEGORIES: { id: string; label: string }[] = [
   { id: "discovery", label: "discoveries" },
   { id: "construction", label: "construction" },
@@ -58,13 +68,15 @@ export class EventLogPanel {
       const chip = document.createElement("button");
       chip.className = "btn";
       chip.style.cssText = "font-size:9px;padding:2px 6px;border-radius:8px;";
-      chip.textContent = f.label;
+      chip.textContent = `${CATEGORY_ICON[f.id] ?? ""} ${f.label}`;
+      chip.setAttribute("aria-pressed", "false");
       chip.style.color = CATEGORY_COLOR[f.id] ?? "#aaa";
       chip.style.opacity = "0.5";
       chip.addEventListener("click", () => {
         if (this.filter.has(f.id)) this.filter.delete(f.id);
         else this.filter.add(f.id);
         chip.style.opacity = this.filter.has(f.id) ? "1" : "0.5";
+        chip.setAttribute("aria-pressed", String(this.filter.has(f.id)));
         this.lastRenderedTick = -1; // force re-render
       });
       filterHost.appendChild(chip);
@@ -90,6 +102,7 @@ export class EventLogPanel {
         return `
           <div style="display:flex;gap:8px;align-items:flex-start;">
             <span style="color:#666;font-variant-numeric:tabular-nums;flex:0 0 auto;">d${day} ${pad(hour)}h</span>
+            <span style="color:${color};flex:0 0 auto;" title="${e.category}" aria-label="${e.category}">${CATEGORY_ICON[e.category] ?? "·"}</span>
             <span style="color:${color};">${escapeHtml(e.text)}</span>
           </div>
         `;
