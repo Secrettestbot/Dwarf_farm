@@ -219,6 +219,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       current: sim.research.current,
       progress: sim.research.progress,
       completed: [...sim.research.completed],
+      queued: sim.research.queued ?? null,
+      progressById: { ...(sim.research.progressById ?? {}) },
     },
     hollowKingAware: sim.hollowKingAware,
     hollowKingNightmares: sim.hollowKingNightmares,
@@ -573,6 +575,8 @@ export function restore(save: SaveV1): SimWorld {
     sim.research.current = save.research.current ?? null;
     sim.research.progress = save.research.progress ?? 0;
     sim.research.completed = [...(save.research.completed ?? [])];
+    sim.research.queued = save.research.queued ?? null;
+    sim.research.progressById = { ...(save.research.progressById ?? {}) };
   }
   if (save.hollowKingAware) sim.hollowKingAware = true;
   if (save.hollowKingNightmares !== undefined) sim.hollowKingNightmares = save.hollowKingNightmares;

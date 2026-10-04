@@ -30,6 +30,25 @@ const HOLLOW_KING_SIEGE_INTERVAL_TICKS = TICKS_PER_DAY * 4;
 /** How many shades show up at once. Three is a meaningful fight for a
  * mid-game military but not auto-fatal for a prepared one. */
 const HOLLOW_KING_SHADES_PER_SIEGE = 3;
+/** Void Engineering (Tier 5): the colony understands how the King
+ * folds the dark to send his emissaries and can pinch the seams — each
+ * siege brings one fewer shade. */
+const VOID_ENGINEERING_SHADES_PER_SIEGE = 2;
+/** Anchor Runes (Tier 6): runes carved into the fortress anchor the
+ * sleepers' minds — nightmares arrive half as often. */
+const ANCHOR_RUNES_NIGHTMARE_INTERVAL_TICKS = NIGHTMARE_INTERVAL_TICKS * 2;
+
+export function nightmareIntervalTicks(sim: SimWorld): number {
+  return sim.research.completed.includes("anchor_runes")
+    ? ANCHOR_RUNES_NIGHTMARE_INTERVAL_TICKS
+    : NIGHTMARE_INTERVAL_TICKS;
+}
+
+export function shadesPerSiege(sim: SimWorld): number {
+  return sim.research.completed.includes("void_engineering")
+    ? VOID_ENGINEERING_SHADES_PER_SIEGE
+    : HOLLOW_KING_SHADES_PER_SIEGE;
+}
 /** Cumulative void-shade kills the colony needs to fire The Siege
  * Endured milestone. Defeating the King himself is reserved for
  * actually putting the hollow_king hostile down. With three shades
@@ -60,7 +79,7 @@ export function hollowKingSystem(sim: SimWorld): void {
     return;
   }
   // Phase 1: dread + nightmares.
-  if (sim.tick > 0 && sim.tick % NIGHTMARE_INTERVAL_TICKS === 0) {
+  if (sim.tick > 0 && sim.tick % nightmareIntervalTicks(sim) === 0) {
     deliverNightmare(sim);
     sim.hollowKingNightmares++;
     // First-siege herald: announce the shift in tone before the first
@@ -189,7 +208,8 @@ function spawnVoidShadeSiege(sim: SimWorld): void {
   }
   if (candidates.length === 0) return;
   const spawned: Array<{ x: number; y: number }> = [];
-  for (let n = 0; n < HOLLOW_KING_SHADES_PER_SIEGE; n++) {
+  const count = shadesPerSiege(sim);
+  for (let n = 0; n < count; n++) {
     const pick = candidates[sim.aiRng.nextRange(0, candidates.length)];
     sim.spawnHostile({ kind: "void_shade", x: pick.x, y: pick.y });
     spawned.push(pick);

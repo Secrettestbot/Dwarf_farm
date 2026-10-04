@@ -17,7 +17,7 @@ import { strandedSystem } from "./systems/stranded";
 import { recipeFor, CARPENTER_BED_RECIPE, CARPENTER_BARREL_RECIPE, CARPENTER_BIN_RECIPE, CARPENTER_LIBRARY_DESK_RECIPE, CARPENTER_HOSPITAL_BED_RECIPE, CARPENTER_TAVERN_COUNTER_RECIPE, CARPENTER_ARMOURY_RACK_RECIPE, CARPENTER_PUMP_PART_RECIPE, CARPENTER_WHEELBARROW_RECIPE, MASON_TABLE_RECIPE, MASON_STOVE_RECIPE, MASON_THRONE_RECIPE, MASON_CARPENTER_BENCH_RECIPE, CARPENTER_MASON_BENCH_RECIPE, MASON_SMELTER_FURNACE_RECIPE, MASON_FORGE_ANVIL_RECIPE, MASON_MAGMA_ANVIL_RECIPE, CARPENTER_JEWELLER_BENCH_RECIPE, MASON_KILN_FIREBOX_RECIPE, CARPENTER_TANNERY_VAT_RECIPE, CARPENTER_LOOM_FRAME_RECIPE, CARPENTER_TRADE_SCALES_RECIPE, CARPENTER_WATER_WHEEL_AXLE_RECIPE, KITCHEN_STEW_RECIPE, KITCHEN_FEAST_RECIPE } from "./planner/recipes";
 import { BLUEPRINT_KIND_LABELS, FURNITURE_REQUIREMENTS, QUALITY_BASE, QUALITY_MAX, QUALITY_PER_MAINTAIN, ENGRAVE_QUALITY_PER_BLOCK, ENGRAVE_QUALITY_PER_GEM, isMaintainable, maxDecorationsFor } from "./planner/blueprint";
 import { effectsFor } from "./dwarves/traitEffects";
-import { nextTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
+import { chooseNextTopic, beginTopic, TOPICS_BY_ID, RESEARCH_COST_SCALE } from "./research";
 import { awardSkillXp, bumpCumulative, dropJob, releaseItemClaims, fireMilestone, isElder } from "./systems/shared";
 import { petSpawnSystem, petSystem, PET_DEFS } from "./systems/pets";
 import { hollowKingSystem, hollowKingManifestSystem } from "./systems/hollowKing";
@@ -199,6 +199,9 @@ const DEEP_FEVER_DEPTH = 700; // Gem Seam threshold
 const DEEP_FEVER_BASE_CHANCE = 0.020;
 const WOUND_SICKNESS_HP_RATIO = 0.30; // below 30% HP, susceptible
 const WOUND_SICKNESS_BASE_CHANCE = 0.04;
+/** Advanced Medicine (Tier 3): proper regimens double the passive
+ * (cot / bed-rest) disease recovery rate. */
+const ADVANCED_MEDICINE_DISEASE_RECOVERY_SCALE = 2;
 
 function diseaseSystem(sim: SimWorld): void {
   // Per-hour drain + medic recovery pass.
@@ -241,6 +244,9 @@ function diseaseSystem(sim: SimWorld): void {
       } else if (sleeping) {
         // A bed (any kind) helps a little.
         progress = 1;
+      }
+      if (progress > 0 && sim.research.completed.includes("advanced_medicine")) {
+        progress *= ADVANCED_MEDICINE_DISEASE_RECOVERY_SCALE;
       }
       d.treatProgress += progress;
       if (d.treatProgress >= def.cureTicks) {
@@ -448,23 +454,30 @@ function depthPhraseFor(y: number, surfaceY: number): string {
 
 // ---- Research auto-pick -----------------------------------------------
 //
-// If no topic is currently being studied, pick the cheapest available
-// one whose prerequisites are met. Auto-pick runs every tick (cheap)
-// so a freshly-completed topic immediately yields the next one.
+// If no topic is currently being studied, pick the player's queued
+// topic when it's available, else the cheapest available one. Runs
+// every tick (cheap) so a freshly-completed topic immediately yields
+// the next one. Picking a topic with banked progress (the player
+// switched away from it earlier) resumes that progress.
 
 function researchPickSystem(sim: SimWorld): void {
-  if (sim.research.current) return;
-  const next = nextTopic(sim.research, {
+  const r = sim.research;
+  // A queued topic that has since been completed is stale.
+  if (r.queued && r.completed.includes(r.queued)) r.queued = null;
+  if (r.current) return;
+  const next = chooseNextTopic(r, {
     cumulative: sim.cumulative,
     discovered: sim.discoveries,
   });
   if (!next) return;
-  sim.research.current = next.id;
-  sim.research.progress = 0;
+  const resumed = (r.progressById?.[next.id] ?? 0) > 0;
+  beginTopic(r, next.id);
   sim.events.add(
     sim.tick,
     "milestone",
-    `The scholars open a new line of inquiry: ${next.name}.`,
+    resumed
+      ? `The scholars return to their study of ${next.name}.`
+      : `The scholars open a new line of inquiry: ${next.name}.`,
   );
 }
 
@@ -726,6 +739,9 @@ function depthMilestoneSystem(sim: SimWorld): void {
 // black so the cross-section feels like a discovery view.
 
 const VISIBILITY_RADIUS = 5;
+/** Deep Cartography (Tier 4): surveyors' habits — every dwarf reads
+ * the rock this many tiles further into the fog. */
+const DEEP_CARTOGRAPHY_VISION_BONUS = 3;
 
 function visibilitySystem(sim: SimWorld): void {
   const grid = sim.grid;
@@ -743,6 +759,7 @@ function visibilitySystem(sim: SimWorld): void {
     if (def.visionRadius === 0) continue;
     ownerBonus.set(pet.ownerId, (ownerBonus.get(pet.ownerId) ?? 0) + def.visionRadius);
   }
+  const cartographyBonus = sim.research.completed.includes("deep_cartography") ? DEEP_CARTOGRAPHY_VISION_BONUS : 0;
   for (let i = 0; i < dwarves.length; i++) {
     const id = dwarves[i];
     const pos = sim.position.get(id);
@@ -750,7 +767,7 @@ function visibilitySystem(sim: SimWorld): void {
     // Eagle-Eyed dwarves see further into the fog (GDD §6.5).
     const dw = sim.dwarf.get(id);
     const traitR = dw ? effectsFor(dw.traitIds).visibilityRadius : VISIBILITY_RADIUS;
-    const r = traitR + (ownerBonus.get(id) ?? 0);
+    const r = traitR + (ownerBonus.get(id) ?? 0) + cartographyBonus;
     const x0 = Math.max(0, pos.x - r);
     const y0 = Math.max(0, pos.y - r);
     const x1 = Math.min(grid.width - 1, pos.x + r);
@@ -1753,8 +1770,13 @@ function seasonRolloverSystem(sim: SimWorld): void {
  * accumulator on the Needs component so decay rate isn't tied to integer
  * tick counts and stays deterministic.
  */
+/** Alchemy Basics (Tier 4): tonics and preserved rations — needs
+ * decay as though every dwarf had a 15% stronger constitution. */
+const ALCHEMY_BASICS_NEED_DECAY_SCALE = 1.15;
+
 function needsSystem(sim: SimWorld): void {
   const ents = sim.dwarf.entities;
+  const alchemy = sim.research.completed.includes("alchemy_basics") ? ALCHEMY_BASICS_NEED_DECAY_SCALE : 1;
   // Iterate backwards so killDwarf-from-starvation can mutate the list.
   for (let i = ents.length - 1; i >= 0; i--) {
     const e = ents[i];
@@ -1764,7 +1786,7 @@ function needsSystem(sim: SimWorld): void {
     const effects = dw ? effectsFor(dw.traitIds) : null;
     // Iron Constitution / Sickly scale how often the accumulator advances.
     // > 1 means slower decay (stronger constitution).
-    const decayScale = effects?.needDecay ?? 1;
+    const decayScale = (effects?.needDecay ?? 1) * alchemy;
     n.decayAccumSleep += 1 / decayScale;
     n.decayAccumSocial += 1 / decayScale;
     n.decayAccumHunger += 1 / decayScale;
@@ -2193,6 +2215,10 @@ function progressPump(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   dropJob(sim, e);
 }
 
+/** Relic Analysis (Tier 4): the scholars have learned to read the old
+ * masters' marginalia — every tick of study counts 25% more. */
+export const RELIC_ANALYSIS_RESEARCH_SPEED = 1.25;
+
 /** Tick research progress while the scholar sits at a Library desk.
  * Scholarship skill speeds the work; on completion the topic is logged
  * to the chronicle and the next available topic is auto-picked at the
@@ -2214,7 +2240,8 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
   // book on the library's shelves — the colony's accumulated
   // tradition speeds each new study slightly.
   const libraryBonus = 1 + sim.books.length * 0.01;
-  const ticksThisStep = (1 + Math.max(0, skill + traitBonus - 1) * 0.04) * libraryBonus;
+  const relicBonus = sim.research.completed.includes("relic_analysis") ? RELIC_ANALYSIS_RESEARCH_SPEED : 1;
+  const ticksThisStep = (1 + Math.max(0, skill + traitBonus - 1) * 0.04) * libraryBonus * relicBonus;
   sim.research.progress += ticksThisStep;
   awardSkillXp(sim, e, "scholarship", 1);
   const topic = TOPICS_BY_ID[sim.research.current];
@@ -2222,6 +2249,7 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
     sim.research.completed.push(topic.id);
     sim.research.current = null;
     sim.research.progress = 0;
+    if (sim.research.progressById) delete sim.research.progressById[topic.id];
     sim.events.add(
       sim.tick,
       "milestone",
@@ -2333,6 +2361,40 @@ function progressEngage(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x
   // Engagement keeps running as long as a hostile is present; combatSystem
   // does the damage. The job ends naturally when the hostile dies and the
   // re-target loop above finds none.
+}
+
+/** Magma Tapping (Tier 4): smelters and the magma forge draw heat
+ * straight from a tapped vent — their work takes 30% less time. */
+export const MAGMA_TAPPING_CRAFT_TICKS_SCALE = 0.7;
+/** Adamantite Smelting (Tier 5): the techniques learned refining the
+ * hardest metal lift every workshop's craft by one quality tier. */
+export const ADAMANTITE_SMELTING_QUALITY_BIAS = 1;
+
+/** Research multiplier on a workshop's craft ticks (1 = unchanged). */
+export function craftTicksResearchScale(sim: SimWorld, blueprintKind: string | undefined): number {
+  if ((blueprintKind === "smelter" || blueprintKind === "magma_forge") && sim.research.completed.includes("magma_tapping")) {
+    return MAGMA_TAPPING_CRAFT_TICKS_SCALE;
+  }
+  return 1;
+}
+
+/** Research-driven quality tiers added to a workshop's item output.
+ * Tier-3 Weaponsmithing lifts forge output by a full tier, Tier-4
+ * Advanced Metallurgy adds another to smelter and forge bars, Tier-5
+ * Adamantite Smelting adds one to every workshop. Stacking is
+ * intentional — a dwarf at the legendary forge with every topic
+ * complete produces masterworks the same way an elder does. The
+ * Magma Forge by definition stamps an extra tier on every output —
+ * the "magma forge craft" of the GDD's Tier 4 research arc, the
+ * metallurgical jump that makes the Hollow King ultimately killable. */
+export function craftResearchQualityBias(sim: SimWorld, blueprintKind: string | undefined): number {
+  let bias = 0;
+  const completed = sim.research.completed;
+  if ((blueprintKind === "forge" || blueprintKind === "magma_forge") && completed.includes("weaponsmithing")) bias++;
+  if ((blueprintKind === "forge" || blueprintKind === "magma_forge" || blueprintKind === "smelter") && completed.includes("advanced_metallurgy")) bias++;
+  if (blueprintKind === "magma_forge") bias++;
+  if (completed.includes("adamantite_smelting")) bias += ADAMANTITE_SMELTING_QUALITY_BIAS;
+  return bias;
 }
 
 /** Run a workshop recipe: while the dwarf stands on the workstation tile,
@@ -2533,7 +2595,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
   job.progress += traitSpeed;
   // Skill scales work speed: each level above Novice shaves 4% off ticks.
   const skillLevel = dw?.skills[recipe.skill] ?? 1;
-  const scaledTicks = Math.max(8, Math.round(recipe.ticks * Math.max(0.4, 1 - (skillLevel - 1) * 0.04)));
+  const scaledTicks = Math.max(8, Math.round(recipe.ticks * Math.max(0.4, 1 - (skillLevel - 1) * 0.04) * craftTicksResearchScale(sim, blueprintKind)));
   if (job.progress >= scaledTicks) {
     // Workshop outputs: if the resource has an ItemKind, drop it at
     // the station so a hauler routes it onward (smelter feeds forge,
@@ -2555,20 +2617,7 @@ function progressCraft(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x:
       // Elders craft to a higher tier — the slower-but-wiser side of
       // the GDD §6.1 lifecycle. +1 quality on every output.
       const elderBias = isElder(sim, e) ? 1 : 0;
-      // Research-driven quality bonuses: Tier-3 Weaponsmithing lifts
-      // forge output by a full tier, Tier-4 Advanced Metallurgy adds
-      // another to smelter and forge bars. Stacking is intentional —
-      // a dwarf at the legendary forge with both topics complete
-      // produces masterworks the same way an elder does.
-      let researchBias = 0;
-      const completed = sim.research.completed;
-      if ((blueprintKind === "forge" || blueprintKind === "magma_forge") && completed.includes("weaponsmithing")) researchBias++;
-      if ((blueprintKind === "forge" || blueprintKind === "magma_forge" || blueprintKind === "smelter") && completed.includes("advanced_metallurgy")) researchBias++;
-      // Magma Forge by definition stamps an extra quality tier on
-      // every output — that's the "magma forge craft" of the GDD's
-      // Tier 4 research arc, the metallurgical jump that makes the
-      // Hollow King ultimately killable.
-      if (blueprintKind === "magma_forge") researchBias++;
+      const researchBias = craftResearchQualityBias(sim, blueprintKind);
       const baseQuality = rollCraftQuality(sim, dw?.skills[recipe.skill] ?? 1);
       const quality = Math.max(0, Math.min(4, baseQuality + traitBias + elderBias + researchBias));
       for (let i = 0; i < outputQty; i++) {
@@ -3194,6 +3243,18 @@ function progressShelter(sim: SimWorld, e: EntityId, _job: JobAssignment, _pos: 
   // spot (or as close as they can reach) and waits there.
 }
 
+/** The Deep Breath (Tier 5): breathing drills for the thin, hot air of
+ * the deep let miners keep a steady pace — faces at or below this
+ * depth (tiles below spawn) take 25% fewer ticks to dig. */
+const DEEP_BREATH_MIN_DEPTH = 700;
+const DEEP_BREATH_MINE_TICKS_SCALE = 0.75;
+
+/** Research multiplier on mining ticks for a face at row `y`. */
+export function deepMiningScale(sim: SimWorld, y: number): number {
+  if (y - sim.spawn.y < DEEP_BREATH_MIN_DEPTH) return 1;
+  return sim.research.completed.includes("the_deep_breath") ? DEEP_BREATH_MINE_TICKS_SCALE : 1;
+}
+
 function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   // Adjacency check.
   const dx = Math.abs(pos.x - job.targetX);
@@ -3222,7 +3283,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
   const skillScale = Math.max(0.4, 1 - (miningSkill - 1) * 0.03);
   const toolQuality = colonyToolQuality(sim);
   const toolScale = Math.max(0.4, 1 - toolQuality * 0.08);
-  const ticksNeeded = Math.max(2, Math.round(MINE_TICKS * hardness * skillScale * toolScale));
+  const ticksNeeded = Math.max(2, Math.round(MINE_TICKS * hardness * skillScale * toolScale * deepMiningScale(sim, job.targetY)));
   if (job.progress >= ticksNeeded) {
     // What was the rock made of? Determines stockpile credit.
     const tileType = sim.grid.getTile(job.targetX, job.targetY);
@@ -3405,31 +3466,50 @@ function progressSleep(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     // legendary bedroom hands a meaningful morale bump on every
     // night's rest.
     if (pos) {
-      const q = roomQualityAt(sim, pos.x, pos.y, "bedroom");
-      if (q > QUALITY_BASE) {
-        const dw = sim.dwarf.get(e);
-        const scale = dw ? effectsFor(dw.traitIds).roomQualityScale : 1;
-        const bump = Math.floor((q - QUALITY_BASE) / 10 * scale);
-        needs.morale = Math.min(100, needs.morale + bump);
-      }
+      const bump = roomMoraleBump(sim, e, pos.x, pos.y, "bedroom");
+      if (bump > 0) needs.morale = Math.min(100, needs.morale + bump);
     }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     dropJob(sim, e);
   }
 }
 
-/** Return the quality of a completed room of the given kind whose
- * cavity contains (x, y), or 0 if no such room is here. Used by
- * progressSleep / progressEat to scale morale gain by room quality
- * (GDD §6.4 Esteem). */
-function roomQualityAt(sim: SimWorld, x: number, y: number, kind: string): number {
+/** The completed room of the given kind whose bounds contain (x, y),
+ * or null if there is none. */
+function roomAt(sim: SimWorld, x: number, y: number, kind: string): import("./planner/blueprint").Blueprint | null {
   for (const b of sim.planner.blueprints) {
     if (b.kind !== kind || b.status !== "complete") continue;
     if (x < b.originX || x >= b.originX + b.width) continue;
     if (y < b.originY || y >= b.originY + b.height) continue;
-    return b.quality ?? QUALITY_BASE;
+    return b;
   }
-  return 0;
+  return null;
+}
+
+/** Rune Inscription (Tier 5): warding runes cut alongside a room's
+ * engravings — sleeping or eating in a room with at least one
+ * engraving grants this much extra morale. */
+const RUNE_INSCRIPTION_MORALE_BONUS = 3;
+
+/** Morale lift for finishing a night's sleep / a meal in the room of
+ * `kind` at (x, y) (GDD §6.4 Esteem). A rough cavity at QUALITY_BASE
+ * adds nothing; quality above base adds 1 per 10 points, scaled by
+ * the dwarf's roomQualityScale. Rune Inscription adds a flat bonus in
+ * any engraved room. Returns 0 if no such room is here. */
+export function roomMoraleBump(sim: SimWorld, e: EntityId, x: number, y: number, kind: string): number {
+  const room = roomAt(sim, x, y, kind);
+  if (!room) return 0;
+  let bump = 0;
+  const q = room.quality ?? QUALITY_BASE;
+  if (q > QUALITY_BASE) {
+    const dw = sim.dwarf.get(e);
+    const scale = dw ? effectsFor(dw.traitIds).roomQualityScale : 1;
+    bump = Math.floor((q - QUALITY_BASE) / 10 * scale);
+  }
+  if ((room.decorationsCount ?? 0) > 0 && sim.research.completed.includes("rune_inscription")) {
+    bump += RUNE_INSCRIPTION_MORALE_BONUS;
+  }
+  return bump;
 }
 
 function progressSocialise(sim: SimWorld, e: EntityId, job: JobAssignment): void {
@@ -3500,13 +3580,8 @@ function progressEat(sim: SimWorld, e: EntityId, job: JobAssignment): void {
     // are good. A rough cavity does nothing extra.
     const pos = sim.position.get(e);
     if (pos) {
-      const q = roomQualityAt(sim, pos.x, pos.y, "dining_hall");
-      if (q > QUALITY_BASE) {
-        const dw = sim.dwarf.get(e);
-        const scale = dw ? effectsFor(dw.traitIds).roomQualityScale : 1;
-        const bump = Math.floor((q - QUALITY_BASE) / 10 * scale);
-        needs.morale = Math.min(100, needs.morale + bump);
-      }
+      const bump = roomMoraleBump(sim, e, pos.x, pos.y, "dining_hall");
+      if (bump > 0) needs.morale = Math.min(100, needs.morale + bump);
     }
     sim.dwarf.get(e)!.lastJobTick = sim.tick;
     dropJob(sim, e);
@@ -3632,6 +3707,10 @@ function progressMaintain(sim: SimWorld, e: EntityId, job: JobAssignment, pos: {
  * decoration cap (e.g., another engraver finished first while
  * this one walked over). */
 const ENGRAVE_TICKS = 80;
+/** Gem Inlay (Tier 3): set stones properly instead of gluing them —
+ * each cut-gem engraving adds this much more room quality on top of
+ * ENGRAVE_QUALITY_PER_GEM. */
+const GEM_INLAY_EXTRA_QUALITY = 6;
 function progressEngrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: number; y: number }): void {
   job.progress++;
   if (job.progress < ENGRAVE_TICKS) return;
@@ -3665,7 +3744,11 @@ function progressEngrave(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { 
   // stone block. If neither's available — race lost — bail.
   let material: "cut_gems" | "blocks" | null = null;
   let bump = 0;
-  if (sim.stockpile.cut_gems > 0) { material = "cut_gems"; bump = ENGRAVE_QUALITY_PER_GEM; }
+  if (sim.stockpile.cut_gems > 0) {
+    material = "cut_gems";
+    bump = ENGRAVE_QUALITY_PER_GEM;
+    if (sim.research.completed.includes("gem_inlay")) bump += GEM_INLAY_EXTRA_QUALITY;
+  }
   else if (sim.stockpile.blocks > 0) { material = "blocks"; bump = ENGRAVE_QUALITY_PER_BLOCK; }
   if (!material) {
     dropJob(sim, e);
@@ -3728,6 +3811,9 @@ const HEAL_RATE_HOSPITAL = 5; // tended wound on a hospital cot
 const HEAL_RATE_BED = 3;
 const HEAL_RATE_RESTING = 2; // sleeping anywhere
 const HEAL_RATE_IDLE = 1;    // wandering / socialising
+/** Advanced Medicine (Tier 3): poultices and stitching add this many
+ * HP to every healing tick a resting dwarf already earns. */
+const ADVANCED_MEDICINE_HEAL_BONUS = 1;
 
 /** Return the entity id of the dwarf with the highest medicine skill,
  * tie-broken by entity id for determinism. -1 if no dwarves exist. */
@@ -3795,6 +3881,7 @@ function healingSystem(sim: SimWorld): void {
     }
     // Working (mining) suspends healing — the dwarf is exerting themselves.
     if (healing === 0) continue;
+    if (sim.research.completed.includes("advanced_medicine")) healing += ADVANCED_MEDICINE_HEAL_BONUS;
 
     hp.hp = Math.min(hp.maxHp, hp.hp + healing);
     // Hospital tending: credit the colony's best-skilled medic with
