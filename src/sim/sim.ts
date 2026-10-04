@@ -23,6 +23,7 @@ import { petSpawnSystem, petSystem, PET_DEFS } from "./systems/pets";
 import { hollowKingSystem, hollowKingManifestSystem } from "./systems/hollowKing";
 import { tradeSystem, progressTrade } from "./systems/trade";
 import { killDwarf } from "./systems/shared";
+import { caveInSystem, noteTileMined } from "./systems/caveIns";
 import { hostileSpawnSystem, siegeSystem, hostileMovementSystem, combatSystem } from "./systems/hostiles";
 import {
   specialTraitSystem, furyEndSystem, tantrumSystem, mayorSystem, mandateSystem,
@@ -68,6 +69,8 @@ const MATERIAL_HARDNESS: Record<number, number> = {
   [TileType.SoulCrystal]: 3.0,
   // Cave mushroom is soft — it's a mushroom.
   [TileType.CaveMushroom]: 0.4,
+  // Cave-in rubble is loose — quick to clear.
+  [TileType.Rubble]: 0.6,
 };
 export const SLEEP_TICKS = 240; // 4 in-game hours of rest restores 80 sleep
 export const SOCIALISE_TICKS = 30; // half an in-game hour of conversation
@@ -162,6 +165,7 @@ export function tick(sim: SimWorld): void {
   reconciliationSystem(sim);
   engravingSystem(sim);
   floodSystem(sim);
+  caveInSystem(sim);
   depthMilestoneSystem(sim);
   plannerMilestoneSystem(sim);
   visibilitySystem(sim);
@@ -3321,6 +3325,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
     sim.grid.setDesignation(job.targetX, job.targetY, 0);
     sim.regions.invalidate();
     sim.releaseMineTarget(job.targetX, job.targetY);
+    if (tileType !== TileType.Tree && tileType !== TileType.Rubble) noteTileMined(sim, job.targetX, job.targetY);
     if (tileType === TileType.Tree) {
       awardSkillXp(sim, e, "carpentry", 1);
     } else {
@@ -3418,7 +3423,7 @@ function progressMine(sim: SimWorld, e: EntityId, job: JobAssignment, pos: { x: 
       // Mushroom drops as food. The colony has another mouth to feed
       // and the mountain quietly answers.
       itemKind = "food";
-    } else if (tileType === TileType.Stone || tileType === TileType.Granite) {
+    } else if (tileType === TileType.Stone || tileType === TileType.Granite || tileType === TileType.Rubble) {
       itemKind = "stone";
     } else if (tileType === TileType.Dirt || tileType === TileType.Sand) {
       itemKind = "dirt";

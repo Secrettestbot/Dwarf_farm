@@ -173,6 +173,11 @@ export const enum TileType {
   /** Trade depot's weigh-station counter. A Trade Depot only
    * counts as functional once trade_scales have been delivered. */
   TradeScales = 55,
+  /** Rubble — loose rock brought down by a cave-in (systems/caveIns.ts).
+   * Solid and non-walkable like any rock; it sits inside the planner
+   * cavity it fell into, so miners clear it (yielding stone) the next
+   * time the colony is digging. */
+  Rubble = 56,
 }
 
 export interface TileInfo {
@@ -240,6 +245,7 @@ export const TILE_INFO: Record<number, TileInfo> = {
   [TileType.BrewingBarrel]: { name: "brewing barrel", walkable: true, solid: false, color: 0x7a5028 },
   [TileType.Stove]: { name: "stove", walkable: true, solid: false, color: 0x504030 },
   [TileType.TradeScales]: { name: "trade scales", walkable: true, solid: false, color: 0xa08858 },
+  [TileType.Rubble]: { name: "rubble", walkable: false, solid: true, color: 0x7a6e62 },
 };
 
 export function tileIsGem(t: number): boolean {
