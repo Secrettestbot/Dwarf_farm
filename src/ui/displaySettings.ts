@@ -32,8 +32,7 @@ export type PanelId =
   | "eventLog"
   | "emergency"
   | "notifications"
-  | "minimap"
-  | "zones";
+  | "minimap";
 
 /** Minimap dimensions in screen pixels. The player sets width
  * and height independently from the Display popover sliders —
@@ -69,7 +68,6 @@ export const PANELS: ReadonlyArray<{ id: PanelId; label: string }> = [
   { id: "emergency", label: "Emergency buttons" },
   { id: "notifications", label: "Notification toasts" },
   { id: "minimap", label: "Minimap" },
-  { id: "zones", label: "Zone tools" },
 ];
 
 type Listener = (visible: boolean) => void;
@@ -83,7 +81,6 @@ function defaultVisibility(): Record<PanelId, boolean> {
     emergency: true,
     notifications: true,
     minimap: true,
-    zones: true,
   };
 }
 
@@ -112,7 +109,6 @@ function readInitialState(): Record<PanelId, boolean> {
         base.sliders = false;
         base.eventLog = false;
         base.minimap = false;
-        base.zones = false;
       }
       return base;
     }

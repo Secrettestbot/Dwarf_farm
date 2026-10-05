@@ -2,7 +2,6 @@ import { ComponentStore, EcsWorld, EntityId } from "../ecs/world";
 import { Dwarf, JobAssignment, Needs, Pathing, Position, Item, ItemKind, Carrying, Squad, Equipment, Fury, Obsession, Tantrum, Pet, Disease } from "../ecs/components";
 import { effectsFor } from "../dwarves/traitEffects";
 import { Rng } from "../rng";
-import { ZoneMap } from "../zones";
 import { TileGrid } from "./grid";
 import { ColonyPlanner } from "../planner/colonyPlanner";
 import { AStar } from "../pathing/astar";
@@ -145,8 +144,6 @@ export class SimWorld {
    * regions. Invalidated whenever walkable space changes (mining,
    * flooding, doors barring). */
   readonly regions: RegionMap;
-  /** Player-painted Dig / Forbidden / Gather zones (GDD §4.2). */
-  readonly zones: ZoneMap;
 
   // Component stores.
   readonly position: ComponentStore<Position>;
@@ -473,8 +470,6 @@ export class SimWorld {
     this.astar = new AStar(grid.width, grid.height);
     this.regions = new RegionMap(grid.width, grid.height);
     this.astar.regions = this.regions;
-    this.zones = new ZoneMap(grid.width, grid.height);
-    this.astar.zoneMask = this.zones.mask;
   }
 
   spawnDwarf(spec: {

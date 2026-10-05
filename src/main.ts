@@ -36,9 +36,6 @@ import { NotificationCenter } from "./ui/notificationCenter";
 import { showPrompt } from "./ui/dialog";
 import { showFallScreen } from "./ui/fallScreen";
 import { HintCenter } from "./ui/hints";
-import { ZonePanel } from "./ui/zonePanel";
-import { renderZones } from "./render/zones";
-import { ZoneKind } from "./sim/zones";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
 // 200×500 world for speed; live play uses the full size.
@@ -287,9 +284,6 @@ function runGame(active: ActiveFortress, camera: Camera) {
   const sliders = new SliderPanel(uiHost, sim);
   const emergency = new EmergencyPanel(uiHost, sim);
   const hints = new HintCenter(uiHost, sim);
-  const zonePanel = new ZonePanel(uiHost);
-  // In-progress zone rectangle while the player drags with a zone tool.
-  let zoneDrag: { kind: ZoneKind; x0: number; y0: number; x1: number; y1: number } | null = null;
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
   // Touch pinch-zoom: track active pointers; with two down, each
@@ -334,18 +328,6 @@ function runGame(active: ActiveFortress, camera: Camera) {
       camera.y = mmTile.y;
       return;
     }
-    if (zonePanel.tool !== "none") {
-      const t = camera.screenToTile(e.clientX, e.clientY, viewW, viewH);
-      const tx = Math.floor(t.x);
-      const ty = Math.floor(t.y);
-      if (zonePanel.tool === "erase") {
-        active.sim.zones.removeAt(tx, ty);
-      } else {
-        canvas.setPointerCapture(e.pointerId);
-        zoneDrag = { kind: zonePanel.tool, x0: tx, y0: ty, x1: tx, y1: ty };
-      }
-      return;
-    }
     canvas.setPointerCapture(e.pointerId);
     panStart = { mx: e.clientX, my: e.clientY, cx: camera.x, cy: camera.y };
     isPanning = false;
@@ -353,12 +335,6 @@ function runGame(active: ActiveFortress, camera: Camera) {
 
   canvas.addEventListener("pointermove", (e) => {
     if (touches.size >= 2) return;
-    if (zoneDrag) {
-      const t = camera.screenToTile(e.clientX, e.clientY, viewW, viewH);
-      zoneDrag.x1 = Math.floor(t.x);
-      zoneDrag.y1 = Math.floor(t.y);
-      return;
-    }
     if (panStart) {
       const dx = e.clientX - panStart.mx;
       const dy = e.clientY - panStart.my;
@@ -372,11 +348,6 @@ function runGame(active: ActiveFortress, camera: Camera) {
 
   canvas.addEventListener("pointerup", (e) => {
     canvas.releasePointerCapture(e.pointerId);
-    if (zoneDrag) {
-      active.sim.zones.add(zoneDrag.kind, zoneDrag.x0, zoneDrag.y0, zoneDrag.x1, zoneDrag.y1);
-      zoneDrag = null;
-      return;
-    }
     // A pointer up that wasn't preceded by a real drag is treated as a
     // click — see if it landed on a dwarf and open the inspector.
     if (panStart && !isPanning) {
@@ -427,11 +398,6 @@ function runGame(active: ActiveFortress, camera: Camera) {
     }
     if (e.key === "+" || e.key === "=") { camera.zoomBy(+1, camera.x, camera.y); return; }
     if (e.key === "-" || e.key === "_") { camera.zoomBy(-1, camera.x, camera.y); return; }
-    if (e.key === "Escape" && zonePanel.tool !== "none") {
-      zoneDrag = null;
-      zonePanel.setTool("none");
-      return;
-    }
     if (e.code === "Space") {
       e.preventDefault();
       if (clock.speed === 0) {
@@ -590,7 +556,6 @@ function runGame(active: ActiveFortress, camera: Camera) {
     minimap.refresh(sim, now);
 
     renderWorld(ctx, sim, camera, viewW, viewH);
-    renderZones(ctx, sim, camera, viewW, viewH, zoneDrag);
 
     if (isPanelVisible("minimap")) {
       const mx = viewW - minimap.width - 14;

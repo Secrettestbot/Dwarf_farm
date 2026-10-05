@@ -46,9 +46,7 @@ export function showTutorial(host: HTMLElement): Promise<void> {
         The colony's <span style="color:#e0c080;">Architect</span> chooses
         what to build and where. The <span style="color:#e0c080;">priority sliders</span>
         on the right shift the colony's emphasis — <em>more farming</em>,
-        <em>less mining</em> — but never override autonomy. The
-        <span style="color:#e0c080;">Zones</span> bar at the top lets you
-        paint broad areas to dig, forbid, or clear of loose items.
+        <em>less mining</em> — but never override autonomy.
       </p>
       <p style="color:#cdb88a;margin:0 0 14px;">
         Three buttons can interrupt that autonomy in a real emergency:

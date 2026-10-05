@@ -214,7 +214,6 @@ export function snapshot(input: SnapshotInput): SaveData {
     pets: collectPets(sim, entityToIndex),
     sliders: { ...sim.sliders },
     emergency: { ...sim.emergency },
-    zones: sim.zones.zones.map((z) => ({ kind: z.kind, x0: z.x0, y0: z.y0, x1: z.x1, y1: z.y1 })),
     items: collectItems(sim),
     research: {
       current: sim.research.current,
@@ -564,7 +563,6 @@ export function restore(save: SaveData): SimWorld {
   if (save.sliders) {
     sim.sliders = { ...sim.sliders, ...save.sliders };
   }
-  if (save.zones) sim.zones.load(save.zones);
   if (save.emergency) {
     sim.emergency = { ...sim.emergency, ...save.emergency };
   }

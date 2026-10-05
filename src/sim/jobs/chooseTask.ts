@@ -1025,23 +1025,15 @@ function haulCandidates(sim: SimWorld): HaulCandidates {
     // here; the moment a room emerges that wants the kind, the
     // demand check passes and haulers can route them out.
     if (isItemStoredAtStockpile(sim, p.x, p.y) && !itemHasOpenDemand(sim, it.kind)) continue;
-    // Forbidden Zones are off-limits, items included.
-    if (sim.zones.isForbidden(p.x, p.y)) continue;
     // Tier 2: furniture (or any non-counter kind) that a
     // needs_furnishing room is actively waiting on. Tier 1: bulk /
     // counter-backed goods. findHaulTarget keeps the best candidate
     // from the higher tier it has seen so far; a Tier-2 candidate
-    // beats any Tier-1 candidate regardless of distance. Tier 1.5:
-    // bulk goods lying in a player-painted Gather Zone are cleared
-    // before other bulk goods.
+    // beats any Tier-1 candidate regardless of distance.
     out.ents.push(ents[i]);
     out.xs.push(p.x);
     out.ys.push(p.y);
-    out.tiers.push(
-      isFurnitureKind(it.kind) && hasNeedsFurnishingFor(sim, it.kind)
-        ? 2
-        : sim.zones.has("gather", p.x, p.y) ? 1.5 : 1,
-    );
+    out.tiers.push(isFurnitureKind(it.kind) && hasNeedsFurnishingFor(sim, it.kind) ? 2 : 1);
   }
   haulCandidateCache.set(sim, out);
   return out;

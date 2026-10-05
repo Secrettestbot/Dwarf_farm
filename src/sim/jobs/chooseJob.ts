@@ -1,11 +1,10 @@
 import { SimWorld } from "../world/simWorld";
 
 // BFS outward from a dwarf to find the nearest reachable solid tile that is
-// claimed by an active blueprint (or lies in a player-painted Dig Zone) AND
-// has at least one walkable neighbor (so a dwarf can stand next to it).
-// Other tiles are ignored — dwarves never strip-mine: they only excavate
-// what the Colony Planner or the player's zones commit the colony to.
-// Forbidden Zones are neither crossed nor mined. Determinism: neighbor expansion order is fixed,
+// claimed by an active blueprint AND has at least one walkable neighbor (so a
+// dwarf can stand next to it). Tiles outside any blueprint are ignored —
+// dwarves never strip-mine: they only excavate what the Colony Planner has
+// committed the colony to. Determinism: neighbor expansion order is fixed,
 // ties broken by (y, x) and then by best-distance preservation.
 
 const DX = [1, -1, 0, 0];
@@ -19,8 +18,7 @@ export interface JobTarget {
 export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes = 4000): JobTarget | null {
   const grid = sim.grid;
   if (!grid.inBounds(sx, sy)) return null;
-  const digZones = sim.zones.any("dig");
-  if (!sim.planner.hasActive() && !digZones) return null;
+  if (!sim.planner.hasActive()) return null;
 
   // Generation-counter "seen" map: Int32Array can hold 2^31 generations before
   // wrapping, so resets are effectively never needed.
@@ -68,8 +66,7 @@ export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes =
         // blueprint AND (cx, cy) is a walkable spot the dwarf can stand on
         // AND the tile isn't already claimed by another dwarf — otherwise
         // every dwarf would race to the same nearest mineable tile.
-        if (sim.zones.isForbidden(nx, ny)) continue;
-        if (!sim.planner.containsTile(grid, nx, ny) && !(digZones && sim.zones.has("dig", nx, ny))) continue;
+        if (!sim.planner.containsTile(grid, nx, ny)) continue;
         if (sim.isMineClaimed(nx, ny)) continue;
         if (grid.isWalkable(cx, cy)) {
           const dx = nx - sx;
@@ -87,7 +84,7 @@ export function findMineTarget(sim: SimWorld, sx: number, sy: number, maxNodes =
         continue;
       }
 
-      if (grid.isWalkable(nx, ny) && !sim.zones.isForbidden(nx, ny)) {
+      if (grid.isWalkable(nx, ny)) {
         if (qTail < queue.length) queue[qTail++] = nIdx;
       }
     }
