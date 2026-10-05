@@ -256,10 +256,14 @@ export interface SaveData {
     current: string | null;
     progress: number;
     completed: string[];
-    /** Player-queued next topic. Optional — absent in older saves. */
+    /** Player favoured / neglected leanings per topic id. Optional —
+     * absent in older saves. */
+    leanings?: Record<string, "favoured" | "neglected">;
+    /** Legacy (pre-leanings builds): a "Study next" topic. Read on load
+     * as a favoured leaning; never written. */
     queued?: string | null;
-    /** Banked per-topic progress for topics the player switched away
-     * from. Optional — absent in older saves. */
+    /** Per-topic progress banked by the old "Study now" switch.
+     * Optional — absent in older saves. */
     progressById?: Record<string, number>;
   };
   /** GDD §10.2 narrative milestones already announced (e.g. "The First

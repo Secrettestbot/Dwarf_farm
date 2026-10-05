@@ -4,23 +4,17 @@
 // topic prereqs, and optional material gates (cumulative haul totals
 // or discovered tile types). Scholars sitting at a Library desk
 // advance the current topic in sim.ts (progressResearch). When a
-// topic completes it is logged, a book is written, and the next topic
-// is chosen by `chooseNextTopic`: the player's queued topic if it is
-// available, else the cheapest available topic (deterministic id
-// tie-break).
+// topic completes it is logged, a book is written, and the scholars
+// choose the next topic themselves via `chooseNextTopic`.
 //
-// Player choice: the research panel offers two buttons on every
-// available topic.
-//   * "Study next" sets ResearchState.queued. When the current topic
-//     completes (or immediately, if scholars are idle) the queued
-//     topic is picked instead of the cheapest one. A queued topic
-//     that isn't available falls back to the cheapest-available rule
-//     and stays queued until it opens up.
-//   * "Study now" switches the current topic straight away. Work on
-//     the topic being set aside is banked per-topic in
-//     `progressById` and restored when the colony returns to it
-//     (by player choice or auto-pick), so switching never throws
-//     scholarship away.
+// Player influence is a priority, not an order: each topic can carry a
+// leaning — favoured or neglected (`ResearchState.leanings`). Scholars
+// rank available topics by study cost weighted by that leaning
+// (LEANING_COST_WEIGHT), so a favoured topic usually comes next and a
+// neglected one waits until little else is left, but neither is
+// forced. Leanings never interrupt the topic already being studied.
+// With no leanings set the choice is exactly "cheapest available,
+// id tie-break", as before.
 //
 // Every topic unlocks something concrete. Planner gates (workshops,
 // rooms) live in planner/colonyPlanner.ts; numeric bonuses live next
@@ -283,27 +277,37 @@ export const TOPICS_BY_ID: Record<string, ResearchTopic> = (() => {
   return m;
 })();
 
+/** The player's standing priority for a topic. Absent = neutral. */
+export type ResearchLeaning = "favoured" | "neglected";
+
+/** Multiplier on a topic's study cost when scholars rank what to take
+ * up next. Favoured topics look ~3× cheaper, neglected ones 3× dearer:
+ * a strong pull, not a command. */
+export const LEANING_COST_WEIGHT: Record<ResearchLeaning, number> = {
+  favoured: 0.35,
+  neglected: 3,
+};
+
 export interface ResearchState {
   /** Topic id currently being studied, or null if no topic is active.
-   * Picked by `chooseNextTopic` (player's queued topic, else the
-   * cheapest available), or set directly by `switchTopic`. */
+   * Picked by `chooseNextTopic`; never switched mid-study. */
   current: string | null;
   /** Accumulated ticks of study toward `current`. Reset to 0 on
-   * completion; banked into `progressById` on a player switch. */
+   * completion. */
   progress: number;
   /** Topic ids that have been fully researched. */
   completed: string[];
-  /** Player-chosen next topic ("Study next"). Consumed when it becomes
-   * `current`. Optional for back-compat with older saves. */
-  queued?: string | null;
-  /** Banked progress for topics the player switched away from before
-   * finishing. Restored when the topic becomes current again. Optional
-   * for back-compat with older saves. */
+  /** Player priorities per topic id. Optional for back-compat with
+   * older saves (a save's old "Study next" topic loads as favoured). */
+  leanings?: Record<string, ResearchLeaning>;
+  /** Progress banked on topics set aside by the old "Study now" switch
+   * in earlier builds. Restored when the colony returns to the topic.
+   * Optional; nothing new is banked. */
   progressById?: Record<string, number>;
 }
 
 export function defaultResearch(): ResearchState {
-  return { current: null, progress: 0, completed: [], queued: null, progressById: {} };
+  return { current: null, progress: 0, completed: [], leanings: {}, progressById: {} };
 }
 
 /** Context the research selector consults to decide what's
@@ -381,51 +385,50 @@ export function isTopicAvailable(
   return true;
 }
 
-/** The topic scholars should take up next: the player's queued topic
- * if it is available (and not already current), otherwise the
- * cheapest available topic per `nextTopic`. */
-export function chooseNextTopic(state: ResearchState, ctx?: ResearchAvailabilityContext): ResearchTopic | null {
-  const q = state.queued ? TOPICS_BY_ID[state.queued] : undefined;
-  if (q && q.id !== state.current && isTopicAvailable(state, q, ctx)) return q;
-  return nextTopic(state, ctx);
+/** Cost a topic is ranked by when scholars choose what to study:
+ * base cost weighted by the player's leaning. */
+export function weightedTopicCost(state: ResearchState, t: ResearchTopic): number {
+  const lean = state.leanings?.[t.id];
+  return lean ? t.cost * LEANING_COST_WEIGHT[lean] : t.cost;
 }
 
-/** Make `id` the current topic, banking any progress on the topic
- * being set aside and restoring any progress banked on `id`. Clears
- * `queued` if it pointed at `id`. Caller is responsible for checking
- * availability. */
+/** The topic scholars take up next: the available topic with the
+ * lowest leaning-weighted cost (deterministic id tie-break). Equal to
+ * `nextTopic` when no leanings are set. */
+export function chooseNextTopic(state: ResearchState, ctx?: ResearchAvailabilityContext): ResearchTopic | null {
+  let best: ResearchTopic | null = null;
+  let bestCost = Infinity;
+  for (const t of ALL_TOPICS) {
+    if (t.id === state.current || !isTopicAvailable(state, t, ctx)) continue;
+    const c = weightedTopicCost(state, t);
+    if (c < bestCost || (c === bestCost && best && t.id < best.id)) {
+      best = t;
+      bestCost = c;
+    }
+  }
+  return best;
+}
+
+/** Make `id` the current topic, restoring any progress banked on it
+ * by older builds. Caller is responsible for checking availability. */
 export function beginTopic(state: ResearchState, id: string): void {
   if (state.current === id) return;
   const bank = (state.progressById ??= {});
-  if (state.current && state.progress > 0) bank[state.current] = state.progress;
   state.current = id;
   state.progress = bank[id] ?? 0;
   delete bank[id];
-  if (state.queued === id) state.queued = null;
 }
 
-/** Player action "Study next": queue an available topic to be picked
- * when the current one finishes (or right away if scholars are idle).
- * Passing the already-queued id again un-queues it. Returns true if
+/** Set (or clear, with null) the player's leaning on a topic. Any
+ * topic not yet completed can carry one — including locked topics, so
+ * the player can signal interest before it opens up. Returns true if
  * the state changed. */
-export function queueTopic(state: ResearchState, id: string, ctx?: ResearchAvailabilityContext): boolean {
-  if (state.queued === id) {
-    state.queued = null;
-    return true;
-  }
-  const t = TOPICS_BY_ID[id];
-  if (!t || state.current === id || !isTopicAvailable(state, t, ctx)) return false;
-  state.queued = id;
-  return true;
-}
-
-/** Player action "Study now": switch the current topic to `id`
- * immediately, banking the progress on the topic being set aside so
- * nothing is lost. Returns true if the switch happened. */
-export function switchTopic(state: ResearchState, id: string, ctx?: ResearchAvailabilityContext): boolean {
-  const t = TOPICS_BY_ID[id];
-  if (!t || state.current === id || !isTopicAvailable(state, t, ctx)) return false;
-  beginTopic(state, id);
+export function setLeaning(state: ResearchState, id: string, leaning: ResearchLeaning | null): boolean {
+  if (!TOPICS_BY_ID[id] || state.completed.includes(id)) return false;
+  const map = (state.leanings ??= {});
+  if ((map[id] ?? null) === leaning) return false;
+  if (leaning) map[id] = leaning;
+  else delete map[id];
   return true;
 }
 

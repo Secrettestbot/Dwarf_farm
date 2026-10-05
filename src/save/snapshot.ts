@@ -219,7 +219,7 @@ export function snapshot(input: SnapshotInput): SaveData {
       current: sim.research.current,
       progress: sim.research.progress,
       completed: [...sim.research.completed],
-      queued: sim.research.queued ?? null,
+      leanings: { ...(sim.research.leanings ?? {}) },
       progressById: { ...(sim.research.progressById ?? {}) },
     },
     hollowKingAware: sim.hollowKingAware,
@@ -575,7 +575,16 @@ export function restore(save: SaveData): SimWorld {
     sim.research.current = save.research.current ?? null;
     sim.research.progress = save.research.progress ?? 0;
     sim.research.completed = [...(save.research.completed ?? [])];
-    sim.research.queued = save.research.queued ?? null;
+    sim.research.leanings = {};
+    for (const [id, lean] of Object.entries(save.research.leanings ?? {})) {
+      if (lean === "favoured" || lean === "neglected") sim.research.leanings[id] = lean;
+    }
+    // Older builds had a "Study next" queue; keep the player's intent
+    // as a favoured leaning.
+    const legacyQueued = save.research.queued;
+    if (legacyQueued && !sim.research.completed.includes(legacyQueued) && !sim.research.leanings[legacyQueued]) {
+      sim.research.leanings[legacyQueued] = "favoured";
+    }
     sim.research.progressById = { ...(save.research.progressById ?? {}) };
   }
   if (save.hollowKingAware) sim.hollowKingAware = true;

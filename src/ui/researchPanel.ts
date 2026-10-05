@@ -4,16 +4,16 @@
 // on prereqs. Cross-references sim.books so the player can see
 // which scholar wrote the book on each completed topic.
 //
-// Player choice: every available topic carries two buttons —
-// "Study next" queues it to follow the current topic, "Study now"
-// switches to it immediately (progress on the topic set aside is
-// banked, not lost; see research.ts). The panel re-renders after
-// each click so the queued / current markers update in place.
+// Player influence: every unfinished topic carries Favour / Neglect
+// toggles. These are priorities, not orders — scholars still choose
+// their next topic themselves, weighting study cost by the leaning,
+// and always finish the topic in hand (see research.ts). The panel
+// re-renders after each click so the markers update in place.
 
 import { SimWorld } from "../sim/world/simWorld";
 import {
   ALL_TOPICS, ResearchTopic, ResearchTier, TOPICS_BY_ID, hasMaterials, RESEARCH_COST_SCALE,
-  queueTopic, switchTopic, topicProgressFraction,
+  LEANING_COST_WEIGHT, ResearchLeaning, chooseNextTopic, setLeaning, topicProgressFraction,
 } from "../sim/research";
 import { formatGameDuration, TICKS_PER_YEAR } from "../sim/time";
 
@@ -40,9 +40,10 @@ export class ResearchPanel {
       if (!btn || !this.sim) return;
       const id = btn.dataset.topic ?? "";
       const sim = this.sim;
-      const ctx = { cumulative: sim.cumulative, discovered: sim.discoveries };
-      if (btn.dataset.researchAction === "queue") queueTopic(sim.research, id, ctx);
-      else if (btn.dataset.researchAction === "switch") switchTopic(sim.research, id, ctx);
+      const want = btn.dataset.researchAction as ResearchLeaning;
+      // Clicking the active leaning again clears it back to neutral.
+      const now = sim.research.leanings?.[id] ?? null;
+      setLeaning(sim.research, id, now === want ? null : want);
       this.open(sim);
     });
   }
@@ -57,7 +58,11 @@ export class ResearchPanel {
     const progressPct = currentTopic
       ? Math.round(topicProgressFraction(sim.research, currentTopic) * 100)
       : 0;
-    const queuedTopic = sim.research.queued ? TOPICS_BY_ID[sim.research.queued] : null;
+    const ctx = { cumulative: sim.cumulative, discovered: sim.discoveries };
+    const likelyNext = chooseNextTopic(sim.research, ctx);
+    const favoured = Object.entries(sim.research.leanings ?? {})
+      .filter(([, l]) => l === "favoured")
+      .map(([id]) => TOPICS_BY_ID[id]?.name ?? id);
     const tiers: ResearchTier[] = [1, 2, 3, 4, 5, 6];
 
     const headline = currentTopic
@@ -65,9 +70,9 @@ export class ResearchPanel {
       : completed.size === ALL_TOPICS.length
         ? `<span style="color:#e0c080;">All research complete.</span>`
         : `No active topic — researchers are idle.`;
-    const queuedLine = queuedTopic
-      ? `<div style="color:#9fc0e0;font-size:12px;margin-top:2px;">Next up: ${escapeHtml(queuedTopic.name)}</div>`
-      : `<div style="color:#777;font-size:11px;margin-top:2px;">Next up: cheapest available topic (pick one with "Study next")</div>`;
+    const queuedLine = `
+      <div style="color:#9fc0e0;font-size:12px;margin-top:2px;">${favoured.length ? `Favoured: ${favoured.map(escapeHtml).join(", ")}` : "No favoured topics."}</div>
+      <div style="color:#777;font-size:11px;margin-top:2px;">Scholars choose for themselves, leaning toward favoured topics and away from neglected ones.${likelyNext ? ` Likely next: ${escapeHtml(likelyNext.name)}.` : ""}</div>`;
 
     this.root.innerHTML = `
       <div style="background:#1a1410;border:1px solid #4a4030;padding:24px 28px;max-width:780px;width:92vw;max-height:82vh;overflow-y:auto;line-height:1.45;font-size:13px;">
@@ -115,7 +120,7 @@ function tierSection(tier: ResearchTier, sim: SimWorld, completed: Set<string>, 
 function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, current: string | null): string {
   const isDone = completed.has(t.id);
   const isCurrent = current === t.id;
-  const isQueued = sim.research.queued === t.id;
+  const leaning = sim.research.leanings?.[t.id] ?? null;
   const prereqsMet = t.prereqs.every((p) => completed.has(p));
   const materialsMet = hasMaterials(t, { cumulative: sim.cumulative, discovered: sim.discoveries });
   const available = !isDone && prereqsMet && materialsMet;
@@ -125,9 +130,7 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
     ? `<span style="color:#7fc08c;">✓ complete</span>`
     : isCurrent
       ? `<span style="color:#e0c080;">studying ${pct}%</span>`
-      : isQueued
-        ? `<span style="color:#9fc0e0;">queued next${banked ? ` · ${pct}%` : ""}</span>`
-        : available
+      : available
           ? `<span style="color:#aaa;">available${banked ? ` · ${pct}% banked` : ""}</span>`
           : `<span style="color:#666;">locked</span>`;
   // Book + author for completed topics — cross-reference sim.books.
@@ -150,15 +153,20 @@ function topicRow(t: ResearchTopic, sim: SimWorld, completed: Set<string>, curre
          <div style="height:3px;width:${pct}%;background:${isCurrent ? "#e0c080" : "#7a6a40"};"></div>
        </div>`
     : "";
-  // Player-choice buttons on available, not-current topics.
+  // Leaning toggles on every unfinished topic (locked ones too, so the
+  // player can signal interest before a topic opens up).
   const btnStyle = "padding:1px 6px;font-size:10px;margin-top:3px;margin-left:4px;";
-  const buttons = available && !isCurrent
+  const leanBtn = (kind: ResearchLeaning, label: string, color: string, title: string) => {
+    const on = leaning === kind;
+    return `<button class="btn${on ? " active" : ""}" data-research-action="${kind}" data-topic="${t.id}" aria-pressed="${on}" style="${btnStyle}${on ? `color:${color};` : ""}" title="${title}">${label}</button>`;
+  };
+  const buttons = !isDone
     ? `<div>
-         <button class="btn" data-research-action="queue" data-topic="${t.id}" style="${btnStyle}" title="${isQueued ? "Un-queue this topic" : "Study this topic when the current one finishes"}">${isQueued ? "Unqueue" : "Study next"}</button>
-         ${current ? `<button class="btn" data-research-action="switch" data-topic="${t.id}" style="${btnStyle}" title="Switch now — progress on the current topic is kept">Study now</button>` : ""}
+         ${leanBtn("favoured", "▲ Favour", "#9fc0e0", `Scholars lean toward this topic (ranked at ${LEANING_COST_WEIGHT.favoured}× its cost). Click again to clear.`)}
+         ${leanBtn("neglected", "▼ Neglect", "#c09080", `Scholars put this topic off (ranked at ${LEANING_COST_WEIGHT.neglected}× its cost). Click again to clear.`)}
        </div>`
     : "";
-  const nameColor = isDone ? "#cdb88a" : isCurrent ? "#e0c080" : isQueued ? "#9fc0e0" : available ? "#bbb" : "#666";
+  const nameColor = isDone ? "#cdb88a" : isCurrent ? "#e0c080" : leaning === "favoured" ? "#9fc0e0" : leaning === "neglected" ? "#8a7a6a" : available ? "#bbb" : "#666";
   return `
     <div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px dashed #2a2a35;">
       <div style="flex:1;min-width:0;">

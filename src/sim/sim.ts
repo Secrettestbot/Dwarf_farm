@@ -467,16 +467,14 @@ function depthPhraseFor(y: number, surfaceY: number): string {
 
 // ---- Research auto-pick -----------------------------------------------
 //
-// If no topic is currently being studied, pick the player's queued
-// topic when it's available, else the cheapest available one. Runs
-// every tick (cheap) so a freshly-completed topic immediately yields
-// the next one. Picking a topic with banked progress (the player
-// switched away from it earlier) resumes that progress.
+// If no topic is currently being studied, the scholars pick the next
+// one themselves: cheapest available, weighted by the player's
+// favoured / neglected leanings (research.ts). Runs every tick (cheap)
+// so a freshly-completed topic immediately yields the next one. A
+// topic with progress banked by an older build resumes it.
 
 function researchPickSystem(sim: SimWorld): void {
   const r = sim.research;
-  // A queued topic that has since been completed is stale.
-  if (r.queued && r.completed.includes(r.queued)) r.queued = null;
   if (r.current) return;
   const next = chooseNextTopic(r, {
     cumulative: sim.cumulative,
@@ -2282,6 +2280,7 @@ function progressResearch(sim: SimWorld, e: EntityId, _job: JobAssignment, pos: 
     sim.research.current = null;
     sim.research.progress = 0;
     if (sim.research.progressById) delete sim.research.progressById[topic.id];
+    if (sim.research.leanings) delete sim.research.leanings[topic.id];
     sim.events.add(
       sim.tick,
       "milestone",
