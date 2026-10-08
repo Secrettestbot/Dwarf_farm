@@ -92,6 +92,21 @@ describe("military squads", () => {
     expect(job?.kind).toBe("engage");
   });
 
+  it("a critically thirsty soldier drinks before engaging", () => {
+    // Otherwise a soldier facing a warband they can't reach (e.g.
+    // outside a Lockdown seal) re-picks "engage" forever and dies of
+    // thirst beside a full cellar.
+    const w = generateWorld({ seed: 87, width: 200, height: 500 });
+    const sim = new SimWorld(87, w.grid, w.surfaceY, w.spawn);
+    const id = sim.spawnDwarf({ name: "Guard", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.squad.set(id, { draftedAtTick: 0 });
+    const n = sim.needs.get(id)!;
+    n.hunger = 100; n.thirst = 10; n.sleep = 100; n.social = 100;
+    sim.spawnHostile({ kind: "cave_rat", x: w.spawn.x + 3, y: w.spawn.y });
+    tick(sim);
+    expect(sim.job.get(id)?.kind).toBe("drink");
+  });
+
   it("the year-end draft equips a recruit from the global tools counter", () => {
     const w = generateWorld({ seed: 91, width: 200, height: 500 });
     const sim = new SimWorld(91, w.grid, w.surfaceY, w.spawn);

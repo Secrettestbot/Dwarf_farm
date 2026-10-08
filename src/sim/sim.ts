@@ -1,5 +1,5 @@
 import { SimWorld } from "./world/simWorld";
-import { chooseTask, shelterNeedsBreak, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO, TRAIN_SKILL_CAP } from "./jobs/chooseTask";
+import { chooseTask, criticalNeedsBreak, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO, TRAIN_SKILL_CAP } from "./jobs/chooseTask";
 import { noteAssigned } from "./jobs/laborWeights";
 import { Rng } from "./rng";
 import { TileType } from "./world/tiles";
@@ -1917,7 +1917,7 @@ function jobAssignmentSystem(sim: SimWorld): void {
       // to drink and eat: at critical thirst / hunger they break off
       // (chooseTask lets critical needs pre-empt the shelter branch)
       // and return to the Safe Zone afterwards.
-      if (job.kind === "shelter" && needs && shelterNeedsBreak(sim, needs)) interrupt = true;
+      if (job.kind === "shelter" && needs && criticalNeedsBreak(sim, needs)) interrupt = true;
       if (
         needs &&
         !survivalKind &&

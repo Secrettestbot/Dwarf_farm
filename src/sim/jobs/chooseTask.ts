@@ -27,10 +27,11 @@ const SOCIAL_RANGE = 10; // tiles
 const HUNGER_CRITICAL = 30;
 const THIRST_CRITICAL = 35;
 
-/** True when a sheltering dwarf's thirst or hunger is critical and
- * there is something to drink / eat — shelter yields to survival so a
- * long Evacuate can't starve the colony in its Safe Zone. */
-export function shelterNeedsBreak(
+/** True when a dwarf's thirst or hunger is critical and there is
+ * something to drink / eat. Shelter, rallying and engaging all yield to
+ * it, so a long Evacuate or siege can't starve the colony — including
+ * soldiers chasing a warband they can't reach. */
+export function criticalNeedsBreak(
   sim: SimWorld,
   needs: { thirst: number; hunger: number },
 ): boolean {
@@ -84,7 +85,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   if (
     isShelterMode(sim.emergency) &&
     (sim.emergency.mode === "evacuate" || !sim.squad.has(e)) &&
-    !(needs && shelterNeedsBreak(sim, needs))
+    !(needs && criticalNeedsBreak(sim, needs))
   ) {
     const spot = shelterSpotFor(sim, e);
     return {
@@ -99,7 +100,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     hostile. Civilians are *not* eligible — they flee or shelter via
   //     the alarm path. Engagement supersedes most needs except critical
   //     thirst / hunger / wounds (those branches sit just below).
-  if (sim.squad.has(e)) {
+  if (sim.squad.has(e) && !(needs && criticalNeedsBreak(sim, needs))) {
     // A soldier below the retreat threshold doesn't take new fights
     // (The Fury overrides) — they fall through to the wounded branch,
     // which routes them to a hospital cot / bed to recover.
