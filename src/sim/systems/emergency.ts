@@ -33,9 +33,30 @@ function walkableCells(sim: SimWorld, b: Blueprint): Array<{ x: number; y: numbe
   return out;
 }
 
+/** Score bonus for a Safe Zone with food and drink close by — a long
+ * Evacuate means trips to eat and drink, and short trips keep the
+ * colony out of a warband's way. Worth ~40 tiles of depth. */
+const SAFE_ZONE_FOOD_BONUS = 40;
+/** "Close by" for SAFE_ZONE_FOOD_BONUS, in tiles between room centres. */
+const SAFE_ZONE_FOOD_RADIUS = 25;
+
+/** True when a finished stockpile or dining hall (where dwarves eat and
+ * drink) is within SAFE_ZONE_FOOD_RADIUS of the room, or is the room. */
+function hasFoodNearby(sim: SimWorld, room: Blueprint): boolean {
+  const cx = room.originX + room.width / 2;
+  const cy = room.originY + room.height / 2;
+  for (const b of sim.planner.blueprints) {
+    if (b.status !== "complete" || (b.kind !== "stockpile" && b.kind !== "dining_hall")) continue;
+    const dx = b.originX + b.width / 2 - cx;
+    const dy = b.originY + b.height / 2 - cy;
+    if (dx * dx + dy * dy <= SAFE_ZONE_FOOD_RADIUS * SAFE_ZONE_FOOD_RADIUS) return true;
+  }
+  return false;
+}
+
 /** Pick the Safe Zone: the deepest finished shelter room that is
- * reachable from the entrance, preferring rooms with a door and more
- * floor space. Returns the blueprint, or null to fall back to the
+ * reachable from the entrance, preferring rooms with a door, food and
+ * drink close by, and more floor space. Returns the blueprint, or null to fall back to the
  * entrance. */
 export function chooseSafeZone(sim: SimWorld): Blueprint | null {
   let best: Blueprint | null = null;
@@ -47,7 +68,8 @@ export function chooseSafeZone(sim: SimWorld): Blueprint | null {
     if (!sim.regions.connected(sim.grid, sim.spawn.x, sim.spawn.y, cells[0].x, cells[0].y)) continue;
     const hasDoor = cells.some((c) => sim.grid.getTile(c.x, c.y) === TileType.Door);
     const depth = b.originY + b.height / 2;
-    const score = depth + (hasDoor ? 20 : 0) + Math.min(cells.length, 30) * 0.5;
+    const nearFood = hasFoodNearby(sim, b);
+    const score = depth + (hasDoor ? 20 : 0) + Math.min(cells.length, 30) * 0.5 + (nearFood ? SAFE_ZONE_FOOD_BONUS : 0);
     if (score > bestScore || (score === bestScore && best && b.id < best.id)) {
       best = b;
       bestScore = score;

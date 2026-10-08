@@ -26,6 +26,19 @@ const SOCIAL_CRITICAL = 15;
 const SOCIAL_RANGE = 10; // tiles
 const HUNGER_CRITICAL = 30;
 const THIRST_CRITICAL = 35;
+
+/** True when a sheltering dwarf's thirst or hunger is critical and
+ * there is something to drink / eat — shelter yields to survival so a
+ * long Evacuate can't starve the colony in its Safe Zone. */
+export function shelterNeedsBreak(
+  sim: SimWorld,
+  needs: { thirst: number; hunger: number },
+): boolean {
+  return (
+    (needs.thirst <= THIRST_CRITICAL && sim.stockpile.drink > 0) ||
+    (needs.hunger <= HUNGER_CRITICAL && (sim.stockpile.food > 0 || sim.stockpile.meals > 0))
+  );
+}
 /** Below this age, dwarves don't take mining work — they sleep, socialise,
  * and wander like the children they are. GDD §6.1: childhood 0–18; light
  * hauling 5–18 lands once we have a hauling system. */
@@ -68,7 +81,11 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //    socialising)" rule. Lockdown does not pull dwarves — it seals the
   //    perimeter and holds migrants outside. During an Alarm, soldiers
   //    engage (0.5 below) or rally at the entrance.
-  if (isShelterMode(sim.emergency) && (sim.emergency.mode === "evacuate" || !sim.squad.has(e))) {
+  if (
+    isShelterMode(sim.emergency) &&
+    (sim.emergency.mode === "evacuate" || !sim.squad.has(e)) &&
+    !(needs && shelterNeedsBreak(sim, needs))
+  ) {
     const spot = shelterSpotFor(sim, e);
     return {
       kind: "shelter" as JobKind,

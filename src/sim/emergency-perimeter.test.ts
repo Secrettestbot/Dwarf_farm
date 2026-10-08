@@ -110,4 +110,24 @@ describe("emergency semantics", () => {
     expect(sim.dwarf.size()).toBeGreaterThan(pop);
     expect(sim.emergency.migrantsCampUntil).toBe(0);
   });
+
+  it("a sheltering dwarf breaks off to drink when critically thirsty, then returns", () => {
+    const sim = makeSim(59);
+    carveRoom(sim, 9005, 10);
+    const e = sim.spawnDwarf({ name: "Parched", x: sim.spawn.x, y: sim.spawn.y, age: 30 });
+    pin(sim);
+    sim.emergency.mode = "evacuate";
+    sim.emergency.startedAtTick = sim.tick;
+    tick(sim);
+    expect(sim.job.get(e)?.kind).toBe("shelter");
+    sim.needs.get(e)!.thirst = 10;
+    tick(sim);
+    expect(sim.job.get(e)?.kind).toBe("drink");
+    // Satisfied again: back to the Safe Zone.
+    sim.job.remove(e);
+    sim.pathing.remove(e);
+    pin(sim);
+    tick(sim);
+    expect(sim.job.get(e)?.kind).toBe("shelter");
+  });
 });

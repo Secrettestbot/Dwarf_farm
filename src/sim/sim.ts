@@ -1,5 +1,5 @@
 import { SimWorld } from "./world/simWorld";
-import { chooseTask, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO, TRAIN_SKILL_CAP } from "./jobs/chooseTask";
+import { chooseTask, shelterNeedsBreak, hasMenacingHostileWithin, FLEE_RADIUS, SOLDIER_RETREAT_RATIO, TRAIN_SKILL_CAP } from "./jobs/chooseTask";
 import { noteAssigned } from "./jobs/laborWeights";
 import { Rng } from "./rng";
 import { TileType } from "./world/tiles";
@@ -504,9 +504,18 @@ function researchPickSystem(sim: SimWorld): void {
 // colony, a dozen in a fortress of two hundred. The rest of the
 // population stays civilian and runs the workshops, farms, and library.
 
-const DRAFT_FRACTION = 0.1;
 const DRAFT_MIN_AGE = 18;
-const DRAFT_MIN_MILITARY_SKILL = 2;
+
+/** Share of the colony drafted each year, set by the Military slider:
+ * nobody at <= 5%, 10% at the neutral 50%, rising to 30% at 100%. The
+ * draft takes the best fighters available — founders start untrained
+ * (skill 1), so a skill floor here meant no colony ever fielded a
+ * guard and every siege landed on unarmed civilians. */
+export function draftFraction(militarySlider: number): number {
+  if (militarySlider <= 0.05) return 0;
+  if (militarySlider <= 0.5) return 0.1 * (militarySlider / 0.5);
+  return 0.1 + 0.4 * (militarySlider - 0.5);
+}
 
 function draftSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
@@ -521,12 +530,13 @@ function draftSystem(sim: SimWorld): void {
     const dw = sim.dwarf.get(id);
     if (!dw) continue;
     if (sim.ageOf(id) < DRAFT_MIN_AGE) continue;
-    const military = dw.skills.military ?? 1;
-    if (military < DRAFT_MIN_MILITARY_SKILL) continue;
-    eligible.push({ id, military });
+    eligible.push({ id, military: dw.skills.military ?? 1 });
   }
   eligible.sort((a, b) => (b.military - a.military) || (a.id - b.id));
-  const target = Math.max(1, Math.ceil(sim.dwarf.size() * DRAFT_FRACTION));
+  const fraction = draftFraction(sim.sliders.military);
+  // Epsilon keeps float noise (10 × 0.1 = 1.0000000000000002) from
+  // drafting an extra soldier.
+  const target = fraction > 0 ? Math.max(1, Math.ceil(sim.dwarf.size() * fraction - 1e-9)) : 0;
   const keep = new Set<EntityId>();
   for (let i = 0; i < Math.min(target, eligible.length); i++) {
     const c = eligible[i];
@@ -1903,6 +1913,11 @@ function jobAssignmentSystem(sim: SimWorld): void {
       const survivalKind =
         job.kind === "eat" || job.kind === "drink" || job.kind === "sleep" || job.kind === "shelter";
       let interrupt = false;
+      // A dwarf sheltering through a long Evacuate or siege still has
+      // to drink and eat: at critical thirst / hunger they break off
+      // (chooseTask lets critical needs pre-empt the shelter branch)
+      // and return to the Safe Zone afterwards.
+      if (job.kind === "shelter" && needs && shelterNeedsBreak(sim, needs)) interrupt = true;
       if (
         needs &&
         !survivalKind &&
