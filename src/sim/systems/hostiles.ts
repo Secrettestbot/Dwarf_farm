@@ -13,6 +13,7 @@ import { HOSTILE_DEFS, HostileKind } from "../hostiles/types";
 import { narrateHostileSpawn, narrateHostileSlain } from "../events/narrator";
 import { awardSkillXp, fireMilestone, killDwarf } from "./shared";
 import { HOLLOW_KING_VICTORY_THRESHOLD } from "./hollowKing";
+import { beginSiegeMorale, siegeMoraleCheck } from "./siegeMorale";
 
 /** Active-zones radius (GDD §12.3): entities further than this from any
  * dwarf get their per-tick work skipped. Picked so the largest pursue
@@ -98,21 +99,9 @@ const SIEGE_MIN_POPULATION = 10; // sieges start when the colony is worth raidin
 /** No warband before the end of the colony's second year: the first
  * year-end draft fields soldiers and they get a season to drill. */
 const FIRST_SIEGE_EARLIEST_TICK = TICKS_PER_YEAR * 2;
-/** A warband that hasn't broken the fortress after this long packs up
- * and leaves. Without it, a walled-off colony faced an eternal siege —
- * goblins path well now, but they can't dig, so an unreachable
- * fortress stalled the siege state forever. */
-const SIEGE_WITHDRAW_TICKS = TICKS_PER_DAY * 6;
-/** Fortification Design (Tier 3): properly designed gates, murder
- * holes and baffled entrances break a warband's will sooner — they
- * withdraw after four days at the walls instead of six. */
-const FORTIFIED_SIEGE_WITHDRAW_TICKS = TICKS_PER_DAY * 4;
-
-export function siegeWithdrawTicks(sim: SimWorld): number {
-  return sim.research.completed.includes("fortification_design")
-    ? FORTIFIED_SIEGE_WITHDRAW_TICKS
-    : SIEGE_WITHDRAW_TICKS;
-}
+/** A warband withdraws when its morale breaks (systems/siegeMorale.ts).
+ * This hard cap is only a backstop so a siege can never stall forever. */
+const SIEGE_MAX_TICKS = TICKS_PER_DAY * 14;
 
 export function siegeSystem(sim: SimWorld): void {
   // Mid-siege check: if the warband is wiped, fire a victory event.
@@ -133,10 +122,10 @@ export function siegeSystem(sim: SimWorld): void {
       );
     } else if (
       sim.siegeStartedAtTick >= 0 &&
-      sim.tick - sim.siegeStartedAtTick >= siegeWithdrawTicks(sim)
+      (siegeMoraleCheck(sim) || sim.tick - sim.siegeStartedAtTick >= SIEGE_MAX_TICKS)
     ) {
-      // Withdrawal: the warband gives up. Outlasting a siege counts
-      // as surviving it — the fortress held, whether by axe or wall.
+      // Withdrawal: the warband's morale has broken. Outlasting a siege
+      // counts as surviving it — the fortress held, whether by axe or wall.
       for (const id of sim.hostile.entities.slice()) {
         const h = sim.hostile.get(id);
         if (!h || !h.siegeMember) continue;
@@ -149,7 +138,7 @@ export function siegeSystem(sim: SimWorld): void {
       sim.events.add(
         sim.tick,
         "milestone",
-        `The warband breaks camp and withdraws — ${siegeWithdrawTicks(sim) === FORTIFIED_SIEGE_WITHDRAW_TICKS ? "four" : "six"} days at the gate bought them nothing. Count it the ${ordinal(sim.siegesSurvived)} siege the colony has survived.`,
+        `Their nerve broken, the warband breaks camp and withdraws. Count it the ${ordinal(sim.siegesSurvived)} siege the colony has survived.`,
       );
     }
   }
@@ -257,6 +246,7 @@ function spawnSiegeWarband(sim: SimWorld): void {
   sim.siegeActive = true;
   sim.siegeStartedAtTick = sim.tick;
   sim.siegeKilledSinceStart = 0;
+  beginSiegeMorale(sim, goblinCount + trollCount + warlordCount);
   sim.siegeWarlordName = warlordName;
   const leaderClause = warlordCount > 0
     ? `, led by ${warlordName}`
@@ -545,6 +535,8 @@ export function combatSystem(sim: SimWorld): void {
           dwarfHealth.wasSevereWound = true;
         }
         if (dwarfHealth.hp <= 0) {
+          // Blood emboldens a besieging warband (siegeMorale.ts).
+          if (hostile.siegeMember && sim.siegeActive) sim.siegeDwarvesSlain++;
           killDwarf(sim, target, `slain by ${def.spawnArticle}`);
         }
       }
@@ -632,6 +624,8 @@ export function combatSystem(sim: SimWorld): void {
           const hp = sim.position.get(h);
           if (hp) sim.spawnItem({ kind: "hide", x: hp.x, y: hp.y });
         }
+        // Every warband member lost saps the rest (siegeMorale.ts).
+        if (hostile.siegeMember && sim.siegeActive) sim.siegeGoblinsLost++;
         sim.ecs.destroy(h, [sim.position, sim.hostile, sim.health]);
       }
     }

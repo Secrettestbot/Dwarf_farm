@@ -519,7 +519,21 @@ export function draftFraction(militarySlider: number): number {
 
 function draftSystem(sim: SimWorld): void {
   if (sim.tick === 0) return;
-  if (sim.tick % TICKS_PER_YEAR !== 0) return;
+  // The yearly draft, plus a muster when a siege is announced and then
+  // daily while one is coming or under way: soldiers are called up
+  // (Military slider sets how many) and unarmed ones draw weapons as
+  // the forge turns them out. Sealing the gates buys time for this.
+  const yearly = sim.tick % TICKS_PER_YEAR === 0;
+  const siegeLooming = sim.siegeScheduledTick > 0 || sim.siegeActive;
+  if (!siegeLooming) sim.siegeMusteredTick = -1;
+  const muster = siegeLooming && (sim.siegeMusteredTick < 0 || sim.tick - sim.siegeMusteredTick >= TICKS_PER_DAY);
+  if (!yearly && !muster) return;
+  if (muster) {
+    if (sim.siegeMusteredTick < 0 && draftFraction(sim.sliders.military) > 0) {
+      sim.events.add(sim.tick, "crisis", "The colony musters. Able hands are called to arms against the coming warband.");
+    }
+    sim.siegeMusteredTick = sim.tick;
+  }
   // Gather eligible adults sorted by Military skill descending; tie-break by
   // entity id for determinism.
   type Cand = { id: EntityId; military: number };
@@ -1814,6 +1828,21 @@ function seasonRolloverSystem(sim: SimWorld): void {
  * decay as though every dwarf had a 15% stronger constitution. */
 const ALCHEMY_BASICS_NEED_DECAY_SCALE = 1.15;
 
+/** Morale-target penalties for living under siege (the cost of hiding
+ * it out). Morale drifts ~1/hour, so a short shelter is cheap but a
+ * week sealed in pushes dwarves toward tantrums. */
+const SIEGE_DREAD_MORALE = 15;
+const SHELTER_COOPED_MORALE = 25;
+const SEALED_IN_MORALE = 10;
+
+function hidingMoralePenalty(sim: SimWorld, e: EntityId): number {
+  let p = 0;
+  if (sim.siegeActive) p += SIEGE_DREAD_MORALE;
+  if (sim.job.get(e)?.kind === "shelter") p += SHELTER_COOPED_MORALE;
+  if (sim.emergency.mode === "lockdown") p += SEALED_IN_MORALE;
+  return p;
+}
+
 function needsSystem(sim: SimWorld): void {
   const ents = sim.dwarf.entities;
   const alchemy = sim.research.completed.includes("alchemy_basics") ? ALCHEMY_BASICS_NEED_DECAY_SCALE : 1;
@@ -1856,7 +1885,7 @@ function needsSystem(sim: SimWorld): void {
       n.decayAccumMorale -= MORALE_TICK_INTERVAL;
       const baseline = effects?.moraleBaseline ?? 50;
       const avgNeeds = (n.sleep + n.social + n.hunger + n.thirst) / 4;
-      const target = Math.max(0, Math.min(100, baseline + (avgNeeds - 50) * 0.4));
+      const target = Math.max(0, Math.min(100, baseline + (avgNeeds - 50) * 0.4 - hidingMoralePenalty(sim, e)));
       if (n.morale < target) n.morale = Math.min(100, n.morale + 1);
       else if (n.morale > target) n.morale = Math.max(0, n.morale - 1);
     }

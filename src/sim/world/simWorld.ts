@@ -332,6 +332,16 @@ export class SimWorld {
   /** Snapshot of siegesSurvived at the moment a siege starts, so
    * the end-of-siege event knows whether to bump the counter. */
   siegeKilledSinceStart: number = 0;
+  /** Warband morale bookkeeping (systems/siegeMorale.ts): size at
+   * arrival, warband members lost, dwarves the warband has slain, and
+   * how many wavering beats have been chronicled. */
+  siegeInitialSize: number = 0;
+  siegeGoblinsLost: number = 0;
+  siegeDwarvesSlain: number = 0;
+  siegeMoraleBeat: number = 0;
+  /** Tick of the last siege muster (draftSystem), or -1 when no siege
+   * is looming. Transient: a reload simply musters again. */
+  siegeMusteredTick: number = -1;
   /** Name of the warlord leading the active siege, if any. Empty
    * when no siege is active or the colony's too small for a
    * warlord to lead. */

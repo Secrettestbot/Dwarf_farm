@@ -1,3 +1,4 @@
+import { moraleBeatFor, siegeMorale } from "../sim/systems/siegeMorale";
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
 import { CURRENT_SAVE_VERSION, SaveData, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
@@ -263,6 +264,9 @@ export function snapshot(input: SnapshotInput): SaveData {
           survived: sim.siegesSurvived,
           startedAtTick: sim.siegeStartedAtTick >= 0 ? sim.siegeStartedAtTick : undefined,
           warlordName: sim.siegeWarlordName || undefined,
+          initialSize: sim.siegeInitialSize || undefined,
+          goblinsLost: sim.siegeGoblinsLost || undefined,
+          dwarvesSlain: sim.siegeDwarvesSlain || undefined,
         }
       : undefined,
     // Named hostiles are stored on their SavedHostile entries (the
@@ -628,6 +632,9 @@ export function restore(save: SaveData): SimWorld {
     sim.siegeStartedAtTick = save.siege.startedAtTick
       ?? (save.siege.active ? save.tick : -1);
     sim.siegeWarlordName = save.siege.warlordName ?? "";
+    sim.siegeGoblinsLost = save.siege.goblinsLost ?? 0;
+    sim.siegeDwarvesSlain = save.siege.dwarvesSlain ?? 0;
+    sim.siegeInitialSize = save.siege.initialSize ?? 0;
   }
   if (save.hostileNames) {
     for (const e of save.hostileNames) sim.hostileNames.set(e.id, e.name);
@@ -727,6 +734,15 @@ export function restore(save: SaveData): SimWorld {
       });
       if (id !== -1 && h.name) sim.hostileNames.set(id, h.name);
     }
+  }
+  if (sim.siegeActive) {
+    // Older saves have no morale bookkeeping: treat the live warband
+    // as its starting size. Then mark the wavering beats already
+    // passed so they aren't chronicled twice.
+    if (sim.siegeInitialSize <= 0) {
+      for (const id of sim.hostile.entities) if (sim.hostile.get(id)?.siegeMember) sim.siegeInitialSize++;
+    }
+    sim.siegeMoraleBeat = moraleBeatFor(siegeMorale(sim));
   }
   // Restore pets — wild and tame both. ownerIndex maps back through
   // the dwarf-restoration array so the owner's entity id is correct

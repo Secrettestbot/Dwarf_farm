@@ -1518,6 +1518,10 @@ function findHostileTarget(sim: SimWorld, sx: number, sy: number): { x: number; 
     const dy = p.y - sy;
     const d = dx * dx + dy * dy;
     if (d > SOLDIER_ENGAGE_RANGE * SOLDIER_ENGAGE_RANGE) continue;
+    // Only hostiles the soldier can actually reach: a warband outside
+    // sealed gates isn't a target, so the squad drills instead of
+    // pacing at the seal.
+    if (!sim.regions.connected(sim.grid, sx, sy, p.x, p.y)) continue;
     if (
       !best ||
       d < best.d ||

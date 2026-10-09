@@ -347,6 +347,11 @@ export interface SaveData {
     /** Name of the warlord currently leading the active siege, if
      * any. Empty when no warlord is in play. */
     warlordName?: string;
+    /** Warband morale bookkeeping (systems/siegeMorale.ts). Optional:
+     * older saves treat the live warband as its starting size. */
+    initialSize?: number;
+    goblinsLost?: number;
+    dwarvesSlain?: number;
   };
   /** Per-hostile display names — pinned for named foes (the
    * goblin warlord, future named bosses). Keyed by entity id;

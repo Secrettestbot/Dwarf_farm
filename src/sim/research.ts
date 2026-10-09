@@ -203,7 +203,7 @@ export const TIER_3_TOPICS: ResearchTopic[] = [
     tier: 3, cost: 1300, prereqs: ["armoury_basics", "advanced_metallurgy"] },
   { id: "military_tactics", name: "Military Tactics", effect: "Goblin scouts arrive in larger, more frequent patrols (the enemy adapts).",
     tier: 3, cost: 1500, prereqs: ["weaponsmithing"] },
-  { id: "fortification_design", name: "Fortification Design", effect: "Besieging warbands give up after 4 days instead of 6.",
+  { id: "fortification_design", name: "Fortification Design", effect: "Besieging warbands lose heart 50% faster.",
     tier: 3, cost: 1500, prereqs: ["masonry_and_mortaring", "carpentry_mechanisms"],
     materials: [{ resource: "blocks", min: 10, describe: "10 stone blocks cut" }] },
   { id: "gem_cutting", name: "Gem Cutting", effect: "Unlocks the Jeweller (rough gems into cut gems).",

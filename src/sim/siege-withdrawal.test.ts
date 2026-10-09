@@ -3,9 +3,10 @@ import { generateWorld } from "./world/worldgen";
 import { SimWorld } from "./world/simWorld";
 import { tick } from "./sim";
 import { TICKS_PER_DAY } from "./time";
+import { beginSiegeMorale, siegeMoraleRate } from "./systems/siegeMorale";
 
 describe("siege withdrawal", () => {
-  it("an unbeatable warband withdraws after six days and counts as survived", () => {
+  it("an unbeatable warband loses heart, withdraws, and counts as survived", () => {
     const w = generateWorld({ seed: 5501, width: 200, height: 500 });
     const sim = new SimWorld(5501, w.grid, w.surfaceY, w.spawn);
     sim.spawnDwarf({ name: "D0", x: w.spawn.x, y: w.spawn.y, age: 30 });
@@ -20,11 +21,14 @@ describe("siege withdrawal", () => {
     });
     sim.siegeActive = true;
     sim.siegeStartedAtTick = sim.tick;
+    beginSiegeMorale(sim, 1);
     const survivedBefore = sim.siegesSurvived;
-    // Jump to just before the withdrawal deadline, then cross it.
-    sim.tick += TICKS_PER_DAY * 6 - 2;
+    // Morale reaches zero after 100 / rate days with nothing achieved.
+    const breakTicks = Math.ceil((100 / siegeMoraleRate(sim)) * TICKS_PER_DAY);
+    sim.tick += breakTicks - 2;
     tick(sim);
     expect(sim.siegeActive).toBe(true);
+    tick(sim);
     tick(sim);
     expect(sim.siegeActive).toBe(false);
     expect(sim.ecs.isAlive(gob)).toBe(false);

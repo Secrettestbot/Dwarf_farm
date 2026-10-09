@@ -16,7 +16,8 @@ import { TileType } from "./world/tiles";
 import { Blueprint, QUALITY_BASE } from "./planner/blueprint";
 import { TICKS_PER_DAY } from "./time";
 import { haulerCapForColony } from "./jobs/chooseTask";
-import { siegeWithdrawTicks, voidMetallurgyBonus } from "./systems/hostiles";
+import { voidMetallurgyBonus } from "./systems/hostiles";
+import { FORTIFIED_DECAY_FACTOR, siegeMoraleRate } from "./systems/siegeMorale";
 import { hollowKingSystem, nightmareIntervalTicks, shadesPerSiege } from "./systems/hollowKing";
 
 function freshSim(seed: number): SimWorld {
@@ -68,27 +69,11 @@ describe("research unlock effects", () => {
     expect(haulerCapForColony(sim)).toBe(6);
   });
 
-  it("fortification_design makes a stalled warband withdraw after four days", () => {
+  it("fortification_design makes a besieging warband lose heart faster", () => {
     const sim = freshSim(5501);
-    sim.spawnDwarf({ name: "D0", x: sim.spawn.x, y: sim.spawn.y, age: 30 });
-    pinNeeds(sim);
+    const base = siegeMoraleRate(sim);
     sim.research.completed.push("fortification_design");
-    expect(siegeWithdrawTicks(sim)).toBe(TICKS_PER_DAY * 4);
-    const gob = sim.spawnHostile({
-      kind: "goblin_scout",
-      x: sim.spawn.x,
-      y: sim.surfaceY[sim.spawn.x],
-      siegeMember: true,
-    });
-    sim.siegeActive = true;
-    sim.siegeStartedAtTick = sim.tick;
-    sim.tick += TICKS_PER_DAY * 4 - 2;
-    tick(sim);
-    expect(sim.siegeActive).toBe(true);
-    tick(sim);
-    expect(sim.siegeActive).toBe(false);
-    expect(sim.ecs.isAlive(gob)).toBe(false);
-    expect(sim.events.events.some((e) => e.text.includes("four days at the gate"))).toBe(true);
+    expect(siegeMoraleRate(sim)).toBeCloseTo(base * FORTIFIED_DECAY_FACTOR);
   });
 
   it("gem_inlay makes cut-gem engravings add more room quality", () => {
