@@ -195,13 +195,18 @@ export interface SavedStockpile {
   wheelbarrows?: number;
 }
 
-export interface SaveV1 {
+/** One persisted fortress — the shape at CURRENT_SAVE_VERSION. Older
+ * records are brought up to this shape by migrateSave(). */
+export interface SaveData {
   version: number;
   slotId: string;
   /** Friendly fortress name shown on the title screen — set when the founders begin. */
   fortressName: string;
   /** Permadeath choice. Stored at fortress creation; never changes. */
   mode: GameMode;
+  /** Set when the fortress fell (population reached zero) or a Saga
+   * run was abandoned. A fallen Saga slot is a read-only memorial. */
+  fallenAtTick?: number;
   seed: number;
   width: number;
   height: number;
@@ -247,7 +252,20 @@ export interface SaveV1 {
   /** Loose items on the floor at save time. */
   items?: SavedItem[];
   /** Research progress. Optional for back-compat with v2 saves. */
-  research?: { current: string | null; progress: number; completed: string[] };
+  research?: {
+    current: string | null;
+    progress: number;
+    completed: string[];
+    /** Player favoured / neglected leanings per topic id. Optional —
+     * absent in older saves. */
+    leanings?: Record<string, "favoured" | "neglected">;
+    /** Legacy (pre-leanings builds): a "Study next" topic. Read on load
+     * as a favoured leaning; never written. */
+    queued?: string | null;
+    /** Per-topic progress banked by the old "Study now" switch.
+     * Optional — absent in older saves. */
+    progressById?: Record<string, number>;
+  };
   /** GDD §10.2 narrative milestones already announced (e.g. "The First
    * Hearth", "Iron Mountain"). Optional for back-compat — older saves
    * lose the bookkeeping but the milestones don't re-fire because the
@@ -329,6 +347,11 @@ export interface SaveV1 {
     /** Name of the warlord currently leading the active siege, if
      * any. Empty when no warlord is in play. */
     warlordName?: string;
+    /** Warband morale bookkeeping (systems/siegeMorale.ts). Optional:
+     * older saves treat the live warband as its starting size. */
+    initialSize?: number;
+    goblinsLost?: number;
+    dwarvesSlain?: number;
   };
   /** Per-hostile display names — pinned for named foes (the
    * goblin warlord, future named bosses). Keyed by entity id;
@@ -404,15 +427,30 @@ export interface SaveV1 {
   discoveries?: number[];
 }
 
-// Bumped 2 → 3 for the rooms-need-furniture overhaul: the
-// blueprint state machine grew a needs_furnishing tier, item kinds
-// gained "bed", carpenter recipes split into planks vs bed. Old
-// saves are dropped rather than migrated — the room state on a
-// loaded colony wouldn't match the new gates.
-/** v4: index-encoded entity references (mayor/king/broker/grudges,
- * per-hostile names, siege member flags + start tick). See
- * migrations.ts for the vN -> vN+1 chain. */
+
+/**
+ * Version history (see migrations.ts for the vN -> vN+1 chain; the
+ * oldest loadable version is 2):
+ *
+ * - v1: session-1 single-slot saves. Not loadable — migrateSave()
+ *   rejects them with a readable error.
+ * - v2: multi-slot saves with founders, traits and skills.
+ * - v3: rooms-need-furniture overhaul (needs_furnishing blueprint tier,
+ *   furniturePlaced, "bed" item kind). When this landed the plan was to
+ *   drop v2 saves, but no loader ever enforced that, and the migration
+ *   chain now upgrades v2 -> v3 as an identity step: a v2 room that is
+ *   "complete" was auto-furnished on the old path (its furniture tiles
+ *   are in tileOverrides), so it stays complete; v2 "digging" rooms go
+ *   through the new furnishing gate when they finish. Every field v3
+ *   added is optional and defaulted by restore().
+ * - v4: index-encoded entity references (mayor/king/broker/grudges,
+ *   per-hostile names, siege member flags + start tick). v3 -> v4 drops
+ *   the legacy raw-id fields that cannot be mapped onto a restored world.
+ */
 export const CURRENT_SAVE_VERSION = 4 as const;
+
+/** Oldest save version migrateSave() can bring forward. */
+export const OLDEST_SUPPORTED_SAVE_VERSION = 2 as const;
 
 /** A lightweight summary of a save slot, shown on the title screen. */
 export interface SlotSummary {
@@ -422,6 +460,7 @@ export interface SlotSummary {
   population: number;
   tick: number;
   realTimestampMs: number;
+  fallenAtTick?: number;
 }
 
 export const SAVE_SLOT_IDS = ["slot0", "slot1", "slot2", "slot3", "slot4"] as const;

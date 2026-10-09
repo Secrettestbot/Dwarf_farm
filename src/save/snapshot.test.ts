@@ -75,4 +75,38 @@ describe("snapshot/restore", () => {
     expect(b.planner.nextId).toBe(a.planner.nextId);
     expect(b.planner.completed).toBe(a.planner.completed);
   });
+
+  it("preserves research leanings + banked per-topic progress", () => {
+    const a = buildSim(77);
+    a.research.completed = ["basic_cooking"];
+    a.research.current = "basic_brewing";
+    a.research.progress = 123.5;
+    a.research.leanings = { rope_and_fibre: "favoured", basic_carpentry: "neglected" };
+    a.research.progressById = { basic_carpentry: 456 };
+    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    const b = restore(structuredClone(save));
+    expect(b.research.current).toBe("basic_brewing");
+    expect(b.research.progress).toBe(123.5);
+    expect(b.research.completed).toEqual(["basic_cooking"]);
+    expect(b.research.leanings).toEqual({ rope_and_fibre: "favoured", basic_carpentry: "neglected" });
+    expect(b.research.progressById).toEqual({ basic_carpentry: 456 });
+  });
+
+  it("loads an older save whose research block has no leaning fields", () => {
+    const a = buildSim(78);
+    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    save.research = { current: "basic_brewing", progress: 10, completed: [] };
+    const b = restore(save);
+    expect(b.research.current).toBe("basic_brewing");
+    expect(b.research.leanings).toEqual({});
+    expect(b.research.progressById).toEqual({});
+  });
+
+  it("turns an older save's queued \"Study next\" topic into a favoured leaning", () => {
+    const a = buildSim(79);
+    const save = snapshot({ sim: a, slotId: "slot0", fortressName: "Test Hold", mode: "legacy", cameraX: 0, cameraY: 0, zoomIndex: 1 });
+    save.research = { current: null, progress: 0, completed: [], queued: "basic_carpentry", leanings: { basic_cooking: "bogus" as never } };
+    const b = restore(save);
+    expect(b.research.leanings).toEqual({ basic_carpentry: "favoured" });
+  });
 });

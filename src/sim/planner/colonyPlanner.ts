@@ -69,8 +69,10 @@ export interface PlannerContext {
    * supply — without it, a room would block on "carpenter must be
    * complete" even when a founder-kit bed is sitting at spawn ready
    * to deliver. Optional; older callers pass undefined and the
-   * gate falls back to producer-complete only. */
-  availableFurniture?: Set<string>;
+   * gate falls back to producer-complete only. May be a provider
+   * function so the caller only pays for building the set when the
+   * architect actually consults it. */
+  availableFurniture?: ReadonlySet<string> | (() => ReadonlySet<string>);
 }
 
 const PLAN_INTERVAL_TICKS = 60; // re-evaluate once per in-game hour
@@ -1442,8 +1444,9 @@ export class ColonyPlanner {
     // Callers without an availableFurniture set (planner-only
     // tests, callers that haven't opted in) get the legacy
     // "no gate" behavior so existing test fixtures keep emitting.
-    const avail = ctx.availableFurniture;
-    if (!avail) return true;
+    const provided = ctx.availableFurniture;
+    if (!provided) return true;
+    const avail = typeof provided === "function" ? provided() : provided;
     const reqs = FURNITURE_REQUIREMENTS[kind];
     if (reqs) {
       for (const r of reqs) if (avail.has(r.item)) return true;

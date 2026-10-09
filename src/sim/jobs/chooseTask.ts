@@ -10,7 +10,15 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR } from "../time";
 import { TileType } from "../world/tiles";
 import { BlueprintKind, FURNITURE_REQUIREMENTS, isRoomNeglected, maxDecorationsFor } from "../planner/blueprint";
 import { isShelterMode } from "../emergency";
+import { shelterSpotFor } from "../systems/emergency";
 import { recipeFor } from "../planner/recipes";
+import {
+  categoryOpen,
+  haulerCapScale,
+  LaborCategory,
+  promotedCategories,
+  SLIDER_OFF,
+} from "./laborWeights";
 
 const SLEEP_CRITICAL = 25;
 const SOCIAL_THRESHOLD = 35;
@@ -18,6 +26,20 @@ const SOCIAL_CRITICAL = 15;
 const SOCIAL_RANGE = 10; // tiles
 const HUNGER_CRITICAL = 30;
 const THIRST_CRITICAL = 35;
+
+/** True when a dwarf's thirst or hunger is critical and there is
+ * something to drink / eat. Shelter, rallying and engaging all yield to
+ * it, so a long Evacuate or siege can't starve the colony — including
+ * soldiers chasing a warband they can't reach. */
+export function criticalNeedsBreak(
+  sim: SimWorld,
+  needs: { thirst: number; hunger: number },
+): boolean {
+  return (
+    (needs.thirst <= THIRST_CRITICAL && sim.stockpile.drink > 0) ||
+    (needs.hunger <= HUNGER_CRITICAL && (sim.stockpile.food > 0 || sim.stockpile.meals > 0))
+  );
+}
 /** Below this age, dwarves don't take mining work — they sleep, socialise,
  * and wander like the children they are. GDD §6.1: childhood 0–18; light
  * hauling 5–18 lands once we have a hauling system. */
@@ -52,19 +74,24 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // through if no target is found, so a dwarf never gets stuck idle when a
   // lower-priority alternative is reachable.
 
-  // 0. Emergency shelter override — Alarm and Evacuate both pull every
-  //    civilian to the Safe Zone (currently the spawn tile). Even hunger
-  //    and thirst defer until the panic subsides; that matches the GDD's
+  // 0. Emergency shelter override — Alarm sends civilians, and
+  //    Evacuate sends everyone, to the Safe Zone (the deepest finished
+  //    room, chosen by emergencySystem; see systems/emergency.ts). Even
+  //    hunger and thirst defer until the panic subsides, per the GDD's
   //    "drop their current job (including eating, sleeping, and
-  //    socialising)" rule. Lockdown does not pull dwarves — it just
-  //    blocks the perimeter and the migration system. Soldiers don't
-  //    shelter — they engage; their branch lands two priorities below
-  //    survival needs.
-  if (isShelterMode(sim.emergency) && !sim.squad.has(e)) {
+  //    socialising)" rule. Lockdown does not pull dwarves — it seals the
+  //    perimeter and holds migrants outside. During an Alarm, soldiers
+  //    engage (0.5 below) or rally at the entrance.
+  if (
+    isShelterMode(sim.emergency) &&
+    (sim.emergency.mode === "evacuate" || !sim.squad.has(e)) &&
+    !(needs && criticalNeedsBreak(sim, needs))
+  ) {
+    const spot = shelterSpotFor(sim, e);
     return {
       kind: "shelter" as JobKind,
-      targetX: sim.spawn.x,
-      targetY: sim.spawn.y,
+      targetX: spot.x,
+      targetY: spot.y,
       progress: 0,
     };
   }
@@ -73,7 +100,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     hostile. Civilians are *not* eligible — they flee or shelter via
   //     the alarm path. Engagement supersedes most needs except critical
   //     thirst / hunger / wounds (those branches sit just below).
-  if (sim.squad.has(e)) {
+  if (sim.squad.has(e) && !(needs && criticalNeedsBreak(sim, needs))) {
     // A soldier below the retreat threshold doesn't take new fights
     // (The Fury overrides) — they fall through to the wounded branch,
     // which routes them to a hospital cot / bed to recover.
@@ -89,6 +116,10 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
           targetY: target.y,
           progress: 0,
         };
+      }
+      // Alarm with nothing to fight: hold the entrance.
+      if (sim.emergency.mode === "alarm") {
+        return { kind: "shelter" as JobKind, targetX: sim.spawn.x, targetY: sim.spawn.y, progress: 0 };
       }
     }
   }
@@ -193,9 +224,9 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     Hospital cot (their own findSleepTarget routed them there); and
   //     no other medic is already on the way. Walks adjacent to the
   //     patient and stays until the disease clears.
-  if (age >= MIN_WORK_AGE) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "medicine")) {
     const selfDw = sim.dwarf.get(e);
-    if (selfDw && (selfDw.skills.medicine ?? 1) >= MEDIC_MIN_SKILL) {
+    if (selfDw && (selfDw.skills.medicine ?? 1) >= medicMinSkill(sim)) {
       const patient = findPatientForTreatment(sim, e, pos.x, pos.y);
       if (patient !== -1) {
         const ppos = sim.position.get(patient)!;
@@ -249,6 +280,17 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
     }
   }
 
+  // 4.9 Slider emphasis — a share of workers proportional to how far
+  //     a work slider sits above neutral checks that category before
+  //     the standard order (see laborWeights.ts). At default settings
+  //     nobody is promoted and the cascade below is unchanged.
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e)) {
+    for (const cat of promotedCategories(sim, e)) {
+      const proposal = trySpecialtyBranch(sim, e, pos, CATEGORY_JOB[cat]);
+      if (proposal) return proposal;
+    }
+  }
+
   // 5. Tend a farm cell that's getting close to fallow. Capped at
   //    one concurrent tender per farm via findTendTarget — without
   //    that cap every farm with overdue cells (most of them, most
@@ -257,7 +299,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //    prevents the tend → harvest → re-tend loop when a dwarf
   //    finishes a tend holding the harvested food: they fall
   //    through to step 6.5's delivery branch instead.
-  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && sim.sliders.farming > 0.05) {
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && categoryOpen(sim, "farming")) {
     const tendTarget = findTendTarget(sim, pos.x, pos.y);
     if (tendTarget) {
       return { kind: "tend" as JobKind, targetX: tendTarget.x, targetY: tendTarget.y, progress: 0 };
@@ -267,7 +309,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // 6. Maintain a neglected room. !carrying gate for the same
   //    reason as tend — a dwarf holding something needs to drop it
   //    in step 6.5 before starting upkeep work.
-  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && sim.sliders.construction > 0.05) {
+  if (age >= MIN_WORK_AGE && !sim.carrying.has(e) && categoryOpen(sim, "construction")) {
     const maintainTarget = findMaintainTarget(sim, pos.x, pos.y);
     if (maintainTarget) {
       return { kind: "maintain" as JobKind, targetX: maintainTarget.x, targetY: maintainTarget.y, progress: 0 };
@@ -282,7 +324,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     them here automatically. Carrying-with-no-destination drops
   //     in place and falls THROUGH past the else-pickup branch so
   //     the dwarf doesn't immediately re-grab what they just dropped.
-  if (age >= MIN_WORK_AGE && sim.sliders.hauling > 0.05) {
+  if (age >= MIN_WORK_AGE && sim.sliders.hauling > SLIDER_OFF) {
     const carrying = sim.carrying.get(e);
     if (carrying) {
       const workshop = findWorkshopWantingInput(sim, carrying.kind, pos.x, pos.y);
@@ -329,8 +371,8 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
       // haul jobs, leaving nobody at workshops, mining faces, or
       // research desks and making the colony read as a single big
       // haul column.
-      const haulerCap = haulerCapForColony(sim);
-      if (countActiveHaulers(sim) < haulerCap) {
+      const haulerCap = Math.round(haulerCapForColony(sim) * haulerCapScale(sim.sliders));
+      if (categoryOpen(sim, "hauling") && countActiveHaulers(sim) < haulerCap) {
         const haul = findHaulTarget(sim, e, pos.x, pos.y);
         if (haul) {
           return { kind: "haul" as JobKind, targetX: haul.x, targetY: haul.y, progress: 0 };
@@ -342,7 +384,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   // 6.7 Craft at a workshop. Gated by the Crafting slider. Skips
   //     workshops whose recipe input isn't in the stockpile so a smelter
   //     with no ore doesn't tie up a dwarf for nothing.
-  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "crafting")) {
     const craftTarget = findCraftTarget(sim, pos.x, pos.y);
     if (craftTarget) {
       return { kind: "craft" as JobKind, targetX: craftTarget.x, targetY: craftTarget.y, progress: 0 };
@@ -354,7 +396,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //     that isn't already maxed on decorations. Sinks the surplus
   //     mason / jeweller output into permanent room-quality bumps
   //     and chronicle-worthy art. Same Crafting slider gate.
-  if (age >= MIN_WORK_AGE && sim.sliders.crafting > 0.05) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "crafting")) {
     const engraveTarget = findEngraveTarget(sim, pos.x, pos.y);
     if (engraveTarget) {
       return { kind: "engrave" as JobKind, targetX: engraveTarget.x, targetY: engraveTarget.y, progress: 0 };
@@ -366,7 +408,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
   //      the only way to grow the military skill in peacetime. Drills
   //      teach up to Expert (13); the tiers beyond come from real
   //      combat. One trainee per rack.
-  if (age >= MIN_WORK_AGE && sim.squad.has(e) && sim.sliders.military > 0.05) {
+  if (age >= MIN_WORK_AGE && sim.squad.has(e) && categoryOpen(sim, "military")) {
     const dw = sim.dwarf.get(e);
     if (dw && (dw.skills.military ?? 1) < TRAIN_SKILL_CAP) {
       const rack = findTrainingRack(sim, pos.x, pos.y);
@@ -390,7 +432,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 6.8 Research at a Library desk. Gated by the Research slider, and
   //     only fires when there's an active topic to study.
-  if (age >= MIN_WORK_AGE && sim.sliders.research > 0.05 && sim.research.current) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "research") && sim.research.current) {
     const desk = findResearchDesk(sim, pos.x, pos.y);
     if (desk) {
       return { kind: "research" as JobKind, targetX: desk.x, targetY: desk.y, progress: 0 };
@@ -399,7 +441,7 @@ export function chooseTask(sim: SimWorld, e: EntityId): JobAssignment | null {
 
   // 7. Mine inside an active blueprint. Gated by the Excavation slider —
   //    set to zero, the colony stops digging entirely.
-  if (age >= MIN_WORK_AGE && sim.sliders.excavation > 0.05) {
+  if (age >= MIN_WORK_AGE && categoryOpen(sim, "excavation")) {
     const mineTarget = findMineTarget(sim, pos.x, pos.y);
     if (mineTarget) {
       return { kind: "mine" as JobKind, targetX: mineTarget.x, targetY: mineTarget.y, progress: 0 };
@@ -522,44 +564,52 @@ function trySpecialtyBranch(
 ): JobAssignment | null {
   switch (kind) {
     case "mine": {
-      if (sim.sliders.excavation <= 0.05) return null;
+      if (!categoryOpen(sim, "excavation")) return null;
       const t = findMineTarget(sim, pos.x, pos.y);
       return t ? { kind: "mine" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "haul": {
-      if (sim.sliders.hauling <= 0.05) return null;
+      if (!categoryOpen(sim, "hauling")) return null;
       const t = findHaulTarget(sim, e, pos.x, pos.y);
       return t ? { kind: "haul" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "tend": {
-      if (sim.sliders.farming <= 0.05) return null;
+      if (!categoryOpen(sim, "farming")) return null;
       const t = findTendTarget(sim, pos.x, pos.y);
       return t ? { kind: "tend" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "craft": {
-      if (sim.sliders.crafting <= 0.05) return null;
+      if (!categoryOpen(sim, "crafting")) return null;
       const t = findCraftTarget(sim, pos.x, pos.y);
       return t ? { kind: "craft" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "research": {
-      if (sim.sliders.research <= 0.05 || !sim.research.current) return null;
+      if (!categoryOpen(sim, "research") || !sim.research.current) return null;
       const t = findResearchDesk(sim, pos.x, pos.y);
       return t ? { kind: "research" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "treat": {
+      if (!categoryOpen(sim, "medicine")) return null;
       const dw = sim.dwarf.get(e);
-      if (!dw || (dw.skills.medicine ?? 1) < MEDIC_MIN_SKILL) return null;
+      if (!dw || (dw.skills.medicine ?? 1) < medicMinSkill(sim)) return null;
       const patient = findPatientForTreatment(sim, e, pos.x, pos.y);
       if (patient === -1) return null;
       const ppos = sim.position.get(patient)!;
       return { kind: "treat" as JobKind, targetX: ppos.x, targetY: ppos.y, progress: 0, partnerId: patient };
+    }
+    case "train": {
+      if (!sim.squad.has(e) || !categoryOpen(sim, "military")) return null;
+      const dw = sim.dwarf.get(e);
+      if (!dw || (dw.skills.military ?? 1) >= TRAIN_SKILL_CAP) return null;
+      const t = findTrainingRack(sim, pos.x, pos.y);
+      return t ? { kind: "train" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "pump": {
       const t = findPumpTarget(sim, pos.x, pos.y);
       return t ? { kind: "pump" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
     case "maintain": {
-      if (sim.sliders.construction <= 0.05) return null;
+      if (!categoryOpen(sim, "construction")) return null;
       const t = findMaintainTarget(sim, pos.x, pos.y);
       return t ? { kind: "maintain" as JobKind, targetX: t.x, targetY: t.y, progress: 0 } : null;
     }
@@ -580,6 +630,29 @@ const GRAVE_VISIT_COOLDOWN_TICKS = 60 * 24 * 6; // ~6 in-game days
  * grows past the founders. Below this, a dwarf stays out of the
  * hospital and the patient lies on the cot recovering passively. */
 const MEDIC_MIN_SKILL = 4;
+
+/** The Medicine slider widens (or narrows) who counts as a medic: at
+ * high emphasis even novices sit with the sick; at low emphasis only
+ * trained healers bother. */
+function medicMinSkill(sim: SimWorld): number {
+  const s = sim.sliders.medicine;
+  if (s >= 0.85) return 1;
+  if (s >= 0.65) return 2;
+  if (s < 0.3) return MEDIC_MIN_SKILL + 3;
+  return MEDIC_MIN_SKILL;
+}
+
+/** The job each labour category promotes when its slider is high. */
+const CATEGORY_JOB: Record<LaborCategory, JobKind> = {
+  excavation: "mine",
+  hauling: "haul",
+  construction: "maintain",
+  crafting: "craft",
+  farming: "tend",
+  military: "train",
+  research: "research",
+  medicine: "treat",
+};
 
 /** Find a sick dwarf lying on a Hospital cot who isn't already being
  * treated by another medic. Returns the patient's entity id, or -1 if
@@ -890,24 +963,78 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
   let bestEnt = -1;
   let bestTier = -1;
   let best: { x: number; y: number; d: number } | null = null;
+  // The claim-independent filters and the tier are cached per tick;
+  // only the claim check, the Armoury-rack tile check and the distance
+  // run per call. Candidate order is the item store's dense order, so
+  // the tie-breaking below sees items in exactly the order it used to.
+  const cands = haulCandidates(sim);
+  for (let i = 0; i < cands.ents.length; i++) {
+    const ent = cands.ents[i];
+    const it = sim.item.get(ent)!;
+    // A claim by *this* hauler doesn't disqualify — an interrupted haul
+    // leaves the claim in place, and the claimant must be able to come
+    // back for the item rather than orphan it for as long as they live.
+    if (it.claimedBy !== -1 && it.claimedBy !== hauler && sim.ecs.isAlive(it.claimedBy)) continue;
+    const px = cands.xs[i];
+    const py = cands.ys[i];
+    // Tools sitting on an Armoury rack are "stored" — they wait there
+    // for the next draft to equip a soldier. Same loop-prevention
+    // logic as the workshop destination skip. Checked live (not
+    // cached) since it reads the tile grid.
+    if (it.kind === "tools" && sim.grid.getTile(px, py) === TileType.ArmouryRack) continue;
+    const tier = cands.tiers[i];
+    if (tier < bestTier) continue;
+    const dx = px - sx;
+    const dy = py - sy;
+    const d = dx * dx + dy * dy;
+    if (
+      tier > bestTier ||
+      !best ||
+      d < best.d ||
+      (d === best.d && (py < best.y || (py === best.y && px < best.x)))
+    ) {
+      best = { x: px, y: py, d };
+      bestEnt = ent;
+      bestTier = tier;
+    }
+  }
+  if (bestEnt !== -1) {
+    sim.item.get(bestEnt)!.claimedBy = hauler;
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+/** Loose items that pass findHaulTarget's claim-independent filters,
+ * with their haul tier. Everything these filters read — item kind and
+ * position (items never move; they are destroyed and respawned) and
+ * the per-tick haulIndex — is fixed for a given (tick, item-store
+ * version), so one scan serves every idle hauler that tick instead of
+ * each one walking the whole item store (O(haulers × items)). */
+interface HaulCandidates {
+  tick: number;
+  itemVersion: number;
+  ents: number[];
+  xs: number[];
+  ys: number[];
+  tiers: number[];
+}
+
+const haulCandidateCache = new WeakMap<SimWorld, HaulCandidates>();
+
+function haulCandidates(sim: SimWorld): HaulCandidates {
+  const cached = haulCandidateCache.get(sim);
+  if (cached && cached.tick === sim.tick && cached.itemVersion === sim.item.version) return cached;
+  const out: HaulCandidates = { tick: sim.tick, itemVersion: sim.item.version, ents: [], xs: [], ys: [], tiers: [] };
   const ents = sim.item.entities;
   for (let i = 0; i < ents.length; i++) {
     const it = sim.item.get(ents[i]);
     const p = sim.position.get(ents[i]);
     if (!it || !p) continue;
-    // A claim by *this* hauler doesn't disqualify — an interrupted haul
-    // leaves the claim in place, and the claimant must be able to come
-    // back for the item rather than orphan it for as long as they live.
-    if (it.claimedBy !== -1 && it.claimedBy !== hauler && sim.ecs.isAlive(it.claimedBy)) continue;
     // Skip items already sitting on a workshop station that wants
     // them — those are "delivered", waiting for the crafter to consume.
     // Without this, a hauler picks up the item it just dropped at the
     // smelter and the production chain loops forever.
     if (isItemAtWorkshopDestination(sim, p.x, p.y, it.kind)) continue;
-    // Tools sitting on an Armoury rack are "stored" — they wait there
-    // for the next draft to equip a soldier. Same loop-prevention
-    // logic as the workshop destination skip.
-    if (it.kind === "tools" && sim.grid.getTile(p.x, p.y) === TileType.ArmouryRack) continue;
     // Items already sitting inside a complete stockpile cavity, with
     // no demand from a needs_furnishing room or a workshop input
     // tile, are effectively in storage — picking them up just to
@@ -918,29 +1045,16 @@ function findHaulTarget(sim: SimWorld, hauler: EntityId, sx: number, sy: number)
     if (isItemStoredAtStockpile(sim, p.x, p.y) && !itemHasOpenDemand(sim, it.kind)) continue;
     // Tier 2: furniture (or any non-counter kind) that a
     // needs_furnishing room is actively waiting on. Tier 1: bulk /
-    // counter-backed goods. We keep the best candidate from the
-    // higher tier we've seen so far; a Tier-2 candidate beats any
-    // Tier-1 candidate regardless of distance.
-    const tier = isFurnitureKind(it.kind) && hasNeedsFurnishingFor(sim, it.kind) ? 2 : 1;
-    if (tier < bestTier) continue;
-    const dx = p.x - sx;
-    const dy = p.y - sy;
-    const d = dx * dx + dy * dy;
-    if (
-      tier > bestTier ||
-      !best ||
-      d < best.d ||
-      (d === best.d && (p.y < best.y || (p.y === best.y && p.x < best.x)))
-    ) {
-      best = { x: p.x, y: p.y, d };
-      bestEnt = ents[i];
-      bestTier = tier;
-    }
+    // counter-backed goods. findHaulTarget keeps the best candidate
+    // from the higher tier it has seen so far; a Tier-2 candidate
+    // beats any Tier-1 candidate regardless of distance.
+    out.ents.push(ents[i]);
+    out.xs.push(p.x);
+    out.ys.push(p.y);
+    out.tiers.push(isFurnitureKind(it.kind) && hasNeedsFurnishingFor(sim, it.kind) ? 2 : 1);
   }
-  if (bestEnt !== -1) {
-    sim.item.get(bestEnt)!.claimedBy = hauler;
-  }
-  return best ? { x: best.x, y: best.y } : null;
+  haulCandidateCache.set(sim, out);
+  return out;
 }
 
 /** True iff `kind` is a furniture / workshop-bench / room-deliverable
@@ -967,31 +1081,54 @@ function hasNeedsFurnishingFor(sim: SimWorld, kind: string): boolean {
   return haulIndex(sim).furnishingNeeds.has(kind);
 }
 
+/** Base hauler share: one hauler slot per this many dwarves. */
+const HAULER_DWARVES_PER_SLOT = 3;
+/** Minecart Tracks (Tier 2): carts on rails let more of the colony
+ * keep goods moving without tripping over each other — one hauler
+ * slot per two dwarves instead of per three. */
+const MINECART_TRACKS_DWARVES_PER_SLOT = 2;
+
 /** Cap on the number of dwarves committed to a haul job at once.
  * Keeps a fixed fraction of the population in non-haul roles so the
  * colony reads as a mix of activities rather than a single hauling
  * column. Hauling specialists bypass this — they go through the
  * specialty branch before the general work order kicks in. */
-function haulerCapForColony(sim: SimWorld): number {
+export function haulerCapForColony(sim: SimWorld): number {
   // Roughly one in three dwarves, floor 2. With pop=20 → 6 haulers,
   // with pop=7 founders → 2. Lower than that and the colony can't
   // clear farm yield + workshop outputs; higher and idle dwarves
   // all converge on the haul branch.
-  return Math.max(2, Math.floor(sim.dwarf.size() / 3));
+  const per = sim.research.completed.includes("minecart_tracks")
+    ? MINECART_TRACKS_DWARVES_PER_SLOT
+    : HAULER_DWARVES_PER_SLOT;
+  return Math.max(2, Math.floor(sim.dwarf.size() / per));
 }
 
 /** Count dwarves currently committed to a haul job — either walking
  * to a pickup (haul progress=0), walking to a delivery (haul
  * progress=1), or already carrying. */
 function countActiveHaulers(sim: SimWorld): number {
+  // Memoised on the dwarf / carrying / job store versions: the count
+  // only depends on which dwarves exist, which carry, and each job's
+  // kind — and jobs are always replaced via job.set(), never mutated
+  // to a different kind in place. Saves an O(dwarves) walk per idle
+  // dwarf (O(dwarves²) per tick) while staying exact mid-tick, as
+  // earlier dwarves in the same pass pick up haul jobs.
+  const c = haulerCountCache.get(sim);
+  if (c && c.dwarfV === sim.dwarf.version && c.carryV === sim.carrying.version && c.jobV === sim.job.version) {
+    return c.count;
+  }
   let n = 0;
   for (const e of sim.dwarf.entities) {
     if (sim.carrying.has(e)) { n++; continue; }
     const job = sim.job.get(e);
     if (job && job.kind === "haul") n++;
   }
+  haulerCountCache.set(sim, { dwarfV: sim.dwarf.version, carryV: sim.carrying.version, jobV: sim.job.version, count: n });
   return n;
 }
+
+const haulerCountCache = new WeakMap<SimWorld, { dwarfV: number; carryV: number; jobV: number; count: number }>();
 
 /** Find the nearest Armoury rack tile that doesn't already have a tool
  * sitting on it. Caps each rack at one weapon — a fortress with five
@@ -1381,6 +1518,10 @@ function findHostileTarget(sim: SimWorld, sx: number, sy: number): { x: number; 
     const dy = p.y - sy;
     const d = dx * dx + dy * dy;
     if (d > SOLDIER_ENGAGE_RANGE * SOLDIER_ENGAGE_RANGE) continue;
+    // Only hostiles the soldier can actually reach: a warband outside
+    // sealed gates isn't a target, so the squad drills instead of
+    // pacing at the seal.
+    if (!sim.regions.connected(sim.grid, sx, sy, p.x, p.y)) continue;
     if (
       !best ||
       d < best.d ||
@@ -1611,7 +1752,7 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
   // position every tick, so the colony's idle population pooled
   // around the food counters between meals. A wider random scatter
   // makes idle behavior actually wander.
-  const R = 20;
+  const R = WANDER_RADIUS;
   if (!grid.isWalkable(sx, sy)) return null;
   // Flood-fill the R-box from the dwarf's tile (8-connected with the same
   // corner-cut rule as A*) so every candidate is genuinely *reachable*,
@@ -1619,13 +1760,34 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
   // picked, fail pathfinding in jobAssignmentSystem, and leave the dwarf
   // standing idle until its AI bucket came round again.
   const side = 2 * R + 1;
-  const seen = new Uint8Array(side * side);
-  const queue = new Int32Array(side * side);
+  // Scratch buffers are reused across calls (chooseTask is synchronous
+  // and never re-enters this function). `walk` memoises isWalkable per
+  // box cell — 0 unknown, 1 walkable, 2 blocked — so each tile is
+  // looked up at most once instead of up to ~24 times by the flood.
+  const seen = WANDER_SEEN;
+  const walk = WANDER_WALK;
+  const queue = WANDER_QUEUE;
+  seen.fill(0);
+  walk.fill(0);
+  const x0 = sx - R;
+  const y0 = sy - R;
+  const walkable = (x: number, y: number): boolean => {
+    // Every lookup is inside the box: the flood only visits box cells,
+    // and the diagonal corner cells share a row/column with one.
+    const li = (y - y0) * side + (x - x0);
+    let w = walk[li];
+    if (w === 0) {
+      w = grid.isWalkable(x, y) ? 1 : 2;
+      walk[li] = w;
+    }
+    return w === 1;
+  };
   let head = 0;
   let tail = 0;
   seen[R * side + R] = 1;
   queue[tail++] = (sy << 16) | sx;
-  const candidates: number[] = [];
+  // Every enqueued cell except the start is a candidate, in enqueue
+  // order — so the candidates are exactly queue[1..tail).
   while (head < tail) {
     const c = queue[head++];
     const cx = c & 0xffff;
@@ -1636,21 +1798,27 @@ function pickWanderTarget(sim: SimWorld, sx: number, sy: number): { x: number; y
         const x = cx + dx;
         const y = cy + dy;
         if (x < sx - R || x > sx + R || y < sy - R || y > sy + R) continue;
-        const li = (y - sy + R) * side + (x - sx + R);
+        const li = (y - y0) * side + (x - x0);
         if (seen[li]) continue;
-        if (!grid.isWalkable(x, y)) continue;
+        if (!walkable(x, y)) continue;
         // Match A*'s diagonal rule: no squeezing through solid corners.
-        if (dx !== 0 && dy !== 0 && (!grid.isWalkable(cx + dx, cy) || !grid.isWalkable(cx, cy + dy))) {
+        if (dx !== 0 && dy !== 0 && (!walkable(cx + dx, cy) || !walkable(cx, cy + dy))) {
           continue;
         }
         seen[li] = 1;
         queue[tail++] = (y << 16) | x;
-        candidates.push((y << 16) | x);
       }
     }
   }
-  if (candidates.length === 0) return null;
-  const idx = sim.aiRng.nextRange(0, candidates.length);
-  const c = candidates[idx];
+  const candidateCount = tail - 1;
+  if (candidateCount === 0) return null;
+  const idx = sim.aiRng.nextRange(0, candidateCount);
+  const c = queue[1 + idx];
   return { x: c & 0xffff, y: (c >>> 16) & 0xffff };
 }
+
+const WANDER_RADIUS = 20;
+const WANDER_SIDE = 2 * WANDER_RADIUS + 1;
+const WANDER_SEEN = new Uint8Array(WANDER_SIDE * WANDER_SIDE);
+const WANDER_WALK = new Uint8Array(WANDER_SIDE * WANDER_SIDE);
+const WANDER_QUEUE = new Int32Array(WANDER_SIDE * WANDER_SIDE);

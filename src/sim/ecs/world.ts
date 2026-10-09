@@ -23,6 +23,10 @@ export class ComponentStore<T> {
   readonly data: T[] = [];
   // sparse[index] = position in dense array, or -1 if absent.
   readonly sparse: Int32Array;
+  /** Bumped on every set()/remove(). Lets per-tick caches detect that
+   * membership (or a component value replaced via set) changed without
+   * rescanning. In-place mutation of a stored value does NOT bump it. */
+  version = 0;
 
   constructor(maxEntities: number) {
     this.sparse = new Int32Array(maxEntities);
@@ -46,6 +50,7 @@ export class ComponentStore<T> {
   }
 
   set(e: EntityId, value: T): void {
+    this.version++;
     const i = entityIndex(e);
     const slot = this.sparse[i];
     if (slot === -1) {
@@ -64,6 +69,7 @@ export class ComponentStore<T> {
     const i = entityIndex(e);
     const slot = this.sparse[i];
     if (slot === -1 || this.entities[slot] !== e) return;
+    this.version++;
     const lastSlot = this.entities.length - 1;
     if (slot !== lastSlot) {
       const swapped = this.entities[lastSlot];

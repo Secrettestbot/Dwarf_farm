@@ -120,7 +120,7 @@ export function petSpawnSystem(sim: SimWorld): void {
   const centreX = sim.spawn.x + sim.aiRng.nextRange(-6, 7);
   const centreY = Math.max(0, sim.spawn.y - 8);
   // Find the first walkable tile at or below this column.
-  let sx = centreX;
+  const sx = centreX;
   let sy = centreY;
   for (let probe = 0; probe < 12; probe++) {
     if (sim.grid.isWalkable(sx, sy)) break;

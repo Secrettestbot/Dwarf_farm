@@ -1,7 +1,7 @@
 import { generateWorld } from "./sim/world/worldgen";
 import { SimWorld } from "./sim/world/simWorld";
 import { tick } from "./sim/sim";
-import { Clock, SpeedLevel, TICKS_PER_SECOND_AT_1X } from "./sim/time";
+import { Clock, SpeedLevel, TICKS_PER_SEASON, TICKS_PER_SECOND_AT_1X } from "./sim/time";
 import { Camera } from "./render/camera";
 import { renderWorld } from "./render/renderer";
 import { Minimap } from "./render/minimap";
@@ -13,6 +13,7 @@ import { DwarfInspector } from "./ui/dwarfInspector";
 import { showTitleScreen } from "./ui/titleScreen";
 import { applyStoredSpriteSet } from "./render/spriteSetPref";
 import {
+  getPauseOnCrisis,
   installHudHotkey,
   isPanelVisible,
   getMinimapDimensions,
@@ -21,10 +22,10 @@ import {
 import { showFoundersScreen } from "./ui/foundersScreen";
 import { showReturnScreen, showCatchupChoice } from "./ui/returnScreen";
 import { restore, snapshot } from "./save/snapshot";
-import { saveGame, loadGame } from "./save/db";
-import { GameMode, SaveSlotId, SaveV1 } from "./save/schema";
+import { saveGame, loadGame, saveCheckpoint } from "./save/db";
+import { GameMode, SaveSlotId, SaveData } from "./save/schema";
 import { WorkerToMain } from "./shared/protocol";
-import { Founder } from "./sim/dwarves/founders";
+import { placeFounders } from "./sim/dwarves/embark";
 import { narrateFounding } from "./sim/events/narrator";
 import { playEventSound } from "./audio/sound";
 import { showTutorial, tutorialAlreadySeen } from "./ui/tutorial";
@@ -32,6 +33,9 @@ import { HistoryPanel } from "./ui/historyPanel";
 import { ResearchPanel } from "./ui/researchPanel";
 import { PopulationPanel } from "./ui/populationPanel";
 import { NotificationCenter } from "./ui/notificationCenter";
+import { showPrompt } from "./ui/dialog";
+import { showFallScreen } from "./ui/fallScreen";
+import { HintCenter } from "./ui/hints";
 
 // GDD §5: 400×2000 tiles is the full world scale. Tests use a smaller
 // 200×500 world for speed; live play uses the full size.
@@ -44,6 +48,11 @@ const WORLD_HEIGHT = 2000;
 // at 6 ticks/real-second ≈ 1.5M ticks — well bounded and still
 // covers weekend gaps without forcing a hard truncation.
 const MAX_CATCHUP_TICKS = 3 * 24 * 3600 * TICKS_PER_SECOND_AT_1X;
+/** Real-time autosave cadence. Tick-based saving fired every few
+ * hundred milliseconds at 16× and hammered IndexedDB; a wall-clock
+ * interval keeps the cost flat at any speed. Tab-hide and unload
+ * still save immediately. */
+const AUTOSAVE_INTERVAL_MS = 30_000;
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d", { alpha: false })!;
@@ -72,9 +81,11 @@ interface ActiveFortress {
   slotId: SaveSlotId;
   fortressName: string;
   mode: GameMode;
+  fallenAtTick?: number;
 }
 
 boot().catch((err) => {
+  // eslint-disable-next-line no-console -- deliberate: fatal boot error, keep the stack
   console.error(err);
   uiHost.innerHTML = `<div style="position:fixed;inset:0;display:grid;place-items:center;color:#f88;font-family:monospace;">${
     err instanceof Error ? err.message : String(err)
@@ -92,7 +103,7 @@ async function boot() {
   const choice = await showTitleScreen(uiHost);
 
   let active: ActiveFortress;
-  let camera = new Camera();
+  const camera = new Camera();
 
   if (choice.kind === "new") {
     const founderResult = await showFoundersScreen(uiHost, choice.seed);
@@ -105,6 +116,9 @@ async function boot() {
     camera.setZoom(2);
     active = { sim, slotId: choice.slotId, fortressName: founderResult.fortressName, mode: choice.mode };
     await persist(active, camera);
+    // Legacy fortresses get a day-one restore point so a disastrous
+    // first season can always be rolled back.
+    if (active.mode === "legacy") await checkpoint(active, camera);
     // First-fortress tutorial — shown once across the player's
     // localStorage. The replay button on the HUD opens it again.
     if (!tutorialAlreadySeen()) {
@@ -132,113 +146,19 @@ async function boot() {
     camera.x = save.cameraX;
     camera.y = save.cameraY;
     camera.setZoom(save.zoomIndex);
-    active = { sim, slotId: save.slotId as SaveSlotId, fortressName: save.fortressName, mode: save.mode };
+    active = {
+      sim,
+      slotId: save.slotId as SaveSlotId,
+      fortressName: save.fortressName,
+      mode: save.mode,
+      fallenAtTick: save.fallenAtTick,
+    };
   }
 
   runGame(active, camera);
 }
 
-/**
- * Place the founding seven into the starter cavern. We line them up across the
- * carved chamber. Their entity ids and order in the dwarf store determine
- * iteration order in the deterministic tick, so the placement loop runs in
- * the same order on every machine.
- */
-function placeFounders(sim: SimWorld, founders: Founder[]) {
-  const { spawn, grid } = sim;
-  // Find the row of walkable tiles around the spawn that constitutes the
-  // founders' chamber. We just spread them along y = spawn.y.
-  const placements: Array<{ x: number; y: number }> = [];
-  for (let dx = -6; dx <= 6 && placements.length < founders.length; dx++) {
-    const x = spawn.x + dx;
-    if (grid.isWalkable(x, spawn.y)) placements.push({ x, y: spawn.y });
-  }
-  // Fallback if we couldn't fit them all on one row.
-  for (let dy = 1; placements.length < founders.length && dy < 4; dy++) {
-    for (let dx = -6; dx <= 6 && placements.length < founders.length; dx++) {
-      const x = spawn.x + dx;
-      const y = spawn.y + dy;
-      if (grid.isWalkable(x, y)) placements.push({ x, y });
-    }
-  }
-
-  for (let i = 0; i < founders.length; i++) {
-    const f = founders[i];
-    const p = placements[i] ?? { x: spawn.x, y: spawn.y };
-    sim.spawnDwarf({
-      name: f.name,
-      x: p.x,
-      y: p.y,
-      traitIds: f.traits.map((t) => t.id),
-      skills: f.skills,
-      profession: f.profession,
-      age: f.age,
-    });
-  }
-  // Starter equipment — the founders arrive with one bed each
-  // (placed as items at spawn so the first bedrooms can be
-  // furnished without first standing up a carpenter) and a couple
-  // of brewing barrels (one for the first brewery, one for an
-  // expansion later). Plus a small planks + wood reserve so the
-  // carpenter can keep crafting furniture for migrants without
-  // running dry on day one.
-  const starterBeds = founders.length;
-  for (let i = 0; i < starterBeds; i++) {
-    sim.spawnItem({ kind: "bed", x: spawn.x, y: spawn.y });
-  }
-  for (let i = 0; i < 2; i++) {
-    sim.spawnItem({ kind: "barrel", x: spawn.x, y: spawn.y });
-  }
-  // One pre-built table for the first dining hall; one pre-built
-  // bin so the first stockpile is operational on day one too;
-  // one pre-built stove for the first kitchen. The founders bring
-  // a small starter kit of finished pieces; the rest the colony
-  // has to craft as it grows.
-  sim.spawnItem({ kind: "table", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "bin", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "stove", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "library_desk", x: spawn.x, y: spawn.y });
-  // Hospital cot + tavern counter pre-built so those rooms can stand
-  // up without waiting on a carpenter. Throne is NOT pre-built — the
-  // colony has to earn its crown via mason work later in the game.
-  sim.spawnItem({ kind: "hospital_bed", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "tavern_counter", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "armoury_rack", x: spawn.x, y: spawn.y });
-  // No pre-built pump_part — pumps are an emergency response to an
-  // aquifer breach, and the carpenter prioritises them ahead of
-  // everything else when one's needed. The colony has to actually
-  // build the part when the time comes.
-  // Slice 8 starter kit — one of each workshop bench / anvil /
-  // firebox so the first carpenter / mason / smelter / etc. can
-  // stand up the moment their cavity finishes digging. Without
-  // these the chain dead-locks: a mason_bench can only be made by
-  // a carpenter, a carpenter_bench can only be made by a mason,
-  // and the first colony has neither. One trade-scales for the
-  // first depot, one water-wheel axle for the first wheel, and
-  // one seed bag so the first farm goes productive on day one.
-  sim.spawnItem({ kind: "carpenter_bench", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "mason_bench", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "smelter_furnace", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "forge_anvil", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "magma_anvil", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "jeweller_bench", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "kiln_firebox", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "tannery_vat", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "loom_frame", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "trade_scales", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "water_wheel_axle", x: spawn.x, y: spawn.y });
-  sim.spawnItem({ kind: "seed_bag", x: spawn.x, y: spawn.y });
-  sim.stockpile.planks += 8;
-  sim.stockpile.wood += 4;
-  // A small block cache so the mason can carve a table for a
-  // dining hall expansion before mining catches up.
-  sim.stockpile.blocks += 4;
-  // Reveal the founders' immediate surroundings before the first frame so
-  // the New Game screen doesn't open onto an all-black mountain.
-  sim.revealAroundDwarves();
-}
-
-async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {
+async function catchUp(save: SaveData, elapsedMs: number, ticksToRun: number): Promise<SimWorld> {
   const screen = showReturnScreen(uiHost, elapsedMs, ticksToRun);
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./workers/sim.worker.ts", import.meta.url), { type: "module" });
@@ -290,6 +210,9 @@ async function catchUp(save: SaveV1, elapsedMs: number, ticksToRun: number): Pro
 
 function runGame(active: ActiveFortress, camera: Camera) {
   const { sim } = active;
+  // Dev-server only: expose live state for console debugging and
+  // browser smoke tests. Stripped from production builds.
+  if (import.meta.env.DEV) (window as unknown as { __dd: unknown }).__dd = { active, camera };
   const clock = new Clock();
   clock.tick = sim.tick;
   clock.setSpeed(1);
@@ -344,29 +267,74 @@ function runGame(active: ActiveFortress, camera: Camera) {
     onShowPopulation: () => {
       if (populationPanel) populationPanel.open(active.sim);
     },
-    onRenameFortress: () => {
-      const next = window.prompt("Rename the fortress:", active.fortressName);
+    onRenameFortress: async () => {
+      const next = await showPrompt(uiHost, "Rename the fortress", active.fortressName);
       if (next && next.trim()) {
         active.fortressName = next.trim().slice(0, 60);
         void persist(active, camera);
       }
+    },
+    onQuitToTitle: () => {
+      void quitToTitle();
     },
   });
   const eventPanel = new EventLogPanel(uiHost);
   const inspector = new DwarfInspector(uiHost);
   populationPanel = new PopulationPanel(uiHost, inspector, camera);
   const sliders = new SliderPanel(uiHost, sim);
-  void sliders;
   const emergency = new EmergencyPanel(uiHost, sim);
+  const hints = new HintCenter(uiHost, sim);
 
   // ---- Input: pan + zoom only. The dwarves act on their own. ----
+  // Touch pinch-zoom: track active pointers; with two down, each
+  // 25% change in their separation steps one zoom level.
+  const touches = new Map<number, { x: number; y: number }>();
+  let pinchBase = 0;
+  const pinchDistance = () => {
+    const [a, b] = [...touches.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
   canvas.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) {
+      pinchBase = pinchDistance();
+      panStart = null;
+      isPanning = true; // suppress the click-to-inspect on release
+    }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size !== 2 || pinchBase <= 0) return;
+    const d = pinchDistance();
+    const pts = [...touches.values()];
+    const mid = camera.screenToTile((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2, viewW, viewH);
+    if (d > pinchBase * 1.25) { camera.zoomBy(+1, mid.x, mid.y); pinchBase = d; }
+    else if (d < pinchBase * 0.8) { camera.zoomBy(-1, mid.x, mid.y); pinchBase = d; }
+  });
+  const endTouch = (e: PointerEvent) => {
+    touches.delete(e.pointerId);
+    if (touches.size < 2) pinchBase = 0;
+  };
+  canvas.addEventListener("pointerup", endTouch);
+  canvas.addEventListener("pointercancel", endTouch);
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (touches.size >= 2) return;
+    // Clicking the minimap jumps the camera there instead of panning.
+    const mmTile = isPanelVisible("minimap") ? minimap.tileAtScreen(e.clientX, e.clientY) : null;
+    if (mmTile) {
+      camera.x = mmTile.x;
+      camera.y = mmTile.y;
+      return;
+    }
     canvas.setPointerCapture(e.pointerId);
     panStart = { mx: e.clientX, my: e.clientY, cx: camera.x, cy: camera.y };
     isPanning = false;
   });
 
   canvas.addEventListener("pointermove", (e) => {
+    if (touches.size >= 2) return;
     if (panStart) {
       const dx = e.clientX - panStart.mx;
       const dy = e.clientY - panStart.my;
@@ -410,6 +378,26 @@ function runGame(active: ActiveFortress, camera: Camera) {
   }, { passive: false });
 
   document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+    // Keyboard camera: WASD / arrows pan a fraction of the viewport,
+    // +/- zoom around the viewport centre.
+    const panStep = Math.max(4, Math.round(Math.min(viewW, viewH) / camera.pxPerTile / 6));
+    const panKeys: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0], KeyA: [-1, 0],
+      ArrowRight: [1, 0], KeyD: [1, 0],
+      ArrowUp: [0, -1], KeyW: [0, -1],
+      ArrowDown: [0, 1], KeyS: [0, 1],
+    };
+    const dir = panKeys[e.code];
+    if (dir) {
+      e.preventDefault();
+      camera.pan(dir[0] * panStep, dir[1] * panStep);
+      return;
+    }
+    if (e.key === "+" || e.key === "=") { camera.zoomBy(+1, camera.x, camera.y); return; }
+    if (e.key === "-" || e.key === "_") { camera.zoomBy(-1, camera.x, camera.y); return; }
     if (e.code === "Space") {
       e.preventDefault();
       if (clock.speed === 0) {
@@ -424,14 +412,53 @@ function runGame(active: ActiveFortress, camera: Camera) {
   });
 
   // ---- Auto-save lifecycle ----
-  let autoSaveAccum = 0;
+  let lastAutoSaveMs = performance.now();
+  // Legacy restore points land at each season boundary.
+  let lastCheckpointSeason = Math.floor(sim.tick / TICKS_PER_SEASON);
+  let fallHandled = active.fallenAtTick !== undefined;
+  let quitting = false;
+  async function quitToTitle(): Promise<void> {
+    if (quitting) return;
+    quitting = true;
+    clock.setSpeed(0);
+    await persist(active, camera);
+    // persist() may have queued a trailing write; wait for it too.
+    while (saveInFlight) await saveInFlight;
+    window.location.reload();
+  }
+  async function handleFall(): Promise<void> {
+    clock.setSpeed(0);
+    active.fallenAtTick = sim.tick;
+    // From here on the slot is only written explicitly.
+    quitting = true;
+    sim.events.add(sim.tick, "crisis", `${active.fortressName} has fallen. No dwarf remains to keep its fires.`);
+    await persist(active, camera);
+    while (saveInFlight) await saveInFlight;
+    const choice = await showFallScreen(uiHost, {
+      fortressName: active.fortressName,
+      mode: active.mode,
+      slotId: active.slotId,
+      fellAtTick: sim.tick,
+      graves: sim.graves.length,
+      artifacts: sim.artifacts.length,
+      books: sim.books.length,
+      lastWords: sim.events.events.slice(-6).map((e) => ({ tick: e.tick, category: e.category, text: e.text })),
+    });
+    // "restored" rewrote the slot; either way reload into the title
+    // screen (a restored slot continues from there).
+    void choice;
+    window.location.reload();
+  }
+  // While quitting / after a fall the slot has already been written
+  // (possibly replaced by a restore point) — an unload-time save would
+  // clobber it with the stale in-memory fortress.
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
+    if (document.visibilityState === "hidden" && !quitting) {
       void persist(active, camera);
     }
   });
   window.addEventListener("beforeunload", () => {
-    void persist(active, camera);
+    if (!quitting) void persist(active, camera);
   });
 
   // ---- Game loop ----
@@ -448,9 +475,14 @@ function runGame(active: ActiveFortress, camera: Camera) {
   // forever; after a few consecutive failures we pause the clock so the
   // player can read the chronicle and save.
   let consecutiveTickErrors = 0;
+  // Emergency mode at the end of the previous frame. A change seen at
+  // the start of a frame was the player pressing a button, so the
+  // crisis lines it produces shouldn't trigger pause-on-crisis.
+  let lastFrameEmergency = sim.emergency.mode;
   function frame(now: number) {
     const dt = Math.min(100, now - lastFrame);
     lastFrame = now;
+    const playerToggledEmergency = sim.emergency.mode !== lastFrameEmergency;
 
     const ticks = clock.consume(dt);
     for (let i = 0; i < ticks; i++) {
@@ -462,7 +494,7 @@ function runGame(active: ActiveFortress, camera: Camera) {
         // the game. The sim's own paths handle entity-cap overflow
         // gracefully via -1 sentinels; this catches everything
         // else so the player can see the chronicle and save.
-        // eslint-disable-next-line no-console
+        // eslint-disable-next-line no-console -- deliberate: surface the stack in devtools
         console.error("tick failed", err);
         sim.events.add(
           sim.tick,
@@ -482,17 +514,26 @@ function runGame(active: ActiveFortress, camera: Camera) {
       }
     }
 
-    autoSaveAccum += ticks;
-    if (autoSaveAccum >= 60) {
-      autoSaveAccum = 0;
+    if (now - lastAutoSaveMs >= AUTOSAVE_INTERVAL_MS) {
+      lastAutoSaveMs = now;
       void persist(active, camera);
+    }
+    const season = Math.floor(sim.tick / TICKS_PER_SEASON);
+    if (season !== lastCheckpointSeason) {
+      lastCheckpointSeason = season;
+      if (active.mode === "legacy" && !fallHandled) void checkpoint(active, camera);
+    }
+    if (!fallHandled && sim.dwarf.size() === 0) {
+      fallHandled = true;
+      void handleFall();
     }
 
     // Play sounds for any chronicle entries added this frame, deduped
     // by category so a busy tick doesn't overflow the audio bus.
     const seq = sim.events.seq;
+    const fresh = seq > lastEventSeq ? sim.events.events.slice(-(seq - lastEventSeq)) : [];
+    hints.observe(sim, fresh);
     if (seq > lastEventSeq) {
-      const fresh = sim.events.events.slice(-(seq - lastEventSeq));
       const played = new Set<string>();
       for (const ev of fresh) {
         if (played.has(ev.category)) continue;
@@ -500,8 +541,18 @@ function runGame(active: ActiveFortress, camera: Camera) {
         playEventSound(ev.category);
       }
       lastEventSeq = seq;
+      if (
+        getPauseOnCrisis() &&
+        clock.speed !== 0 &&
+        !playerToggledEmergency &&
+        fresh.some((ev) => ev.category === "crisis")
+      ) {
+        lastRunSpeed = clock.speed;
+        clock.setSpeed(0);
+      }
     }
 
+    lastFrameEmergency = sim.emergency.mode;
     minimap.refresh(sim, now);
 
     renderWorld(ctx, sim, camera, viewW, viewH);
@@ -510,12 +561,15 @@ function runGame(active: ActiveFortress, camera: Camera) {
       const mx = viewW - minimap.width - 14;
       const my = viewH - minimap.height - 14;
       minimap.draw(ctx, mx, my, camera, viewW, viewH);
+    } else {
+      minimap.clearDrawn();
     }
 
     hud.update(clock, sim);
     eventPanel.update(sim.events.events);
     inspector.update(sim);
     emergency.update();
+    sliders.update();
     notifications.refresh(sim, now);
     requestAnimationFrame(frame);
   }
@@ -583,15 +637,7 @@ async function persist(active: ActiveFortress, camera: Camera): Promise<void> {
     saveQueued = { active, camera };
     return saveInFlight;
   }
-  const save = snapshot({
-    sim: active.sim,
-    slotId: active.slotId,
-    fortressName: active.fortressName,
-    mode: active.mode,
-    cameraX: camera.x,
-    cameraY: camera.y,
-    zoomIndex: camera.zoomIndex,
-  });
+  const save = snapshotActive(active, camera);
   saveInFlight = saveGame(save).finally(() => {
     saveInFlight = null;
     if (saveQueued) {
@@ -601,6 +647,30 @@ async function persist(active: ActiveFortress, camera: Camera): Promise<void> {
     }
   });
   return saveInFlight;
+}
+
+function snapshotActive(active: ActiveFortress, camera: Camera): SaveData {
+  return snapshot({
+    sim: active.sim,
+    slotId: active.slotId,
+    fortressName: active.fortressName,
+    mode: active.mode,
+    fallenAtTick: active.fallenAtTick,
+    cameraX: camera.x,
+    cameraY: camera.y,
+    zoomIndex: camera.zoomIndex,
+  });
+}
+
+/** Record a Legacy restore point. Failures are logged, not fatal —
+ * the live save is unaffected. */
+async function checkpoint(active: ActiveFortress, camera: Camera): Promise<void> {
+  try {
+    await saveCheckpoint(snapshotActive(active, camera));
+  } catch (err) {
+    // eslint-disable-next-line no-console -- deliberate: a failed restore point is non-fatal but worth a stack
+    console.error("checkpoint failed", err);
+  }
 }
 
 let flashTimer: ReturnType<typeof setTimeout> | null = null;

@@ -23,6 +23,8 @@ const LEGACY_MINIMAP_SCALE_MULTIPLIERS: Record<string, number> = {
  * migrate from this on first read so an existing player doesn't
  * lose their "everything hidden" preference. */
 const LEGACY_STORAGE_KEY = "hudHidden";
+/** Below this viewport width, secondary panels start hidden. */
+const NARROW_VIEWPORT_PX = 700;
 
 export type PanelId =
   | "hud"
@@ -82,7 +84,7 @@ function defaultVisibility(): Record<PanelId, boolean> {
   };
 }
 
-let visibility: Record<PanelId, boolean> = readInitialState();
+const visibility: Record<PanelId, boolean> = readInitialState();
 
 function readInitialState(): Record<PanelId, boolean> {
   const base = defaultVisibility();
@@ -100,7 +102,16 @@ function readInitialState(): Record<PanelId, boolean> {
     if (legacy !== null) localStorage.removeItem(LEGACY_STORAGE_KEY);
 
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return base;
+    if (!raw) {
+      // First visit on a phone-sized screen: start with only the HUD,
+      // emergency buttons and toasts so the canvas isn't buried.
+      if (typeof window !== "undefined" && window.innerWidth < NARROW_VIEWPORT_PX) {
+        base.sliders = false;
+        base.eventLog = false;
+        base.minimap = false;
+      }
+      return base;
+    }
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
       for (const p of PANELS) {
@@ -260,4 +271,30 @@ export function installHudHotkey(): void {
     ev.preventDefault();
     toggleAllPanels();
   });
+}
+
+// ---- Pause on crisis -------------------------------------------------
+// When on, a crisis entry in the chronicle (siege, death, flood…)
+// pauses the clock so it can't scroll past unseen at 16×.
+
+const PAUSE_ON_CRISIS_KEY = "pauseOnCrisis";
+let pauseOnCrisis = (() => {
+  try {
+    return localStorage.getItem(PAUSE_ON_CRISIS_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+
+export function getPauseOnCrisis(): boolean {
+  return pauseOnCrisis;
+}
+
+export function setPauseOnCrisis(v: boolean): void {
+  pauseOnCrisis = v;
+  try {
+    localStorage.setItem(PAUSE_ON_CRISIS_KEY, v ? "1" : "0");
+  } catch {
+    // Best-effort persistence.
+  }
 }

@@ -195,7 +195,10 @@ export function tradeSystem(sim: SimWorld): void {
 }
 
 function arriveCaravan(sim: SimWorld, originName: string): void {
-  if (sim.emergency.mode === "lockdown") return;
+  if (sim.emergency.mode === "lockdown") {
+    sim.events.add(sim.tick, "social", `The caravan from ${originName} finds the gates sealed and turns back.`);
+    return;
+  }
   const kingdom = kingdomByName(originName);
   if (!kingdom) return;
   // Need an active Trade Depot.

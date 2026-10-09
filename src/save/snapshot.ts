@@ -1,11 +1,12 @@
+import { moraleBeatFor, siegeMorale } from "../sim/systems/siegeMorale";
 import { SimWorld } from "../sim/world/simWorld";
 import { generateWorld } from "../sim/world/worldgen";
-import { CURRENT_SAVE_VERSION, SaveV1, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
+import { CURRENT_SAVE_VERSION, SaveData, SavedBlueprint, SavedDwarf, SavedHostile, SavedPet, GameMode } from "./schema";
 import { decodeOverrides, encodeOverrides, encodeSeen, decodeSeen } from "./codec";
 import { migrateSave } from "./migrations";
 import { Blueprint, BlueprintKind } from "../sim/planner/blueprint";
 
-// Serialize / deserialize a SimWorld to/from a SaveV1. The save records only
+// Serialize / deserialize a SimWorld to/from a SaveData. The save records only
 // what's needed to deterministically reconstruct the simulation: seed, RLE
 // delta vs a clean regen, RNG states, the dwarf list with traits/skills, and
 // the colony planner state.
@@ -15,6 +16,8 @@ export interface SnapshotInput {
   slotId: string;
   fortressName: string;
   mode: GameMode;
+  /** See SaveData.fallenAtTick. */
+  fallenAtTick?: number;
   cameraX: number;
   cameraY: number;
   zoomIndex: number;
@@ -35,7 +38,7 @@ function baselineGridFor(seed: number, width: number, height: number): import(".
   return baselineCache.grid;
 }
 
-export function snapshot(input: SnapshotInput): SaveV1 {
+export function snapshot(input: SnapshotInput): SaveData {
   const baseline = baselineGridFor(input.sim.seed, input.sim.grid.width, input.sim.grid.height);
   const overrides = encodeOverrides(input.sim.grid, baseline);
 
@@ -161,6 +164,7 @@ export function snapshot(input: SnapshotInput): SaveV1 {
     slotId: input.slotId,
     fortressName: input.fortressName,
     mode: input.mode,
+    ...(input.fallenAtTick !== undefined ? { fallenAtTick: input.fallenAtTick } : {}),
     seed: input.sim.seed,
     width: input.sim.grid.width,
     height: input.sim.grid.height,
@@ -216,6 +220,8 @@ export function snapshot(input: SnapshotInput): SaveV1 {
       current: sim.research.current,
       progress: sim.research.progress,
       completed: [...sim.research.completed],
+      leanings: { ...(sim.research.leanings ?? {}) },
+      progressById: { ...(sim.research.progressById ?? {}) },
     },
     hollowKingAware: sim.hollowKingAware,
     hollowKingNightmares: sim.hollowKingNightmares,
@@ -258,6 +264,9 @@ export function snapshot(input: SnapshotInput): SaveV1 {
           survived: sim.siegesSurvived,
           startedAtTick: sim.siegeStartedAtTick >= 0 ? sim.siegeStartedAtTick : undefined,
           warlordName: sim.siegeWarlordName || undefined,
+          initialSize: sim.siegeInitialSize || undefined,
+          goblinsLost: sim.siegeGoblinsLost || undefined,
+          dwarvesSlain: sim.siegeDwarvesSlain || undefined,
         }
       : undefined,
     // Named hostiles are stored on their SavedHostile entries (the
@@ -360,7 +369,7 @@ function collectHostiles(sim: SimWorld): SavedHostile[] {
   return out;
 }
 
-export function restore(save: SaveV1): SimWorld {
+export function restore(save: SaveData): SimWorld {
   save = migrateSave(save);
   const w = generateWorld({ seed: save.seed, width: save.width, height: save.height });
   const decoded = decodeOverrides(save.tileOverrides);
@@ -570,6 +579,17 @@ export function restore(save: SaveV1): SimWorld {
     sim.research.current = save.research.current ?? null;
     sim.research.progress = save.research.progress ?? 0;
     sim.research.completed = [...(save.research.completed ?? [])];
+    sim.research.leanings = {};
+    for (const [id, lean] of Object.entries(save.research.leanings ?? {})) {
+      if (lean === "favoured" || lean === "neglected") sim.research.leanings[id] = lean;
+    }
+    // Older builds had a "Study next" queue; keep the player's intent
+    // as a favoured leaning.
+    const legacyQueued = save.research.queued;
+    if (legacyQueued && !sim.research.completed.includes(legacyQueued) && !sim.research.leanings[legacyQueued]) {
+      sim.research.leanings[legacyQueued] = "favoured";
+    }
+    sim.research.progressById = { ...(save.research.progressById ?? {}) };
   }
   if (save.hollowKingAware) sim.hollowKingAware = true;
   if (save.hollowKingNightmares !== undefined) sim.hollowKingNightmares = save.hollowKingNightmares;
@@ -612,6 +632,9 @@ export function restore(save: SaveV1): SimWorld {
     sim.siegeStartedAtTick = save.siege.startedAtTick
       ?? (save.siege.active ? save.tick : -1);
     sim.siegeWarlordName = save.siege.warlordName ?? "";
+    sim.siegeGoblinsLost = save.siege.goblinsLost ?? 0;
+    sim.siegeDwarvesSlain = save.siege.dwarvesSlain ?? 0;
+    sim.siegeInitialSize = save.siege.initialSize ?? 0;
   }
   if (save.hostileNames) {
     for (const e of save.hostileNames) sim.hostileNames.set(e.id, e.name);
@@ -711,6 +734,15 @@ export function restore(save: SaveV1): SimWorld {
       });
       if (id !== -1 && h.name) sim.hostileNames.set(id, h.name);
     }
+  }
+  if (sim.siegeActive) {
+    // Older saves have no morale bookkeeping: treat the live warband
+    // as its starting size. Then mark the wavering beats already
+    // passed so they aren't chronicled twice.
+    if (sim.siegeInitialSize <= 0) {
+      for (const id of sim.hostile.entities) if (sim.hostile.get(id)?.siegeMember) sim.siegeInitialSize++;
+    }
+    sim.siegeMoraleBeat = moraleBeatFor(siegeMorale(sim));
   }
   // Restore pets — wild and tame both. ownerIndex maps back through
   // the dwarf-restoration array so the owner's entity id is correct

@@ -1,9 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { generateWorld } from "./world/worldgen";
 import { SimWorld } from "./world/simWorld";
-import { tick } from "./sim";
+import { tick, draftFraction } from "./sim";
 import { TICKS_PER_YEAR } from "./time";
 import { TileType } from "./world/tiles";
+
+function runOneYear(sim: SimWorld): void {
+  for (let i = 0; i < TICKS_PER_YEAR + 5; i++) {
+    for (const id of sim.dwarf.entities) {
+      const n = sim.needs.get(id);
+      if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+    }
+    tick(sim);
+  }
+}
 
 describe("military squads", () => {
   it("the year-end draft picks the dwarves with the highest Military skill", () => {
@@ -25,27 +35,43 @@ describe("military squads", () => {
       }
       tick(sim);
     }
-    // 10% of 10 = 1 soldier. Should be the one with Military skill 12.
-    expect(sim.squad.size()).toBe(1);
-    const drafted = sim.squad.entities[0];
-    expect(sim.dwarf.get(drafted)!.skills.military).toBe(12);
+    // 10% of the colony (migrants may have arrived during the year),
+    // led by the one with Military skill 12.
+    expect(sim.squad.size()).toBe(Math.ceil(sim.dwarf.size() * 0.1 - 1e-9));
+    expect(sim.squad.entities.some((d) => sim.dwarf.get(d)!.skills.military === 12)).toBe(true);
   });
 
-  it("dwarves below the minimum military threshold aren't drafted", () => {
+  it("an untrained colony still drafts its best available fighters", () => {
+    // Founders start at Military 1 and nothing trains civilians, so a
+    // skill floor here left every colony without a guard.
     const w = generateWorld({ seed: 83, width: 200, height: 500 });
     const sim = new SimWorld(83, w.grid, w.surfaceY, w.spawn);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       const id = sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x, y: w.spawn.y, age: 30 });
       sim.dwarf.get(id)!.skills.military = 1;
     }
-    for (let i = 0; i < TICKS_PER_YEAR + 5; i++) {
-      for (const id of sim.dwarf.entities) {
-        const n = sim.needs.get(id);
-        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
-      }
-      tick(sim);
-    }
-    expect(sim.squad.size()).toBe(0);
+    runOneYear(sim);
+    expect(sim.squad.size()).toBeGreaterThanOrEqual(1);
+    expect(sim.squad.size()).toBe(Math.ceil(sim.dwarf.size() * 0.1 - 1e-9));
+  });
+
+  it("the Military slider sets the size of the draft", () => {
+    expect(draftFraction(0)).toBe(0);
+    expect(draftFraction(0.05)).toBe(0);
+    expect(draftFraction(0.5)).toBeCloseTo(0.1);
+    expect(draftFraction(1)).toBeCloseTo(0.3);
+    const make = (slider: number) => {
+      const w = generateWorld({ seed: 84, width: 200, height: 500 });
+      const sim = new SimWorld(84, w.grid, w.surfaceY, w.spawn);
+      for (let i = 0; i < 10; i++) sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x, y: w.spawn.y, age: 30 });
+      sim.sliders.military = slider;
+      runOneYear(sim);
+      return { squad: sim.squad.size(), pop: sim.dwarf.size() };
+    };
+    expect(make(0).squad).toBe(0);
+    const full = make(1);
+    expect(full.squad).toBe(Math.ceil(full.pop * 0.3 - 1e-9));
+    expect(full.squad).toBeGreaterThan(Math.ceil(full.pop * 0.1));
   });
 
   it("a soldier engages a nearby hostile instead of taking civilian work", () => {
@@ -64,6 +90,21 @@ describe("military squads", () => {
     tick(sim);
     const job = sim.job.get(id);
     expect(job?.kind).toBe("engage");
+  });
+
+  it("a critically thirsty soldier drinks before engaging", () => {
+    // Otherwise a soldier facing a warband they can't reach (e.g.
+    // outside a Lockdown seal) re-picks "engage" forever and dies of
+    // thirst beside a full cellar.
+    const w = generateWorld({ seed: 87, width: 200, height: 500 });
+    const sim = new SimWorld(87, w.grid, w.surfaceY, w.spawn);
+    const id = sim.spawnDwarf({ name: "Guard", x: w.spawn.x, y: w.spawn.y, age: 30 });
+    sim.squad.set(id, { draftedAtTick: 0 });
+    const n = sim.needs.get(id)!;
+    n.hunger = 100; n.thirst = 10; n.sleep = 100; n.social = 100;
+    sim.spawnHostile({ kind: "cave_rat", x: w.spawn.x + 3, y: w.spawn.y });
+    tick(sim);
+    expect(sim.job.get(id)?.kind).toBe("drink");
   });
 
   it("the year-end draft equips a recruit from the global tools counter", () => {

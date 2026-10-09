@@ -11,6 +11,10 @@ export class Chunk {
    * and draws unseen tiles as opaque dark blocks. */
   readonly seen: Uint8Array;
   dirty = true;
+  /** Bumped on every setTile into this chunk. Unlike `dirty` (which the
+   * renderer clears), this only ever grows, so any number of consumers
+   * can track "changed since I last looked" independently. */
+  version = 0;
 
   constructor() {
     this.tiles = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
@@ -29,6 +33,13 @@ export class TileGrid {
   readonly chunksX: number;
   readonly chunksY: number;
   private readonly chunks: Chunk[];
+  /** Bounding box of every tile ever marked seen (inclusive), or
+   * seenMaxX < 0 when nothing is seen. Seen tiles are never unseen, so
+   * the box only grows — the minimap reads it instead of scanning. */
+  seenMinX = Infinity;
+  seenMinY = Infinity;
+  seenMaxX = -1;
+  seenMaxY = -1;
 
   constructor(width: number, height: number) {
     if (width % CHUNK_SIZE !== 0 || height % CHUNK_SIZE !== 0) {
@@ -67,6 +78,12 @@ export class TileGrid {
     const c = this.chunkAt(x, y);
     c.tiles[this.localIndex(x, y)] = t;
     c.dirty = true;
+    c.version++;
+  }
+
+  /** Tile-write counter of chunk (cx, cy) — see Chunk.version. */
+  chunkVersion(cx: number, cy: number): number {
+    return this.chunks[cy * this.chunksX + cx].version;
   }
 
   isWalkable(x: number, y: number): boolean {
@@ -91,6 +108,10 @@ export class TileGrid {
     if (c.seen[idx] === 0) {
       c.seen[idx] = 1;
       c.dirty = true;
+      if (x < this.seenMinX) this.seenMinX = x;
+      if (x > this.seenMaxX) this.seenMaxX = x;
+      if (y < this.seenMinY) this.seenMinY = y;
+      if (y > this.seenMaxY) this.seenMaxY = y;
     }
   }
 

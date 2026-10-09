@@ -49,7 +49,7 @@ export class NotificationCenter {
       // above and below; max-height clips the column at the bottom
       // gap boundary, with hidden overflow so a burst of crises
       // can't push past into the event log.
-      "position:absolute;top:288px;left:8px;display:flex;flex-direction:column;gap:6px;z-index:10;pointer-events:none;width:240px;max-height:calc(100vh - 580px);overflow:hidden;";
+      "position:absolute;top:288px;left:8px;display:flex;flex-direction:column;gap:6px;z-index:10;pointer-events:none;width:240px;max-height:max(140px, calc(100vh - 580px));overflow:hidden;";
     this.host.appendChild(wrap);
     this.root = wrap;
     // NotificationCenter has no destroy() — it lives for the page

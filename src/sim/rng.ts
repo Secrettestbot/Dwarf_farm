@@ -22,7 +22,7 @@ function mul64(aHi: number, aLo: number, bHi: number, bLo: number): [number, num
 
   // Sum partial products with proper carry tracking.
   const lo16 = ll & 0xffff;
-  let mid = (ll >>> 16) + (lh & 0xffff) + (hl & 0xffff);
+  const mid = (ll >>> 16) + (lh & 0xffff) + (hl & 0xffff);
   const lo32 = ((mid & 0xffff) << 16) | lo16;
 
   let hi32 = (mid >>> 16) + (lh >>> 16) + (hl >>> 16) + hh + Math.imul(aLo, bHi) + Math.imul(aHi, bLo);

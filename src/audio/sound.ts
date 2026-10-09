@@ -12,11 +12,17 @@
 import { EventCategory } from "../sim/events/eventLog";
 
 const STORAGE_KEY = "dwarven-deep:muted";
+const VOLUME_KEY = "dwarven-deep:volume";
 
 let ctx: AudioContext | null = null;
+let master: GainNode | null = null;
 let muted = false;
+/** Master volume in [0, 1]; scales every motif. */
+let volume = 0.7;
 try {
   muted = localStorage.getItem(STORAGE_KEY) === "1";
+  const v = Number(localStorage.getItem(VOLUME_KEY));
+  if (localStorage.getItem(VOLUME_KEY) !== null && Number.isFinite(v)) volume = Math.max(0, Math.min(1, v));
 } catch {
   // localStorage may be unavailable in private browsing; default to unmuted.
 }
@@ -30,8 +36,12 @@ function ensureCtx(): AudioContext | null {
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctor) return null;
     ctx = new Ctor();
+    master = ctx.createGain();
+    master.gain.value = volume;
+    master.connect(ctx.destination);
   } catch {
     ctx = null;
+    master = null;
   }
   return ctx;
 }
@@ -41,7 +51,7 @@ function ensureCtx(): AudioContext | null {
  * vary per call. */
 function note(freq: number, durSec: number, amp = 0.18, type: OscillatorType = "sine"): void {
   const c = ensureCtx();
-  if (!c) return;
+  if (!c || !master || volume <= 0) return;
   const t0 = c.currentTime;
   const osc = c.createOscillator();
   osc.type = type;
@@ -50,7 +60,7 @@ function note(freq: number, durSec: number, amp = 0.18, type: OscillatorType = "
   gain.gain.setValueAtTime(0, t0);
   gain.gain.linearRampToValueAtTime(amp, t0 + 0.01);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durSec);
-  osc.connect(gain).connect(c.destination);
+  osc.connect(gain).connect(master);
   osc.start(t0);
   osc.stop(t0 + durSec + 0.02);
 }
@@ -107,7 +117,23 @@ export function setMuted(value: boolean): void {
   if (muted && ctx) {
     void ctx.close();
     ctx = null;
+    master = null;
   }
+}
+
+export function getVolume(): number {
+  return volume;
+}
+
+/** Set master volume in [0, 1]; persisted. */
+export function setVolume(value: number): void {
+  volume = Math.max(0, Math.min(1, value));
+  try {
+    localStorage.setItem(VOLUME_KEY, String(volume));
+  } catch {
+    // Persistence best-effort.
+  }
+  if (master) master.gain.value = volume;
 }
 
 export function isMuted(): boolean {
