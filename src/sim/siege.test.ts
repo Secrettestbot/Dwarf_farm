@@ -8,6 +8,8 @@ describe("siege system", () => {
   it("fires an outrider warning ~5 days before the warband arrives", () => {
     const w = generateWorld({ seed: 711, width: 200, height: 500 });
     const sim = new SimWorld(711, w.grid, w.surfaceY, w.spawn);
+    // Sieges begin at the end of year 2: start the clock a year in.
+    sim.tick = TICKS_PER_YEAR;
     // Spawn enough founders for the SIEGE_MIN_POPULATION gate.
     for (let i = 0; i < 12; i++) {
       sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + (i % 5) - 2, y: w.spawn.y, age: 30 });
@@ -34,6 +36,8 @@ describe("siege system", () => {
   it("a colony below SIEGE_MIN_POPULATION (10) is never sieged", () => {
     const w = generateWorld({ seed: 713, width: 200, height: 500 });
     const sim = new SimWorld(713, w.grid, w.surfaceY, w.spawn);
+    // Sieges begin at the end of year 2: start the clock a year in.
+    sim.tick = TICKS_PER_YEAR;
     for (let i = 0; i < 7; i++) {
       sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + i - 3, y: w.spawn.y, age: 30 });
     }
@@ -58,6 +62,8 @@ describe("siege system", () => {
   it("a siege at pop ≥ 15 includes a named warlord", () => {
     const w = generateWorld({ seed: 717, width: 200, height: 500 });
     const sim = new SimWorld(717, w.grid, w.surfaceY, w.spawn);
+    // Sieges begin at the end of year 2: start the clock a year in.
+    sim.tick = TICKS_PER_YEAR;
     for (let i = 0; i < 18; i++) {
       sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + (i % 5) - 2, y: w.spawn.y, age: 30 });
     }
@@ -94,6 +100,8 @@ describe("siege system", () => {
     function countGoblinsAfterArrival(pop: number): number {
       const w = generateWorld({ seed: 715, width: 200, height: 500 });
       const sim = new SimWorld(715, w.grid, w.surfaceY, w.spawn);
+      // Sieges begin at the end of year 2: start the clock a year in.
+      sim.tick = TICKS_PER_YEAR;
       for (let i = 0; i < pop; i++) {
         sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x + (i % 5) - 2, y: w.spawn.y, age: 30 });
       }

@@ -13,6 +13,7 @@ import { HOSTILE_DEFS, HostileKind } from "../hostiles/types";
 import { narrateHostileSpawn, narrateHostileSlain } from "../events/narrator";
 import { awardSkillXp, fireMilestone, killDwarf } from "./shared";
 import { HOLLOW_KING_VICTORY_THRESHOLD } from "./hollowKing";
+import { siegeHuntStep } from "./siegeHunt";
 
 /** Active-zones radius (GDD §12.3): entities further than this from any
  * dwarf get their per-tick work skipped. Picked so the largest pursue
@@ -95,6 +96,8 @@ const DWARF_ATTACK_COOLDOWN = 60;
 const SIEGE_INTERVAL_TICKS = TICKS_PER_YEAR; // once per in-game year
 const SIEGE_PREANNOUNCE_LEAD = TICKS_PER_DAY * 5;
 const SIEGE_MIN_POPULATION = 10; // sieges start when the colony is worth raiding
+/** No warband before the end of the colony's second year. */
+const FIRST_SIEGE_EARLIEST_TICK = TICKS_PER_YEAR * 2;
 /** A warband that hasn't broken the fortress after this long packs up
  * and leaves. Without it, a walled-off colony faced an eternal siege —
  * goblins path well now, but they can't dig, so an unreachable
@@ -151,10 +154,11 @@ export function siegeSystem(sim: SimWorld): void {
     }
   }
 
-  // Schedule the next siege at year boundaries (after the first
-  // year, so a brand-new colony isn't sieged on day one).
+  // Schedule the next siege at year boundaries, from the end of the
+  // colony's second year: the first year-end draft fields soldiers, and
+  // they get a season to drill before the first warband arrives.
   if (
-    sim.tick > 0 &&
+    sim.tick >= FIRST_SIEGE_EARLIEST_TICK &&
     sim.tick % SIEGE_INTERVAL_TICKS === 0 &&
     sim.siegeScheduledTick === -1 &&
     !sim.siegeActive
@@ -409,7 +413,8 @@ export function hostileMovementSystem(sim: SimWorld): void {
     // of this hostile, skip the per-dwarf nearest-search entirely.
     // Hostiles in a sealed-off corner of the map don't burn cycles
     // until a dwarf wanders close.
-    if (!isInActiveZone(sim, pos.x, pos.y)) continue;
+    // Siege warbands are exempt: they hunt the colony from afar.
+    if (!h.siegeMember && !isInActiveZone(sim, pos.x, pos.y)) continue;
     // Goblins (scouts + warlord) target intelligently — the mayor
     // first, then unarmed civilians and wounded dwarves, then
     // soldiers last. Other hostiles (rats, spiders, trolls)
@@ -447,7 +452,12 @@ export function hostileMovementSystem(sim: SimWorld): void {
         bestPos = { x: p.x, y: p.y };
       }
     });
-    if (!bestPos) continue;
+    if (!bestPos) {
+      // A siege warband with nobody in range advances on the colony
+      // (and batters Lockdown seals) instead of idling at the gate.
+      if (h.siegeMember && siegeHuntStep(sim, pos)) h.lastMoveTick = sim.tick;
+      continue;
+    }
     h.lastMoveTick = sim.tick;
     const target: { x: number; y: number } = bestPos;
     // Goblins path properly (budgeted A*) so a concave wall doesn't
@@ -465,8 +475,11 @@ export function hostileMovementSystem(sim: SimWorld): void {
         pos.y = next.y;
         continue;
       }
-      // No route within budget — fall through to the greedy step so
-      // the goblin still paces at the wall instead of freezing.
+      // No route within budget (or the way is sealed): a siege goblin
+      // follows the hunt field — possibly to a seal it can batter.
+      if (h.siegeMember && siegeHuntStep(sim, pos)) continue;
+      // Otherwise fall through to the greedy step so the goblin still
+      // paces at the wall instead of freezing.
     }
     const dx = Math.sign(target.x - pos.x);
     const dy = Math.sign(target.y - pos.y);

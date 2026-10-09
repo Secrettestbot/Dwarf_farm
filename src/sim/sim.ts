@@ -683,10 +683,14 @@ function emergencySystem(sim: SimWorld): void {
     sim.doorsSealed = wantSealed;
     if (wantSealed) {
       // Re-entering after a load: the saved grid already holds the seal.
-      if (!e.sealed || e.sealed.length === 0) e.sealed = sealPerimeter(sim);
+      if (!e.sealed || e.sealed.length === 0) {
+        e.sealed = sealPerimeter(sim);
+        e.sealDamage = [];
+      }
     } else {
       restoreSeal(sim, e.sealed);
       e.sealed = undefined;
+      e.sealDamage = undefined;
     }
   }
 
