@@ -33,9 +33,6 @@ export interface EmergencyState {
   /** Tiles sealed by the current Lockdown as packed [x, y, tile]
    * triples, so lifting it restores exactly what was there. */
   sealed?: number[];
-  /** Blows each sealed tile has taken from a siege warband, parallel
-   * to `sealed` (one entry per triple). See systems/siegeHunt.ts. */
-  sealDamage?: number[];
   /** Tick until which a migrant party waits outside a Lockdown; 0 when
    * none is camped. */
   migrantsCampUntil?: number;

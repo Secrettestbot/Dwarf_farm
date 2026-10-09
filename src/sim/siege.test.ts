@@ -124,4 +124,19 @@ describe("siege system", () => {
     const large = countGoblinsAfterArrival(36);
     expect(large).toBeGreaterThan(small);
   });
+
+  it("no siege comes before the end of the colony's second year", () => {
+    const w = generateWorld({ seed: 901, width: 200, height: 500 });
+    const sim = new SimWorld(901, w.grid, w.surfaceY, w.spawn);
+    for (let i = 0; i < 12; i++) sim.spawnDwarf({ name: `D${i}`, x: w.spawn.x, y: w.spawn.y, age: 30 });
+    for (let i = 0; i < TICKS_PER_YEAR + TICKS_PER_DAY * 7; i++) {
+      for (const id of sim.dwarf.entities) {
+        const n = sim.needs.get(id);
+        if (n) { n.hunger = 100; n.thirst = 100; n.sleep = 100; n.social = 100; }
+      }
+      tick(sim);
+    }
+    expect(sim.siegeScheduledTick).toBe(-1);
+    expect(sim.siegeActive).toBe(false);
+  });
 });

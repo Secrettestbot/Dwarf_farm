@@ -41,7 +41,7 @@ export class EmergencyPanel {
       "Everyone, soldiers included, withdraws to the Safe Zone until you cancel. 8-hour cooldown afterwards.";
     this.lockBtn = makeBtn(row, "▮ Lockdown", "#7090e0", () => this.toggleLockdown());
     this.lockBtn.title =
-      "Seal every opening to the surface. Work inside continues; migrants camp outside and caravans turn back until you lift it. A siege warband can batter a seal open in about a day.";
+      "Seal every opening to the surface. Work inside continues; migrants camp outside and caravans turn back until you lift it.";
     root.appendChild(row);
 
     this.statusLabel = document.createElement("div");
